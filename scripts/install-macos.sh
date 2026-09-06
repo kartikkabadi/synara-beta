@@ -2,7 +2,7 @@
 #
 # One-line macOS installer for Synara Beta (Apple Silicon and Intel).
 #
-#   t=$(curl -fsSL https://api.github.com/repos/kartikkabadi/synara-beta/releases/latest | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -1); if [ -z "$t" ]; then echo "Could not resolve the latest Synara Beta release." >&2; (exit 1); else f=$(mktemp /tmp/synara-beta-install.XXXXXX) && curl -fsSL -o "$f" "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-macos.sh" && bash "$f" --tag "$t"; rc=$?; rm -f "${f:-/tmp/synara-beta-install-none}"; (exit $rc); fi
+#   t=$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep '"tag_name"' | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | grep -- '-beta' | head -1); if [ -z "$t" ]; then echo "Could not resolve the latest Synara Beta release." >&2; (exit 1); else f=$(mktemp /tmp/synara-beta-install.XXXXXX) && curl -fsSL -o "$f" "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-macos.sh" && bash "$f" --tag "$t"; rc=$?; rm -f "${f:-/tmp/synara-beta-install-none}"; (exit $rc); fi
 #   bash install-macos.sh --tag v0.8.2-beta.1
 #
 # Downloads the GitHub DMG for the latest beta tag (or --tag), checks
@@ -60,7 +60,8 @@ trap 'hdiutil detach "$mnt" >/dev/null 2>&1 || true; rm -rf "$tmp"' EXIT
 mkdir -p "$mnt"
 
 if [ -z "$tag" ]; then
-  tag="$(curl -fsSL https://api.github.com/repos/kartikkabadi/synara-beta/releases/latest | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+  # /releases/latest excludes prereleases, so list releases and pick the newest -beta tag.
+  tag="$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep '"tag_name"' | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | grep -- '-beta' | head -1 || true)"
 fi
 
 if [ -z "$tag" ]; then
@@ -79,7 +80,7 @@ curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS" || {
   exit 1
 }
 
-dmg="$(grep -E "[[:space:]]+\*?Synara.*${arch_suffix}\.dmg\$" "$tmp/SHA256SUMS" | head -1 | awk '{print $NF}' | sed 's/^\*//')"
+dmg="$(grep -E "[[:space:]]+\*?Synara.*${arch_suffix}\.dmg\$" "$tmp/SHA256SUMS" | head -1 | awk '{print $NF}' | sed 's/^\*//' || true)"
 if [ -z "$dmg" ]; then
   dmg="Synara-Beta-${version}-${arch_suffix}.dmg"
 fi
@@ -123,7 +124,7 @@ prepared_app="$tmp/Synara Beta.app"
 ditto "$source_app" "$prepared_app"
 
 identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$prepared_app/Contents/Info.plist" 2>/dev/null || echo "")"
-if [ "$identifier" != "com.emanueledipietro.synara.beta" ] && [ "$identifier" != "com.emanueledipietro.synara" ]; then
+if [ "$identifier" != "com.emanueledipietro.synara.beta" ]; then
   echo "install-macos.sh: unexpected bundle identifier: $identifier" >&2
   exit 1
 fi

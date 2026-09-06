@@ -21,7 +21,7 @@ case "$OS" in
   MINGW*|MSYS*|CYGWIN*)
     echo "Synara Beta installation on Windows should be run in PowerShell:"
     echo ""
-    echo '  $t = (Invoke-RestMethod https://api.github.com/repos/kartikkabadi/synara-beta/releases/latest -ErrorAction Stop).tag_name; if ($t) { $f = Join-Path $env:TEMP $("synara-beta-install-$([Guid]::NewGuid()).ps1"); Invoke-WebRequest "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-windows.ps1" -OutFile $f -ErrorAction Stop; try { & $f -Tag $t } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue } } else { throw "Could not resolve the latest Synara Beta release." }'
+    echo '  $t = ((Invoke-RestMethod "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" -UseBasicParsing -ErrorAction Stop) | Where-Object { $_.tag_name -like '"'"'*-beta*'"'"' } | Select-Object -First 1).tag_name; if ($t) { $f = Join-Path $env:TEMP $("synara-beta-install-$([Guid]::NewGuid()).ps1"); Invoke-WebRequest "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-windows.ps1" -UseBasicParsing -OutFile $f -ErrorAction Stop; Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; Unblock-File -Path $f; try { & $f -Tag $t } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue } } else { throw "Could not resolve the latest Synara Beta release." }'
     echo ""
     exit 0
     ;;
@@ -42,18 +42,23 @@ for ((i=0; i<${#args[@]}; i++)); do
 done
 
 if [ -z "$tag" ]; then
-  tag="$(curl -fsSL https://api.github.com/repos/kartikkabadi/synara-beta/releases/latest | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -1 || echo "")"
+  # /releases/latest excludes prereleases, so list releases and pick the newest -beta tag.
+  tag="$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep '"tag_name"' | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | grep -- '-beta' | head -1 || true)"
 fi
 
-ref="${tag:-main}"
-script_url="https://raw.githubusercontent.com/kartikkabadi/synara-beta/${ref}/scripts/install-${platform}.sh"
+if [ -z "$tag" ]; then
+  echo "install.sh: could not resolve a release tag." >&2
+  exit 1
+fi
+
+script_url="https://raw.githubusercontent.com/kartikkabadi/synara-beta/${tag}/scripts/install-${platform}.sh"
 
 tmp_file="$(mktemp "/tmp/synara-beta-install-${platform}.XXXXXX")"
 trap 'rm -f "$tmp_file"' EXIT
 
 if ! curl -fsSL -o "$tmp_file" "$script_url"; then
-  # Fallback to main branch if tag not yet pushed or release is raw
-  curl -fsSL -o "$tmp_file" "https://raw.githubusercontent.com/kartikkabadi/synara-beta/main/scripts/install-${platform}.sh"
+  echo "install.sh: failed to download ${script_url}" >&2
+  exit 1
 fi
 
 bash "$tmp_file" "${args[@]}"
