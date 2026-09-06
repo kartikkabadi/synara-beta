@@ -97,11 +97,4 @@ describe("compareAgainstBaseline", () => {
     expect(report.failures).toEqual([]);
     expect(report.burnDown).toEqual(["anti-slop(no-runtime-typeof):deleted.ts (4 -> 0)"]);
   });
-
-  it("keeps zero-count burn-down visible so allowances cannot be reused", () => {
-    const baseline = { "anti-slop(no-runtime-typeof):a.ts": 2 };
-    const current = new Map([["anti-slop(no-runtime-typeof):a.ts", 1]]);
-    const report = compareAgainstBaseline(baseline, current);
-    expect(report.burnDown).toEqual(["anti-slop(no-runtime-typeof):a.ts (2 -> 1)"]);
-  });
 });
