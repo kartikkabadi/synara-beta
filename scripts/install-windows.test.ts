@@ -11,9 +11,10 @@ describe("install-windows.ps1", () => {
     NodeAssert.match(script, /^\$ErrorActionPreference = 'Stop'$/m);
   });
 
-  it("gates on Windows AMD64 or ARM64", () => {
+  it("requires Windows x64 and rejects ARM64", () => {
     NodeAssert.match(script, /\$env:PROCESSOR_ARCHITECTURE/);
-    NodeAssert.match(script, /AMD64/);
+    NodeAssert.match(script, /-ne 'AMD64'/);
+    NodeAssert.match(script, /no Windows arm64 installer is published/);
   });
 
   it("requires TLS 1.2", () => {
@@ -54,13 +55,14 @@ describe("install-windows.ps1", () => {
   it("verifies SHA256 checksum with Get-FileHash", () => {
     NodeAssert.match(script, /Select-String -Path \$checksumPath/);
     NodeAssert.match(script, /Get-FileHash -Path \$installerPath -Algorithm SHA256/);
+    NodeAssert.match(script, /\$entries = @\(\$entries\[0\]\)/);
     const hashIndex = script.indexOf("Get-FileHash");
     NodeAssert.ok(hashIndex > -1);
     NodeAssert.ok(script.lastIndexOf("Unblock-File") > hashIndex);
   });
 
   it("unblocks and runs the installer with Start-Process", () => {
-    NodeAssert.match(script, /^Unblock-File -Path \$installerPath$/m);
+    NodeAssert.match(script, /^\s+Unblock-File -Path \$installerPath$/m);
     NodeAssert.match(script, /\$proc = Start-Process -FilePath \$installerPath -Wait -PassThru/);
     NodeAssert.match(script, /if \(\$proc\.ExitCode -ne 0\)/);
   });

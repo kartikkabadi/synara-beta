@@ -463,7 +463,8 @@ jobs:
         shell: bash
         run: |
           cd release-assets
-          shasum -a 256 * > SHA256SUMS
+          rm -f SHA256SUMS
+          shasum -a 256 -- * > SHA256SUMS
 
       - name: Publish release
         uses: softprops/action-gh-release@v2

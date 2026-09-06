@@ -1,7 +1,9 @@
 import * as NodeAssert from "node:assert/strict";
 import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { describe, it } from "vitest";
+import { tryBash } from "./install-test-helper.ts";
 
 const scriptPath = NodePath.resolve(import.meta.dirname, "./install.sh");
 const script = NodeFS.readFileSync(scriptPath, "utf8");
@@ -52,6 +54,35 @@ describe("install.sh", () => {
     NodeAssert.match(script, /install\.sh: failed to download/);
     NodeAssert.doesNotMatch(script, /main\/scripts\/install-/);
     NodeAssert.match(script, /curl -fsSL -o "\$tmp_file"/);
-    NodeAssert.match(script, /bash "\$tmp_file" "\$\{args\[@\]\}"/);
+    // Empty-array safe under `set -u` on bash 3.2 (stock macOS): the bare
+    // `"${args[@]}"` form exits unbound-variable with zero args.
+    NodeAssert.match(script, /bash "\$tmp_file" \$\{args\[@\]\+"\$\{args\[@\]\}"\}/);
+  });
+
+  it("delegates with zero args without tripping set -u", () => {
+    const sandbox = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "synara-install-router-"));
+    try {
+      const stubBin = NodePath.join(sandbox, "bin");
+      NodeFS.mkdirSync(stubBin, { recursive: true });
+      NodeFS.writeFileSync(
+        NodePath.join(stubBin, "uname"),
+        '#!/bin/sh\nif [ "$1" = "-s" ]; then echo Linux; elif [ "$1" = "-m" ]; then echo x86_64; else exit 1; fi\n',
+      );
+      NodeFS.writeFileSync(
+        NodePath.join(stubBin, "curl"),
+        '#!/bin/sh\nout=\'\'\nwhile [ "$#" -gt 0 ]; do\n  case "$1" in\n    -o) out="$2"; shift 2;;\n    -*) shift;;\n    *) shift;;\n  esac\ndone\nif [ -z "$out" ]; then\n  printf \'[{"tag_name": "v9.9.9-beta.9"}]\n\'\nelse\n  printf \'#!/usr/bin/env bash\necho "stub-platform received $# args"\n\' > "$out"\nfi\n',
+      );
+      for (const stub of ["uname", "curl"]) {
+        NodeFS.chmodSync(NodePath.join(stubBin, stub), 0o755);
+      }
+      const result = tryBash(scriptPath, [], {
+        ...process.env,
+        PATH: `${stubBin}${NodePath.delimiter}${process.env.PATH ?? ""}`,
+      });
+      NodeAssert.equal(result.status, 0);
+      NodeAssert.match(result.stdout, /stub-platform received 0 args/);
+    } finally {
+      NodeFS.rmSync(sandbox, { recursive: true, force: true });
+    }
   });
 });

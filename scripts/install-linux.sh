@@ -39,7 +39,10 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-[ "$(uname -s)" = Linux ]
+if [ "$(uname -s)" != Linux ]; then
+  echo "install-linux.sh: unsupported operating system (need Linux)." >&2
+  exit 1
+fi
 
 arch="$(uname -m)"
 case "$arch" in
@@ -66,11 +69,14 @@ if [ -z "$tag" ]; then
 fi
 
 if [ -z "$tag" ]; then
-  echo "install-linux.sh: could not resolve a release tag." >&2
+  echo "install-linux.sh: could not resolve a release tag (API rate-limited? pass --tag vX.Y.Z-beta.N)." >&2
   exit 1
 fi
 
-[[ "$tag" =~ ^v[0-9]+.* ]]
+if ! [[ "$tag" =~ ^v[0-9]+.* ]]; then
+  echo "install-linux.sh: invalid tag '$tag'. Expected vX.Y.Z or vX.Y.Z-beta.N." >&2
+  exit 1
+fi
 
 version="${tag#v}"
 echo "Installing Synara Beta $tag for Linux ($arch)..."
@@ -84,18 +90,13 @@ curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS" || {
 # Match candidate AppImage in SHA256SUMS
 appimage="$(grep -E "[[:space:]]+\*?Synara.*(${arch_pattern})\.AppImage\$" "$tmp/SHA256SUMS" | head -1 | awk '{print $NF}' | sed 's/^\*//' || true)"
 if [ -z "$appimage" ]; then
-  appimage="Synara-Beta-${version}-${default_arch}.AppImage"
+  appimage="Synara-${version}-${default_arch}.AppImage"
 fi
 
-curl -fL -o "$tmp/$appimage" "$base/$appimage" || {
-  fallback_appimage="Synara-${version}-${default_arch}.AppImage"
-  if [ "$appimage" != "$fallback_appimage" ]; then
-    curl -fL -o "$tmp/$fallback_appimage" "$base/$fallback_appimage" && appimage="$fallback_appimage"
-  else
-    echo "install-linux.sh: failed to download $appimage from $base" >&2
-    exit 1
-  fi
-}
+if ! curl -fL -o "$tmp/$appimage" "$base/$appimage"; then
+  echo "install-linux.sh: failed to download $appimage from $base" >&2
+  exit 1
+fi
 
 echo "Verifying checksum..."
 line="$(grep -E "^[a-fA-F0-9]{64}[[:space:]]+\*?${appimage}\$" "$tmp/SHA256SUMS")" || {
@@ -129,7 +130,7 @@ mv -f "$staged" "$dest"
 # Register desktop entry
 desktop_dir="$HOME/.local/share/applications"
 if mkdir -p "$desktop_dir" 2>/dev/null; then
-  cat << DESKTOP_ENTRY > "$desktop_dir/synara-beta.desktop"
+  cat << DESKTOP_ENTRY > "$desktop_dir/synara-beta.desktop" || echo "install-linux.sh: warning: could not write desktop entry" >&2
 [Desktop Entry]
 Name=Synara Beta
 Comment=Coding Agent Workspace
@@ -144,3 +145,7 @@ DESKTOP_ENTRY
 fi
 
 echo "Installed Synara Beta $tag."
+case ":$PATH:" in
+  *":$HOME/.local/bin:"*) ;;
+  *) echo "install-linux.sh: $HOME/.local/bin is not on PATH; restart your shell or add it to PATH to run synara-beta." >&2 ;;
+esac

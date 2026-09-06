@@ -6,7 +6,9 @@
 #   curl -fsSL https://raw.githubusercontent.com/kartikkabadi/synara-beta/main/scripts/install.sh | bash
 #   curl -fsSL https://raw.githubusercontent.com/kartikkabadi/synara-beta/main/scripts/install.sh | bash -s -- --tag v0.8.2-beta.1
 #
-# Detects operating system and delegates to the platform-specific installer script.
+# Detects the operating system and delegates to the platform installer.
+# On Windows shells (Git Bash/Cygwin) it prints PowerShell instructions
+# and exits 0 without installing anything.
 
 set -euo pipefail
 
@@ -47,7 +49,7 @@ if [ -z "$tag" ]; then
 fi
 
 if [ -z "$tag" ]; then
-  echo "install.sh: could not resolve a release tag." >&2
+  echo "install.sh: could not resolve a release tag (API rate-limited? pass --tag vX.Y.Z-beta.N)." >&2
   exit 1
 fi
 
@@ -61,4 +63,4 @@ if ! curl -fsSL -o "$tmp_file" "$script_url"; then
   exit 1
 fi
 
-bash "$tmp_file" "${args[@]}"
+bash "$tmp_file" ${args[@]+"${args[@]}"}
