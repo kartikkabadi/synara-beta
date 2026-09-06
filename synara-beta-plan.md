@@ -71,6 +71,8 @@ What never syncs, the overlay list:
 
 1. Identity: nothing to overlay once the flavor PR lands. Beta ID, name, scheme, data dir live upstream behind the flavor flag. Until then, overlay `packages/shared/src/desktopIdentity.ts` plus the build script plus updater allowPrerelease, and expect sync pauses.
 2. Feed: no overlay needed. Channel stays `synara` across both Stable and Beta. Update repo falls back to the beta repo (`kartikkabadi/synara-beta`) in beta CI. Feeds live per repo, so names cannot clash and `release:smoke` stays clean.
+3. Agent guidance: `AGENTS.md` and `CLAUDE.md` are beta-written and never take upstream versions. Upstream changes to them are dropped on sync; beta wins. `CLAUDE.md` is a one-line pointer to `AGENTS.md`.
+4. Agent skills: `.agents/` is beta-only. Upstream has no such directory; if it ever gains one, beta wins and the trees stay separate.
 
 How code moves, all by hand:
 
