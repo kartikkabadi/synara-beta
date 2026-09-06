@@ -26,11 +26,7 @@
 > Synara Beta is engineered to run seamlessly side-by-side with Synara Stable on the same machine. It uses an isolated data directory (`~/.synara-beta`), separate ports, and a dedicated bundle identifier (`com.emanueledipietro.synara.beta`) to guarantee zero config collisions or session overwrites.
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./assets/prod/readme-hero-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="./assets/prod/readme-hero-light.png">
-    <img src="./assets/prod/readme-hero-light.png" alt="Synara Beta Desktop Interface" width="100%">
-  </picture>
+  <img src="./assets/prod/readme-hero-light.png" alt="Synara Beta Desktop Interface" width="100%">
 </p>
 
 ---
@@ -73,11 +69,7 @@ Synara Beta brings every local agent into a unified, focused workspace. Switch m
 Keep the active conversation directly alongside the surfaces it modifies. Projects define the workspace context, while threads preserve task-specific history, environment state, and live execution diffs.
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./assets/prod/readme-split-view-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="./assets/prod/readme-workspace-light.png">
-    <img src="./assets/prod/readme-workspace-light.png" alt="Synara Multi-Agent Workspace" width="100%">
-  </picture>
+  <img src="./assets/prod/readme-workspace-light.png" alt="Synara Multi-Agent Workspace" width="100%">
 </p>
 
 - **Project-Aware Context:** Seamlessly navigate between repositories and track related tasks without mixing uncommitted files.
