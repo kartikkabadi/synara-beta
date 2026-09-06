@@ -2,6 +2,9 @@ import { defineRule } from "@oxlint/plugins";
 
 import type { ESTree, SourceCode } from "@oxlint/plugins";
 
+import {
+  collectAliasDeclarationsIn,
+} from "../shared/resolves-to-unknown.ts";
 import { lexicalTypeParameterNames } from "../shared/lexical-type-parameters.ts";
 
 type Parameter = ESTree.ParamPattern;
@@ -47,7 +50,8 @@ export const noObjectParametersRule = defineRule({
     },
   },
   createOnce(context) {
-    const aliases = new Map<string, ESTree.TSType>();
+    let aliases: ReadonlyMap<string, ESTree.TSType> = new Map();
+    let ambiguous: ReadonlySet<string> = new Set();
 
     const resolvesToObject = (
       type: ESTree.TSType,
@@ -67,7 +71,8 @@ export const noObjectParametersRule = defineRule({
           type.typeArguments !== undefined &&
           type.typeArguments.params.length > 0) ||
         visited.has(type.typeName.name) ||
-        shadowedAliases.has(type.typeName.name)
+        shadowedAliases.has(type.typeName.name) ||
+        ambiguous.has(type.typeName.name)
       ) {
         return false;
       }
@@ -94,17 +99,14 @@ export const noObjectParametersRule = defineRule({
 
     return {
       Program(node) {
-        aliases.clear();
-        for (const statement of node.body) {
-          const declaration =
-            statement.type === "ExportNamedDeclaration" ? statement.declaration : statement;
-          if (
-            declaration?.type === "TSTypeAliasDeclaration" &&
-            (declaration.typeParameters === null || declaration.typeParameters === undefined)
-          ) {
-            aliases.set(declaration.id.name, declaration.typeAnnotation);
-          }
+        const collected = collectAliasDeclarationsIn(node, context.sourceCode.visitorKeys);
+        const nonGeneric = new Map<string, ESTree.TSType>();
+        for (const [name, alias] of collected.aliases) {
+          if (alias.typeParameters !== null && alias.typeParameters !== undefined) continue;
+          nonGeneric.set(name, alias.typeAnnotation);
         }
+        aliases = nonGeneric;
+        ambiguous = collected.ambiguous;
       },
       ArrowFunctionExpression: checkParameters,
       FunctionDeclaration: checkParameters,
