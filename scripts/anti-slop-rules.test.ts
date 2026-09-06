@@ -374,6 +374,38 @@ describe("no-shape-in-symbol-names", () => {
     expect(byFile.get("array-destructure.ts")).toEqual(reported);
     expect(byFile.get("key-rename.ts")).toBeUndefined();
   });
+
+  it("reports private field declarations and catch bindings but not private reads", () => {
+    const byFile = runRules(
+      {
+        "private-field.ts": "class Box {\n  #shape = 1;\n  read() { return this.#shape; }\n}\n",
+        "catch-binding.ts": "export function f() {\n  try {\n    return 1;\n  } catch (shape) {\n    return shape;\n  }\n}\n",
+      },
+      { "anti-slop/no-shape-in-symbol-names": "error" },
+    );
+    const reported = ["anti-slop(no-shape-in-symbol-names)"];
+    expect(byFile.get("private-field.ts")).toEqual(reported);
+    expect(byFile.get("catch-binding.ts")).toEqual(reported);
+  });
+});
+
+describe("no-object-parameters", () => {
+  it("sees local object aliases, not just top-level ones", () => {
+    const byFile = runRules(
+      {
+        "top-level.ts":
+          "type LocalObject = object;\nexport function f(input: LocalObject) { return input; }\n",
+        "nested-alias.ts":
+          "export function outer() {\n  type LocalObject = object;\n  return function inner(input: LocalObject) { return input; };\n}\n",
+        "clean.ts": "export function g(input: string) { return input; }\n",
+      },
+      { "anti-slop/no-object-parameters": "error" },
+    );
+    const reported = ["anti-slop(no-object-parameters)"];
+    expect(byFile.get("top-level.ts")).toEqual(reported);
+    expect(byFile.get("nested-alias.ts")).toEqual(reported);
+    expect(byFile.get("clean.ts")).toBeUndefined();
+  });
 });
 
 describe("no-service-constructor-imports", () => {
