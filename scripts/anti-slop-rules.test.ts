@@ -57,9 +57,10 @@ function runRules(
       throw new Error(`oxlint produced no JSON output (status ${result.status})`);
     }
     const output = JSON.parse(result.stdout) as { diagnostics?: OxlintDiagnostic[] };
+    const requestedCodes = new Set(Object.keys(rules).map((rule) => `${rule.replace("/", "(")})`));
     const byFile = new Map<string, string[]>();
     for (const diagnostic of output.diagnostics ?? []) {
-      if (!diagnostic.code.startsWith("anti-slop")) continue;
+      if (!requestedCodes.has(diagnostic.code)) continue;
       const name = diagnostic.filename.startsWith(dir)
         ? diagnostic.filename.slice(dir.length + 1)
         : diagnostic.filename;
@@ -166,6 +167,17 @@ describe("no-unknown-parameters", () => {
     );
     expect(byFile.get("nested-shadow.ts")).toBeUndefined();
     expect(byFile.get("top-level.ts")).toEqual(["anti-slop(no-unknown-parameters)"]);
+  });
+
+  it("keeps same-name aliases resolvable when every declaration resolves alike", () => {
+    const byFile = runRules(
+      {
+        "same-name-agree.ts":
+          "type Mysterious = unknown;\nexport function outer() {\n  type Mysterious = unknown;\n  return function inner(input: Mysterious) { return input; };\n}\n",
+      },
+      { "anti-slop/no-unknown-parameters": "error" },
+    );
+    expect(byFile.get("same-name-agree.ts")).toEqual(["anti-slop(no-unknown-parameters)"]);
   });
 
   it("resolves generic alias arguments including unknown", () => {
@@ -379,7 +391,8 @@ describe("no-shape-in-symbol-names", () => {
     const byFile = runRules(
       {
         "private-field.ts": "class Box {\n  #shape = 1;\n  read() { return this.#shape; }\n}\n",
-        "catch-binding.ts": "export function f() {\n  try {\n    return 1;\n  } catch (shape) {\n    return shape;\n  }\n}\n",
+        "catch-binding.ts":
+          "export function f() {\n  try {\n    return 1;\n  } catch (shape) {\n    return shape;\n  }\n}\n",
       },
       { "anti-slop/no-shape-in-symbol-names": "error" },
     );
