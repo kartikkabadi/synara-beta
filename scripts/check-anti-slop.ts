@@ -81,12 +81,12 @@ export function collectCurrentViolations(root: string): Map<string, number> {
   if (result.error !== undefined) {
     throw result.error;
   }
-  if (!result.stdout) {
-    throw new Error(`oxlint produced no JSON output (status ${result.status})`);
-  }
   if (result.status !== 0 && result.status !== 1) {
     const stderr = (result.stderr ?? "").split("\n").slice(0, 4).join("\n");
     throw new Error(`oxlint failed with status ${result.status}: ${stderr}`);
+  }
+  if (!result.stdout) {
+    throw new Error(`oxlint produced no JSON output (status ${result.status})`);
   }
   const output = JSON.parse(result.stdout) as OxlintOutput;
   return countByRuleAndFile(parseAntiSlopDiagnostics(output));
