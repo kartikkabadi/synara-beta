@@ -39,10 +39,12 @@ function runRules(
       writeFileSync(path, source);
       paths.push(path);
     }
+    const shell = process.platform === "win32";
+    const command = shell ? `"${oxlintBinary}.cmd"` : oxlintBinary;
     const result = spawnSync(
-      oxlintBinary,
+      command,
       ["-f", "json", "--config", join(dir, ".oxlintrc.json"), ...paths],
-      { cwd: repoRoot, encoding: "utf8", maxBuffer: 1 << 26 },
+      { cwd: repoRoot, encoding: "utf8", maxBuffer: 1 << 26, shell },
     );
     if (!result.stdout) {
       throw new Error(`oxlint produced no JSON output (status ${result.status})`);
@@ -144,6 +146,51 @@ describe("no-unknown-parameters", () => {
     expect(byFile.get("generic.ts")).toBeUndefined();
     expect(byFile.get("cause.ts")).toBeUndefined();
   });
+
+  it("does not report parameters whose alias is shadowed by a nested alias", () => {
+    const byFile = runRules(
+      {
+        "nested-shadow.ts":
+          "type Mysterious = unknown;\nexport function outer() {\n  type Mysterious = string;\n  return function inner(input: Mysterious) { return input; };\n}\n",
+        "top-level.ts":
+          "type Mysterious = unknown;\nexport function inner(input: Mysterious) { return input; }\n",
+      },
+      { "anti-slop/no-unknown-parameters": "error" },
+    );
+    expect(byFile.get("nested-shadow.ts")).toBeUndefined();
+    expect(byFile.get("top-level.ts")).toEqual(["anti-slop(no-unknown-parameters)"]);
+  });
+
+  it("resolves generic alias arguments including unknown", () => {
+    const byFile = runRules(
+      {
+        "generic-arg.ts":
+          "type Box<T> = T;\nexport function f(value: Box<unknown>) { return value; }\n",
+        "typed-arg.ts":
+          "type Box<T> = T;\nexport function g(value: Box<string>) { return value; }\n",
+        "defaulted.ts":
+          "type Defaulted<T = unknown> = T;\nexport function h(value: Defaulted) { return value; }\n",
+      },
+      { "anti-slop/no-unknown-parameters": "error" },
+    );
+    const reported = ["anti-slop(no-unknown-parameters)"];
+    expect(byFile.get("generic-arg.ts")).toEqual(reported);
+    expect(byFile.get("typed-arg.ts")).toBeUndefined();
+    expect(byFile.get("defaulted.ts")).toEqual(reported);
+  });
+
+  it("treats a local Promise alias as the alias, not the built-in wrapper", () => {
+    const byFile = runRules(
+      {
+        "promise-alias.ts":
+          "type Promise<T> = { value: T };\nexport function f(value: Promise<unknown>) { return value; }\n",
+        "built-in.ts": "export function g(value: Promise<unknown>) { return value; }\n",
+      },
+      { "anti-slop/no-unknown-parameters": "error" },
+    );
+    expect(byFile.get("promise-alias.ts")).toBeUndefined();
+    expect(byFile.get("built-in.ts")).toEqual(["anti-slop(no-unknown-parameters)"]);
+  });
 });
 
 describe("no-unsafe-dictionary-type", () => {
@@ -178,6 +225,17 @@ describe("no-unsafe-dictionary-type", () => {
     );
     expect(byFile.get("nested-alias.ts")).toEqual(["anti-slop(no-unsafe-dictionary-type)"]);
   });
+
+  it("does not let nested declarations shadow built-ins for top-level uses", () => {
+    const byFile = runRules(
+      {
+        "nested-record.ts":
+          "export function f() {\n  type Record = { id: string };\n  let p: Record = { id: 'a' };\n  return p;\n}\nexport let q: Record<string, unknown> = {};\n",
+      },
+      { "anti-slop/no-unsafe-dictionary-type": "error" },
+    );
+    expect(byFile.get("nested-record.ts")).toEqual(["anti-slop(no-unsafe-dictionary-type)"]);
+  });
 });
 
 describe("no-unknown-returns", () => {
@@ -210,6 +268,17 @@ describe("no-widen-then-assert", () => {
     expect(byFile.get("shadowed.ts")).toBeUndefined();
     expect(byFile.get("builtin.ts")).toEqual(["anti-slop(no-widen-then-assert)"]);
   });
+
+  it("does not treat value-only function declarations as type shadowing", () => {
+    const byFile = runRules(
+      {
+        "value-fn.ts":
+          "function Record() { return 1; }\nexport function f() {\n  const r: Record<PropertyKey, unknown> = { id: 1, name: 2 };\n  return r as { id: number };\n}\n",
+      },
+      { "anti-slop/no-widen-then-assert": "error" },
+    );
+    expect(byFile.get("value-fn.ts")).toEqual(["anti-slop(no-widen-then-assert)"]);
+  });
 });
 
 describe("no-known-value-widening", () => {
@@ -221,6 +290,17 @@ describe("no-known-value-widening", () => {
       { "anti-slop/no-known-value-widening": "error" },
     );
     expect(byFile.get("dedup.ts")).toEqual(["anti-slop(no-known-value-widening)"]);
+  });
+
+  it("reports nested broad assertions exactly once", () => {
+    const byFile = runRules(
+      {
+        "nested-assert.ts":
+          "export function f() {\n  const value = { a: 1 };\n  const x: unknown = value as unknown as unknown;\n  return x;\n}\n",
+      },
+      { "anti-slop/no-known-value-widening": "error" },
+    );
+    expect(byFile.get("nested-assert.ts")).toEqual(["anti-slop(no-known-value-widening)"]);
   });
 
   it("does not flag finite mapped-type annotations", () => {
@@ -253,6 +333,24 @@ describe("no-shape-in-symbol-names", () => {
     expect(byFile.get("access.ts")).toBeUndefined();
     expect(byFile.get("import-ref.ts")).toBeUndefined();
     expect(byFile.get("substring.ts")).toEqual(reported);
+  });
+
+  it("reports declare-function names and destructured binding values", () => {
+    const byFile = runRules(
+      {
+        "declare-fn.ts": "declare function shape(input: string): string;\n",
+        "destructure.ts": "const { source: shape } = { source: 1 };\nexport const x = shape;\n",
+        "array-destructure.ts": "const [shape] = [1];\nexport const x = shape;\n",
+        "key-rename.ts":
+          "declare const values: unknown;\nconst { shape: renamed } = values;\nexport const x = renamed;\n",
+      },
+      { "anti-slop/no-shape-in-symbol-names": "error" },
+    );
+    const reported = ["anti-slop(no-shape-in-symbol-names)"];
+    expect(byFile.get("declare-fn.ts")).toEqual(reported);
+    expect(byFile.get("destructure.ts")).toEqual(reported);
+    expect(byFile.get("array-destructure.ts")).toEqual(reported);
+    expect(byFile.get("key-rename.ts")).toBeUndefined();
   });
 });
 
