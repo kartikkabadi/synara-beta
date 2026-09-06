@@ -15,27 +15,25 @@ function isNode(value: unknown): value is ESTree.Node {
 function collectAliasDeclarations(
   node: ESTree.Node,
   visitorKeys: VisitorKeys,
-  aliases: Map<string, ESTree.TSTypeAliasDeclaration>,
+  declarations: Map<string, ESTree.TSTypeAliasDeclaration[]>,
   ambiguous: Set<string>,
 ): void {
   if (node.type === "TSTypeAliasDeclaration") {
-    if (aliases.has(node.id.name)) {
-      aliases.delete(node.id.name);
-      ambiguous.add(node.id.name);
-    } else if (!ambiguous.has(node.id.name)) {
-      aliases.set(node.id.name, node);
-    }
+    const list = declarations.get(node.id.name) ?? [];
+    list.push(node);
+    declarations.set(node.id.name, list);
+    if (list.length > 1) ambiguous.add(node.id.name);
   }
   const record = node as unknown as Readonly<Record<string, unknown>>;
   for (const key of visitorKeys[node.type] ?? []) {
     const value = record[key];
     if (isNode(value)) {
-      collectAliasDeclarations(value, visitorKeys, aliases, ambiguous);
+      collectAliasDeclarations(value, visitorKeys, declarations, ambiguous);
       continue;
     }
     if (!Array.isArray(value)) continue;
     for (const child of value) {
-      if (isNode(child)) collectAliasDeclarations(child, visitorKeys, aliases, ambiguous);
+      if (isNode(child)) collectAliasDeclarations(child, visitorKeys, declarations, ambiguous);
     }
   }
 }
@@ -43,13 +41,47 @@ function collectAliasDeclarations(
 export function collectAliasDeclarationsIn(
   program: ESTree.Program,
   visitorKeys: VisitorKeys,
-): { aliases: AliasDeclarations; ambiguous: ReadonlySet<string> } {
-  const aliases = new Map<string, ESTree.TSTypeAliasDeclaration>();
+): {
+  declarations: ReadonlyMap<string, readonly ESTree.TSTypeAliasDeclaration[]>;
+  ambiguous: ReadonlySet<string>;
+} {
+  const declarations = new Map<string, ESTree.TSTypeAliasDeclaration[]>();
   const ambiguous = new Set<string>();
   for (const statement of program.body) {
-    collectAliasDeclarations(statement, visitorKeys, aliases, ambiguous);
+    collectAliasDeclarations(statement, visitorKeys, declarations, ambiguous);
   }
-  return { aliases, ambiguous };
+  return { declarations, ambiguous };
+}
+
+export function firstWinsAliasDeclarations(
+  declarations: ReadonlyMap<string, readonly ESTree.TSTypeAliasDeclaration[]>,
+): AliasDeclarations {
+  const aliases = new Map<string, ESTree.TSTypeAliasDeclaration>();
+  for (const [name, list] of declarations) {
+    const first = list[0];
+    if (first !== undefined) aliases.set(name, first);
+  }
+  return aliases;
+}
+
+/**
+ * Keeps an ambiguous alias name resolvable when every declaration of that name
+ * resolves the same way, so same-name reuse only suppresses when it truly shadows.
+ */
+export function refineAliasAmbiguity(
+  declarations: ReadonlyMap<string, readonly ESTree.TSTypeAliasDeclaration[]>,
+  ambiguous: ReadonlySet<string>,
+  resolves: (type: ESTree.TSType, name: string) => boolean,
+): { aliases: AliasDeclarations; ambiguous: ReadonlySet<string> } {
+  const refined = new Set<string>();
+  for (const name of ambiguous) {
+    const verdicts = new Set<boolean>();
+    for (const declaration of declarations.get(name) ?? []) {
+      verdicts.add(resolves(declaration.typeAnnotation, name));
+    }
+    if (verdicts.size > 1) refined.add(name);
+  }
+  return { aliases: firstWinsAliasDeclarations(declarations), ambiguous: refined };
 }
 
 export type ResolvesToUnknown = (
