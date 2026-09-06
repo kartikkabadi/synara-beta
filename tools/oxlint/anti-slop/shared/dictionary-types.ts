@@ -41,57 +41,74 @@ export type TypeEnvironment = {
   readonly shadowedBuiltIns: ReadonlySet<string>;
 };
 
-function declaredStatement(statement: ESTree.Statement): ESTree.Node | null {
-  return statement.type === "ExportNamedDeclaration" ||
-    statement.type === "ExportDefaultDeclaration"
-    ? (statement.declaration ?? null)
-    : statement;
+type VisitorKeys = Readonly<Record<string, readonly string[]>>;
+
+type MutableEnvironment = {
+  aliases: Map<string, ESTree.TSTypeAliasDeclaration>;
+  interfaces: Map<string, ESTree.TSInterfaceDeclaration[]>;
+  shadowedBuiltIns: Set<string>;
+};
+
+function isNode(value: unknown): value is ESTree.Node {
+  return (
+    typeof value === "object" && value !== null && "type" in value && typeof value.type === "string"
+  );
 }
 
-export function createTypeEnvironment(program: ESTree.Program): TypeEnvironment {
-  const aliases = new Map<string, ESTree.TSTypeAliasDeclaration>();
-  const interfaces = new Map<string, ESTree.TSInterfaceDeclaration[]>();
-  const shadowedBuiltIns = new Set<string>();
-
-  for (const statement of program.body) {
-    const declaration = declaredStatement(statement);
-    if (declaration?.type === "ImportDeclaration") {
-      for (const specifier of declaration.specifiers) {
-        if (BUILT_INS.has(specifier.local.name)) shadowedBuiltIns.add(specifier.local.name);
-      }
-      continue;
+function collectTypeDeclarations(
+  node: ESTree.Node,
+  visitorKeys: VisitorKeys,
+  environment: MutableEnvironment,
+): void {
+  if (node.type === "TSTypeAliasDeclaration") {
+    const existing = environment.aliases.get(node.id.name);
+    if (existing === undefined) environment.aliases.set(node.id.name, node);
+    else environment.shadowedBuiltIns.add(node.id.name);
+    if (BUILT_INS.has(node.id.name)) environment.shadowedBuiltIns.add(node.id.name);
+  } else if (node.type === "TSInterfaceDeclaration") {
+    const declarations = environment.interfaces.get(node.id.name) ?? [];
+    declarations.push(node);
+    environment.interfaces.set(node.id.name, declarations);
+    if (BUILT_INS.has(node.id.name)) environment.shadowedBuiltIns.add(node.id.name);
+  } else if (node.type === "ImportDeclaration") {
+    for (const specifier of node.specifiers) {
+      if (BUILT_INS.has(specifier.local.name)) environment.shadowedBuiltIns.add(specifier.local.name);
     }
-
-    if (declaration?.type === "TSTypeAliasDeclaration") {
-      const existing = aliases.get(declaration.id.name);
-      if (existing === undefined) aliases.set(declaration.id.name, declaration);
-      else shadowedBuiltIns.add(declaration.id.name);
-      if (BUILT_INS.has(declaration.id.name)) shadowedBuiltIns.add(declaration.id.name);
-      continue;
-    }
-
-    if (declaration?.type === "TSInterfaceDeclaration") {
-      const declarations = interfaces.get(declaration.id.name) ?? [];
-      declarations.push(declaration);
-      interfaces.set(declaration.id.name, declarations);
-      if (BUILT_INS.has(declaration.id.name)) shadowedBuiltIns.add(declaration.id.name);
-      continue;
-    }
-
-    if (declaration?.type === "TSEnumDeclaration") {
-      if (BUILT_INS.has(declaration.id.name)) shadowedBuiltIns.add(declaration.id.name);
-      continue;
-    }
-
-    if (
-      (declaration?.type === "ClassDeclaration" || declaration?.type === "FunctionDeclaration") &&
-      declaration.id !== null
-    ) {
-      if (BUILT_INS.has(declaration.id.name)) shadowedBuiltIns.add(declaration.id.name);
-    }
+  } else if (
+    (node.type === "TSEnumDeclaration" ||
+      node.type === "ClassDeclaration" ||
+      node.type === "FunctionDeclaration") &&
+    node.id !== null &&
+    BUILT_INS.has(node.id.name)
+  ) {
+    environment.shadowedBuiltIns.add(node.id.name);
   }
 
-  return { aliases, interfaces, shadowedBuiltIns };
+  const record = node as unknown as Readonly<Record<string, unknown>>;
+  for (const key of visitorKeys[node.type] ?? []) {
+    const value = record[key];
+    if (isNode(value)) {
+      collectTypeDeclarations(value, visitorKeys, environment);
+      continue;
+    }
+    if (!Array.isArray(value)) continue;
+    for (const child of value) {
+      if (isNode(child)) collectTypeDeclarations(child, visitorKeys, environment);
+    }
+  }
+}
+
+export function createTypeEnvironment(
+  program: ESTree.Program,
+  visitorKeys: VisitorKeys,
+): TypeEnvironment {
+  const environment: MutableEnvironment = {
+    aliases: new Map(),
+    interfaces: new Map(),
+    shadowedBuiltIns: new Set(),
+  };
+  collectTypeDeclarations(program, visitorKeys, environment);
+  return environment;
 }
 
 function typeReferenceName(type: ESTree.TSTypeReference): string | null {
@@ -350,7 +367,11 @@ export function classifyWideningTarget(
         ? { kind: "anonymous object" }
         : null;
   }
-  if (unwrapped.type === "TSMappedType") return { kind: "open dictionary" };
+  if (unwrapped.type === "TSMappedType") {
+    return isBroadMappedKey(unwrapped.constraint, environment, new Map())
+      ? { kind: "open dictionary" }
+      : null;
+  }
   if (unwrapped.type !== "TSTypeReference") return null;
   const name = typeReferenceName(unwrapped);
   if (name === null) return null;

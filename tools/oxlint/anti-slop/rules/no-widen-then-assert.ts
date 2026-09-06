@@ -15,6 +15,37 @@ const functionBoundaryTypes = new Set([
   "TSEmptyBodyFunctionExpression",
 ]);
 
+const recordBuiltInNames = new Set(["Record", "Readonly", "PropertyKey"]);
+let shadowedRecordBuiltIns: ReadonlySet<string> = new Set();
+
+function collectShadowedRecordBuiltIns(program: ESTree.Program): ReadonlySet<string> {
+  const shadowed = new Set<string>();
+  for (const statement of program.body) {
+    const declaration =
+      statement.type === "ExportNamedDeclaration" || statement.type === "ExportDefaultDeclaration"
+        ? statement.declaration
+        : statement;
+    if (declaration?.type === "ImportDeclaration") {
+      for (const specifier of declaration.specifiers) {
+        if (recordBuiltInNames.has(specifier.local.name)) shadowed.add(specifier.local.name);
+      }
+      continue;
+    }
+    if (
+      declaration !== null &&
+      declaration !== undefined &&
+      "id" in declaration &&
+      declaration.id !== null &&
+      declaration.id !== undefined &&
+      declaration.id.type === "Identifier" &&
+      recordBuiltInNames.has(declaration.id.name)
+    ) {
+      shadowed.add(declaration.id.name);
+    }
+  }
+  return shadowed;
+}
+
 function unwrapExpressionParentheses(expression: ESTree.Expression): ESTree.Expression {
   let current = expression;
   while (current.type === "ParenthesizedExpression") current = current.expression;
@@ -46,19 +77,28 @@ function isBroadRecordKeyType(type: ESTree.TSType): boolean {
     return true;
   }
   if (unwrapped.type === "TSUnionType") return unwrapped.types.every(isBroadRecordKeyType);
-  return unwrapped.type === "TSTypeReference" && typeReferenceName(unwrapped) === "PropertyKey";
+  return (
+    unwrapped.type === "TSTypeReference" &&
+    typeReferenceName(unwrapped) === "PropertyKey" &&
+    !shadowedRecordBuiltIns.has("PropertyKey")
+  );
 }
 
 function isBroadRecordType(type: ESTree.TSType): boolean {
   const unwrapped = unwrapTypeParentheses(type);
 
   if (unwrapped.type === "TSTypeReference") {
-    if (typeReferenceName(unwrapped) === "Readonly") {
+    if (
+      typeReferenceName(unwrapped) === "Readonly" &&
+      !shadowedRecordBuiltIns.has("Readonly")
+    ) {
       const [inner] = unwrapped.typeArguments?.params ?? [];
       return inner !== undefined && isBroadRecordType(inner);
     }
 
-    if (typeReferenceName(unwrapped) !== "Record") return false;
+    if (typeReferenceName(unwrapped) !== "Record" || shadowedRecordBuiltIns.has("Record")) {
+      return false;
+    }
     const parameters = unwrapped.typeArguments?.params ?? [];
     return (
       parameters.length === 2 &&
@@ -356,8 +396,9 @@ export const noWidenThenAssertRule = defineRule({
     };
 
     return {
-      Program() {
+      Program(node) {
         scopes = context.sourceCode.scopeManager.scopes;
+        shadowedRecordBuiltIns = collectShadowedRecordBuiltIns(node);
       },
       TSAsExpression: checkAssertion,
       TSTypeAssertion: checkAssertion,

@@ -26,6 +26,12 @@ function unwrapExpression(expression: ESTree.Expression): ESTree.Expression {
   return current;
 }
 
+function unwrapParentheses(expression: ESTree.Expression): ESTree.Expression {
+  let current = expression;
+  while (current.type === "ParenthesizedExpression") current = current.expression;
+  return current;
+}
+
 function resolveVariable(
   sourceCode: SourceCode,
   identifier: ESTree.IdentifierReference,
@@ -146,6 +152,15 @@ export const noKnownValueWideningRule = defineRule({
   createOnce(context) {
     let environment: TypeEnvironment | null = null;
 
+    const reportsAsAssertion = (expression: ESTree.Expression): boolean => {
+      if (environment === null) return false;
+      const unwrapped = unwrapParentheses(expression);
+      if (unwrapped.type !== "TSAsExpression" && unwrapped.type !== "TSTypeAssertion") {
+        return false;
+      }
+      return classifyWideningTarget(unwrapped.typeAnnotation, environment) !== null;
+    };
+
     const reportFlow = (
       expression: ESTree.Expression,
       destination: WideningTarget | null,
@@ -155,6 +170,7 @@ export const noKnownValueWideningRule = defineRule({
       if (isDictionaryAccumulatorTarget(destination) && isEmptyObjectExpression(expression)) {
         return;
       }
+      if (reportsAsAssertion(expression)) return;
       if (!hasKnownEvidence(context.sourceCode, expression)) return;
       context.report({
         node: expression,
@@ -168,7 +184,7 @@ export const noKnownValueWideningRule = defineRule({
 
     return {
       Program(node) {
-        environment = createTypeEnvironment(node);
+        environment = createTypeEnvironment(node, context.sourceCode.visitorKeys);
       },
       VariableDeclarator(node) {
         if (node.init === null || node.id.type !== "Identifier") return;
