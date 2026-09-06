@@ -47,6 +47,7 @@ type MutableEnvironment = {
   aliases: Map<string, ESTree.TSTypeAliasDeclaration>;
   interfaces: Map<string, ESTree.TSInterfaceDeclaration[]>;
   shadowedBuiltIns: Set<string>;
+  ambiguousAliases: Set<string>;
 };
 
 function isNode(value: unknown): value is ESTree.Node {
@@ -59,42 +60,50 @@ function collectTypeDeclarations(
   node: ESTree.Node,
   visitorKeys: VisitorKeys,
   environment: MutableEnvironment,
+  topLevel: boolean,
 ): void {
   if (node.type === "TSTypeAliasDeclaration") {
-    const existing = environment.aliases.get(node.id.name);
-    if (existing === undefined) environment.aliases.set(node.id.name, node);
-    else environment.shadowedBuiltIns.add(node.id.name);
-    if (BUILT_INS.has(node.id.name)) environment.shadowedBuiltIns.add(node.id.name);
+    if (environment.aliases.has(node.id.name)) {
+      environment.aliases.delete(node.id.name);
+      environment.ambiguousAliases.add(node.id.name);
+    } else if (!environment.ambiguousAliases.has(node.id.name)) {
+      environment.aliases.set(node.id.name, node);
+    }
+    if (topLevel && BUILT_INS.has(node.id.name)) environment.shadowedBuiltIns.add(node.id.name);
   } else if (node.type === "TSInterfaceDeclaration") {
     const declarations = environment.interfaces.get(node.id.name) ?? [];
     declarations.push(node);
     environment.interfaces.set(node.id.name, declarations);
-    if (BUILT_INS.has(node.id.name)) environment.shadowedBuiltIns.add(node.id.name);
+    if (topLevel && BUILT_INS.has(node.id.name)) environment.shadowedBuiltIns.add(node.id.name);
   } else if (node.type === "ImportDeclaration") {
+    if (node.importKind !== "type") return;
     for (const specifier of node.specifiers) {
       if (BUILT_INS.has(specifier.local.name))
         environment.shadowedBuiltIns.add(specifier.local.name);
     }
+    return;
   } else if (
-    (node.type === "TSEnumDeclaration" ||
-      node.type === "ClassDeclaration" ||
-      node.type === "FunctionDeclaration") &&
+    (node.type === "TSEnumDeclaration" || node.type === "ClassDeclaration") &&
     node.id !== null &&
+    topLevel &&
     BUILT_INS.has(node.id.name)
   ) {
     environment.shadowedBuiltIns.add(node.id.name);
   }
 
+  const childTopLevel =
+    topLevel &&
+    (node.type === "ExportNamedDeclaration" || node.type === "ExportDefaultDeclaration");
   const record = node as unknown as Readonly<Record<string, unknown>>;
   for (const key of visitorKeys[node.type] ?? []) {
     const value = record[key];
     if (isNode(value)) {
-      collectTypeDeclarations(value, visitorKeys, environment);
+      collectTypeDeclarations(value, visitorKeys, environment, childTopLevel);
       continue;
     }
     if (!Array.isArray(value)) continue;
     for (const child of value) {
-      if (isNode(child)) collectTypeDeclarations(child, visitorKeys, environment);
+      if (isNode(child)) collectTypeDeclarations(child, visitorKeys, environment, childTopLevel);
     }
   }
 }
@@ -107,8 +116,11 @@ export function createTypeEnvironment(
     aliases: new Map(),
     interfaces: new Map(),
     shadowedBuiltIns: new Set(),
+    ambiguousAliases: new Set(),
   };
-  collectTypeDeclarations(program, visitorKeys, environment);
+  for (const statement of program.body) {
+    collectTypeDeclarations(statement, visitorKeys, environment, true);
+  }
   return environment;
 }
 
