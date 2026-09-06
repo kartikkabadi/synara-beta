@@ -14,13 +14,28 @@ function getImportedName(specifier: ESTree.ImportSpecifier): string {
   return specifier.imported.value;
 }
 
+function importedModuleStem(source: string): string {
+  const segments = source.split(/[\\/]/u).filter(Boolean);
+  let base = segments[segments.length - 1] ?? "";
+  base = base.replace(/\.[cm]?[jt]sx?$/u, "");
+  if (base.toLowerCase() === "index" && segments.length > 1) {
+    base = segments[segments.length - 2] ?? base;
+  }
+  return base;
+}
+
+function namesOwningModule(importedName: string, source: string): boolean {
+  const stem = importedName.replace(/^make/u, "").toLowerCase();
+  return stem.length > 0 && stem === importedModuleStem(source).toLowerCase();
+}
+
 /** Keep dependency-bearing Effect service constructors local to their owning capability modules. */
 export const noServiceConstructorImportsRule = defineRule({
   meta: {
     type: "problem",
     docs: {
       description:
-        "Disallow project-local make<CapabilityName> imports outside test and spec files.",
+        "Disallow project-local imports of make<Capability> constructors named after their owning module outside test and spec files.",
     },
     messages: {
       serviceConstructorImport:
@@ -39,6 +54,7 @@ export const noServiceConstructorImportsRule = defineRule({
 
           const importedName = getImportedName(specifier);
           if (!SERVICE_CONSTRUCTOR_NAME.test(importedName)) continue;
+          if (!namesOwningModule(importedName, node.source.value)) continue;
 
           context.report({
             node: specifier,
