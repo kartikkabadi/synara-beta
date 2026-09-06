@@ -158,6 +158,7 @@ export const noKnownValueWideningRule = defineRule({
       if (unwrapped.type !== "TSAsExpression" && unwrapped.type !== "TSTypeAssertion") {
         return false;
       }
+      if (hasParentAssertion(unwrapped)) return false;
       return classifyWideningTarget(unwrapped.typeAnnotation, environment) !== null;
     };
 
