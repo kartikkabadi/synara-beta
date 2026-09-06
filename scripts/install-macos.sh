@@ -38,7 +38,10 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-[ "$(uname -s)" = Darwin ]
+if [ "$(uname -s)" != Darwin ]; then
+  echo "install-macos.sh: unsupported operating system (need macOS)." >&2
+  exit 1
+fi
 
 arch="$(uname -m)"
 case "$arch" in
@@ -65,11 +68,14 @@ if [ -z "$tag" ]; then
 fi
 
 if [ -z "$tag" ]; then
-  echo "install-macos.sh: could not resolve a release tag." >&2
+  echo "install-macos.sh: could not resolve a release tag (API rate-limited? pass --tag vX.Y.Z-beta.N)." >&2
   exit 1
 fi
 
-[[ "$tag" =~ ^v[0-9]+.* ]]
+if ! [[ "$tag" =~ ^v[0-9]+.* ]]; then
+  echo "install-macos.sh: invalid tag '$tag'. Expected vX.Y.Z or vX.Y.Z-beta.N." >&2
+  exit 1
+fi
 
 version="${tag#v}"
 echo "Installing Synara Beta $tag for macOS ($arch_suffix)..."
@@ -82,18 +88,13 @@ curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS" || {
 
 dmg="$(grep -E "[[:space:]]+\*?Synara.*${arch_suffix}\.dmg\$" "$tmp/SHA256SUMS" | head -1 | awk '{print $NF}' | sed 's/^\*//' || true)"
 if [ -z "$dmg" ]; then
-  dmg="Synara-Beta-${version}-${arch_suffix}.dmg"
+  dmg="Synara-${version}-${arch_suffix}.dmg"
 fi
 
-curl -fL -o "$tmp/$dmg" "$base/$dmg" || {
-  fallback_dmg="Synara-${version}-${arch_suffix}.dmg"
-  if [ "$dmg" != "$fallback_dmg" ]; then
-    curl -fL -o "$tmp/$fallback_dmg" "$base/$fallback_dmg" && dmg="$fallback_dmg"
-  else
-    echo "install-macos.sh: failed to download $dmg from $base" >&2
-    exit 1
-  fi
-}
+if ! curl -fL -o "$tmp/$dmg" "$base/$dmg"; then
+  echo "install-macos.sh: failed to download $dmg from $base" >&2
+  exit 1
+fi
 
 echo "Verifying checksum..."
 line="$(grep -E "^[a-fA-F0-9]{64}[[:space:]]+\*?${dmg}\$" "$tmp/SHA256SUMS")" || {
@@ -111,7 +112,7 @@ if [ -d "$mnt/Synara Beta.app" ]; then
 elif [ -d "$mnt/Synara.app" ]; then
   source_app="$mnt/Synara.app"
 else
-  source_app="$(find "$mnt" -maxdepth 1 -name "*.app" | head -1)"
+  source_app="$(find "$mnt" -maxdepth 1 -name "*.app" | head -1 || true)"
 fi
 
 if [ -z "$source_app" ] || [ ! -d "$source_app" ]; then
@@ -162,5 +163,5 @@ APPLESCRIPT
 fi
 
 xattr -d com.apple.quarantine "$app" 2>/dev/null || true
-open "$app"
+open "$app" 2>/dev/null || echo "install-macos.sh: installed $app but could not open it automatically." >&2
 echo "Installed Synara Beta $tag."

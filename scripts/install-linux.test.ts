@@ -18,7 +18,7 @@ describe("install-linux.sh", () => {
   });
 
   it("gates on Linux x86_64 and rejects arm64", () => {
-    NodeAssert.match(script, /^\[ "\$\(uname -s\)" = Linux \]$/m);
+    NodeAssert.match(script, /^if \[ "\$\(uname -s\)" != Linux \]; then$/m);
     NodeAssert.match(script, /x86_64\|amd64\)/);
     NodeAssert.match(script, /aarch64\|arm64\)/);
     NodeAssert.match(script, /no Linux arm64 AppImage is published/);

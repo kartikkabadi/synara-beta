@@ -15,7 +15,7 @@ describe("install-macos.sh", () => {
   });
 
   it("gates on macOS", () => {
-    NodeAssert.match(script, /^\[ "\$\(uname -s\)" = Darwin \]$/m);
+    NodeAssert.match(script, /^if \[ "\$\(uname -s\)" != Darwin \]; then$/m);
     NodeAssert.match(script, /arm64\)/);
     NodeAssert.match(script, /x86_64\)/);
   });
@@ -102,7 +102,8 @@ describe("install-macos.sh", () => {
   });
 
   it("opens the app at the end and echoes success", () => {
-    NodeAssert.match(script, /^open "\$app"$/m);
+    NodeAssert.match(script, /^open "\$app" 2>\/dev\/null \|\| echo /m);
+    NodeAssert.match(script, /could not open it automatically/);
     NodeAssert.match(script, /^echo "Installed Synara Beta \$tag\."$/m);
   });
 });
