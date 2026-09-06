@@ -11,7 +11,9 @@ const target = resolve(process.cwd(), targetArgument ?? "tools/oxlint/anti-slop"
 const force = arguments_.includes("--force");
 
 if (existsSync(target) && !force) {
-  console.error(`Refusing to overwrite ${target}. Re-run with --force only after reviewing the existing files.`);
+  console.error(
+    `Refusing to overwrite ${target}. Re-run with --force only after reviewing the existing files.`,
+  );
   process.exit(1);
 }
 

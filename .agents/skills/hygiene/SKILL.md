@@ -1,7 +1,6 @@
 ---
 name: hygiene
 description: "Restore the environment after agent work: close only tabs you opened, kill only processes you started, delete only scratch you created, revert state you changed. Use when finishing any task or ending a session, after creating temp files, opening browser tabs or workspaces, or starting background processes."
-
 ---
 
 # Hygiene

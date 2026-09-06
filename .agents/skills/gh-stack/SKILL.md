@@ -47,16 +47,16 @@ Agent harnesses differ, so always pass the flags below instead of relying on tha
 `--remote <name>` unless `remote.pushDefault` is configured. `checkout` and `trunk` have no
 `--remote` flag and require the config.
 
-| Always run | Never run bare | Why |
-|---|---|---|
-| `gh stack view --json` | `gh stack view` | opens a TUI under a PTY |
-| `gh stack submit --auto` | `gh stack submit` | prompts for a title per new PR |
-| `gh stack merge <target> --yes` | `gh pr merge` | `gh pr merge` cannot merge a stack |
-| `gh stack init <branch>...` | `gh stack init` | prompts for branch names |
-| `gh stack add <branch>` | `gh stack add` | prompts for a name, and fails even when piped |
-| `gh stack checkout <target>` | `gh stack checkout` | opens a selection menu |
-| `gh stack up` / `down` / `top` / `bottom` | `gh stack switch` | `switch` is menu-only |
-| — | `gh stack modify` | TUI-only, no non-interactive path |
+| Always run                                | Never run bare      | Why                                           |
+| ----------------------------------------- | ------------------- | --------------------------------------------- |
+| `gh stack view --json`                    | `gh stack view`     | opens a TUI under a PTY                       |
+| `gh stack submit --auto`                  | `gh stack submit`   | prompts for a title per new PR                |
+| `gh stack merge <target> --yes`           | `gh pr merge`       | `gh pr merge` cannot merge a stack            |
+| `gh stack init <branch>...`               | `gh stack init`     | prompts for branch names                      |
+| `gh stack add <branch>`                   | `gh stack add`      | prompts for a name, and fails even when piped |
+| `gh stack checkout <target>`              | `gh stack checkout` | opens a selection menu                        |
+| `gh stack up` / `down` / `top` / `bottom` | `gh stack switch`   | `switch` is menu-only                         |
+| —                                         | `gh stack modify`   | TUI-only, no non-interactive path             |
 
 - `view --short` is safe in both modes, but it is formatted for humans. Use `--json` to parse.
 - **`checkout <pr>` when a different local stack already covers those branches** cannot be forced.
@@ -140,19 +140,19 @@ an ancestor of the branch.
 
 ## Exit codes
 
-| Code | Meaning | Recovery |
-|---|---|---|
-| 0 | Success | — |
-| 1 | Generic error | Read stderr |
-| 2 | Not in a stack | `gh stack init`, or `gh stack checkout <target>` |
-| 3 | Rebase conflict | Follow the Exit 3 recovery below |
-| 4 | GitHub API failure | Check `gh auth status`, retry |
-| 5 | Invalid arguments | Fix the invocation; see `<command> --help` |
-| 6 | Disambiguation required | Branch is in several stacks; check out a non-shared branch |
-| 7 | Rebase already in progress | `gh stack rebase --continue` or `--abort` |
-| 8 | Stack file locked | Another `gh stack` process is writing; retry after ~5s |
-| 9 | Stacked PRs unavailable | Not enabled on the repository; tell the user |
-| 10 | Modify recovery required | `gh stack modify --abort` |
+| Code | Meaning                    | Recovery                                                   |
+| ---- | -------------------------- | ---------------------------------------------------------- |
+| 0    | Success                    | —                                                          |
+| 1    | Generic error              | Read stderr                                                |
+| 2    | Not in a stack             | `gh stack init`, or `gh stack checkout <target>`           |
+| 3    | Rebase conflict            | Follow the Exit 3 recovery below                           |
+| 4    | GitHub API failure         | Check `gh auth status`, retry                              |
+| 5    | Invalid arguments          | Fix the invocation; see `<command> --help`                 |
+| 6    | Disambiguation required    | Branch is in several stacks; check out a non-shared branch |
+| 7    | Rebase already in progress | `gh stack rebase --continue` or `--abort`                  |
+| 8    | Stack file locked          | Another `gh stack` process is writing; retry after ~5s     |
+| 9    | Stacked PRs unavailable    | Not enabled on the repository; tell the user               |
+| 10   | Modify recovery required   | `gh stack modify --abort`                                  |
 
 **Exit 3 recovery:**
 

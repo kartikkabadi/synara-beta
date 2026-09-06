@@ -67,7 +67,7 @@ first non-merged ancestor, then links them into a Stack on GitHub.
   the title and its body as the PR body. A branch with multiple commits humanizes the branch name
   (hyphens and underscores become spaces). There is no flag for a custom title or body; use
   `gh pr edit` afterwards.
-- `--open` marks new *and existing* PRs ready for review; without it new PRs are drafts.
+- `--open` marks new _and existing_ PRs ready for review; without it new PRs are drafts.
 - Requires stacked PRs to be enabled on the repository. If not, `submit` exits **9** when
   non-interactive (under a TTY it offers to create ordinary unstacked PRs instead).
 
@@ -174,6 +174,6 @@ Removes the stack **grouping** only. It never deletes pull requests or branches.
 
 `up`, `down`, `top`, `bottom`, and `trunk` are always non-interactive. `up` and `down` accept a
 count (`gh stack up 3`). Movement clamps at the stack bounds, and merged branches are skipped when
-navigating from an active branch, so `bottom` lands on the lowest *unmerged* branch.
+navigating from an active branch, so `bottom` lands on the lowest _unmerged_ branch.
 
 `gh stack switch` is a selection menu with no non-interactive path. Use the commands above instead.

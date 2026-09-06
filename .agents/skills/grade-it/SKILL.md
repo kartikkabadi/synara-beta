@@ -1,7 +1,6 @@
 ---
 name: grade-it
 description: "Use to verify finished work: independent verifier subagents grade it."
-
 ---
 
 # Grade It
@@ -68,6 +67,7 @@ user's need.
 ## Universal rubric seeds (always applicable; extend per domain)
 
 **Every deliverable:**
+
 - [ ] Does it exist where the user was told it would be? (stat the path)
 - [ ] Does it cover the whole request, not the convenient half? (diff the
       request against the artifact section by section)

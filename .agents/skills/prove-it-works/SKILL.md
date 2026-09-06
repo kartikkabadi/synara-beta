@@ -1,7 +1,6 @@
 ---
 name: principle-prove-it-works
 description: "Apply after completing a task, before declaring done. Verify against the real artifact (run the feature, read the actual value, inspect the diff), not a proxy, self-report, or 'it compiles.'"
-
 ---
 
 # Prove It Works
@@ -13,11 +12,13 @@ Verify every task output by checking the real thing directly. Do not infer from 
 **Pattern:** After completing any task, ask: "how do I prove this actually works?"
 
 Check the real thing, not a proxy:
+
 - Check process liveness directly, not indirectly through derived state
 - Read the actual value, not a cached or derived representation
 - When verification fails, suspect the observation method before suspecting the system
 
 Code and features:
+
 1. Build it (necessary but not sufficient)
 2. Run it and exercise the actual feature path
 3. Check the full chain: does data flow from input to output?

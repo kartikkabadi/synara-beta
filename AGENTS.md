@@ -49,14 +49,14 @@ Plain English. Short sentences. One idea each. Active voice. Answer first, then 
 
 This repo ships agent skills in `.agents/skills/<name>/SKILL.md`. When a task matches one, read the skill and follow it instead of improvising. If you are not sure whether a skill exists, search `.agents/skills/` before asking.
 
-| Skill              | Use it for                                                          |
-| ------------------ | ------------------------------------------------------------------- |
-| `commit`           | Splitting uncommitted work into human-sized atomic commits.          |
-| `gh-stack`         | Creating, syncing, and merging stacked pull requests.                |
-| `grade-it`         | Verifying finished work with fresh-eyes verifiers before reporting.  |
-| `prove-it-works`   | Proving a task output against the real artifact, not a proxy.        |
-| `hygiene`          | End-of-task cleanup: scratch, tabs, processes, state.                |
-| `install-anti-slop`| Installing the bundled anti-slop Oxlint plugin and its lint rules.   |
+| Skill               | Use it for                                                          |
+| ------------------- | ------------------------------------------------------------------- |
+| `commit`            | Splitting uncommitted work into human-sized atomic commits.         |
+| `gh-stack`          | Creating, syncing, and merging stacked pull requests.               |
+| `grade-it`          | Verifying finished work with fresh-eyes verifiers before reporting. |
+| `prove-it-works`    | Proving a task output against the real artifact, not a proxy.       |
+| `hygiene`           | End-of-task cleanup: scratch, tabs, processes, state.               |
+| `install-anti-slop` | Installing the bundled anti-slop Oxlint plugin and its lint rules.  |
 
 ## Sync discipline
 
@@ -78,14 +78,14 @@ Read this before any git work in this repo.
 
 ## Repository layout
 
-| Path                | Role                                                                                                                                    |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/desktop`      | Electron desktop shell. The primary distribution target: packaging, auto-update, single-instance lock, OS integration.                   |
-| `apps/server`       | Node.js WebSocket server. Provider sessions, project/thread orchestration, workspaces, terminal, browser automation.                     |
-| `apps/web`          | React/Vite UI. Session UX, transcript rendering, client state. Connects to the server over WebSocket.                                    |
-| `apps/marketing`    | Next.js site (trysynara.com), deployed via OpenNext to Cloudflare.                                                                       |
-| `packages/contracts`| Effect/Schema contracts: provider events, WebSocket protocol, model/session types. Schema-only — no runtime logic.                       |
-| `packages/shared`   | Shared runtime utilities for server and web. Explicit subpath exports (e.g. `@synara/shared/git`) — no barrel index.                     |
+| Path                 | Role                                                                                                                   |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `apps/desktop`       | Electron desktop shell. The primary distribution target: packaging, auto-update, single-instance lock, OS integration. |
+| `apps/server`        | Node.js WebSocket server. Provider sessions, project/thread orchestration, workspaces, terminal, browser automation.   |
+| `apps/web`           | React/Vite UI. Session UX, transcript rendering, client state. Connects to the server over WebSocket.                  |
+| `apps/marketing`     | Next.js site (trysynara.com), deployed via OpenNext to Cloudflare.                                                     |
+| `packages/contracts` | Effect/Schema contracts: provider events, WebSocket protocol, model/session types. Schema-only — no runtime logic.     |
+| `packages/shared`    | Shared runtime utilities for server and web. Explicit subpath exports (e.g. `@synara/shared/git`) — no barrel index.   |
 
 Key server internals: Codex session lifecycle in `apps/server/src/codexAppServerManager.ts`, provider dispatch in `apps/server/src/agentGateway/`, WebSocket RPC in `apps/server/src/wsRpc.ts`. The web app consumes orchestration domain events on the `orchestration.domainEvent` push channel.
 
