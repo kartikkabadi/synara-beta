@@ -97,8 +97,9 @@ export function readDroidSecureKey(
         env,
         cwd: nodePath.parse(executable).root || undefined,
         encoding: "utf8",
-        // Windows must start PowerShell and compile the fixed interop declaration on a cold run.
-        timeout: ctx.platform === "win32" ? 10_000 : 3_000,
+        // Windows must start PowerShell and compile the fixed interop declaration on a cold run;
+        // hosted runners have observed cold Add-Type compiles exceeding 10s.
+        timeout: ctx.platform === "win32" ? 60_000 : 3_000,
         killSignal: "SIGKILL",
         maxBuffer: 4_096,
         windowsHide: true,
