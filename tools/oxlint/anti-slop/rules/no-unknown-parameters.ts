@@ -1,6 +1,12 @@
 import { defineRule } from "@oxlint/plugins";
 import type { ESTree } from "@oxlint/plugins";
 
+import {
+  createResolvesToUnknown,
+  topLevelAliasDeclarations,
+} from "../shared/resolves-to-unknown.ts";
+import { lexicalTypeParameterNames } from "../shared/lexical-type-parameters.ts";
+
 type Parameter = ESTree.ParamPattern;
 type ParameterOwner =
   | ESTree.ArrowFunctionExpression
@@ -53,10 +59,19 @@ export const noUnknownParametersRule = defineRule({
     },
   },
   createOnce(context) {
+    let resolvesToUnknown = createResolvesToUnknown(new Map());
+
     const checkParameters = (node: ParameterOwner) => {
+      const shadowedAliases = lexicalTypeParameterNames(node, context.sourceCode.visitorKeys);
       for (const parameter of node.params) {
         const annotation = parameterAnnotation(parameter);
-        if (annotation?.typeAnnotation.type !== "TSUnknownKeyword") continue;
+        if (
+          annotation === null ||
+          annotation === undefined ||
+          !resolvesToUnknown(annotation.typeAnnotation, shadowedAliases)
+        ) {
+          continue;
+        }
         const name = parameterName(parameter, context.sourceCode.getText(parameter));
         if (name === "cause") continue;
         context.report({
@@ -68,6 +83,9 @@ export const noUnknownParametersRule = defineRule({
     };
 
     return {
+      Program(node) {
+        resolvesToUnknown = createResolvesToUnknown(topLevelAliasDeclarations(node));
+      },
       ArrowFunctionExpression: checkParameters,
       FunctionDeclaration: checkParameters,
       FunctionExpression: checkParameters,
