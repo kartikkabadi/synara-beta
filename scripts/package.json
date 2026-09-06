@@ -1,0 +1,24 @@
+{
+  "name": "@synara/scripts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare": "effect-language-service patch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@effect/platform-node": "catalog:",
+    "@synara/contracts": "workspace:*",
+    "@synara/shared": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/language-service": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@types/bun": "catalog:",
+    "electron-builder": "26.15.3",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

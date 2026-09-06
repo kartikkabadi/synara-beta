@@ -1,0 +1,19 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "types": ["node", "bun"],
+    "lib": ["ES2023", "esnext.disposable"],
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "plugins": [
+      {
+        "name": "@effect/language-service"
+      }
+    ]
+  },
+  // device-helper-smoke.ts spawns the helper through the server's sandbox
+  // wrapper so the smoke run exercises the same confinement the app applies.
+  // Duplicating that logic here is what would let the two drift.
+  "include": ["**/*.ts", "../apps/server/src/device/helperSandbox.ts"]
+}

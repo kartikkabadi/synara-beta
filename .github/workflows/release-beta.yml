@@ -1,0 +1,480 @@
+name: Release Desktop Beta
+
+on:
+  push:
+    tags:
+      - "v*-beta.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (for example 0.8.2-beta.1 or v0.8.2-beta.1)"
+        required: true
+        type: string
+      publish_release:
+        description: "Publish the GitHub release after successful builds"
+        required: true
+        default: false
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: synara-desktop-beta-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Preflight
+    if: github.repository == 'kartikkabadi/synara-beta' || github.repository == 'Emanuele-web04/synara'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.release_meta.outputs.version }}
+      tag: ${{ steps.release_meta.outputs.tag }}
+      is_prerelease: ${{ steps.release_meta.outputs.is_prerelease }}
+      make_latest: ${{ steps.release_meta.outputs.make_latest }}
+      mirror_to_stable_channel: ${{ steps.release_meta.outputs.mirror_to_stable_channel }}
+      publish_release: ${{ steps.release_mode.outputs.publish_release }}
+      release_lane: ${{ steps.release_meta.outputs.release_lane }}
+      bridge_tag: ${{ steps.release_meta.outputs.bridge_tag }}
+      update_channel: ${{ steps.release_meta.outputs.update_channel }}
+      source_commit: ${{ steps.source_provenance.outputs.source_commit }}
+      source_tag: ${{ steps.source_provenance.outputs.source_tag }}
+      lockfile_sha256: ${{ steps.source_provenance.outputs.lockfile_sha256 }}
+      ref: ${{ steps.source_provenance.outputs.source_commit }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      - id: release_mode
+        name: Resolve publication mode
+        shell: bash
+        env:
+          PUBLISH_RELEASE: ${{ github.event_name == 'push' || inputs.publish_release }}
+        run: |
+          if [[ "${{ github.repository }}" != "kartikkabadi/synara-beta" ]]; then
+            echo "Beta releases can only be published from kartikkabadi/synara-beta. Forcing build-only mode."
+            PUBLISH_RELEASE="false"
+          fi
+          echo "publish_release=$PUBLISH_RELEASE" >> "$GITHUB_OUTPUT"
+          if [[ "$PUBLISH_RELEASE" == "true" ]]; then
+            echo "Publication enabled."
+          else
+            echo "Build-only validation enabled; no release or package will be published."
+          fi
+
+      - id: release_meta
+        name: Resolve release policy
+        env:
+          RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}
+        run: node scripts/resolve-release-update-policy.ts "$RELEASE_VERSION"
+
+      - id: source_provenance
+        name: Verify exact release source
+        env:
+          RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
+          RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          PUBLISH_RELEASE: ${{ steps.release_mode.outputs.publish_release }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+          SOURCE_REF_TYPE: ${{ github.ref_type }}
+          SOURCE_REF_NAME: ${{ github.ref_name }}
+        run: |
+          node scripts/verify-release-source-provenance.ts \
+            "$RELEASE_VERSION" \
+            "$RELEASE_TAG" \
+            "$PUBLISH_RELEASE" \
+            "$EXPECTED_COMMIT" \
+            "$SOURCE_REF_TYPE" \
+            "$SOURCE_REF_NAME"
+
+      - name: Verify public updater repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          visibility="$(gh api "repos/${GITHUB_REPOSITORY}" --jq .visibility)"
+          if [[ "$visibility" != "public" ]]; then
+            echo "The dedicated updater channel requires the public GitHub provider; repository visibility is $visibility." >&2
+            exit 1
+          fi
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Verify Synara identity
+        run: bun run brand:check
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun run test
+
+  build:
+    name: Build ${{ matrix.label }}
+    needs: preflight
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS arm64
+            runner: macos-14
+            platform: mac
+            target: dmg
+            arch: arm64
+          - label: macOS x64
+            runner: macos-15-intel
+            platform: mac
+            target: dmg
+            arch: x64
+          - label: Linux x64
+            runner: ubuntu-24.04
+            platform: linux
+            target: AppImage
+            arch: x64
+          - label: Windows x64
+            runner: windows-2022
+            platform: win
+            target: nsis
+            arch: x64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      - name: Install dependencies
+        # Preflight already runs the full lifecycle-script install plus lint,
+        # typecheck, and tests. Artifact jobs only need dependencies available.
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - id: build_artifact
+        name: Build desktop artifact
+        shell: bash
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
+          AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
+          AZURE_TRUSTED_SIGNING_SUBJECT_DN: ${{ secrets.AZURE_TRUSTED_SIGNING_SUBJECT_DN }}
+          SYNARA_PUBLISH_RELEASE: ${{ needs.preflight.outputs.publish_release }}
+          ALLOW_UNSIGNED_WINDOWS_PUBLICATION: ${{ vars.SYNARA_ALLOW_UNSIGNED_WINDOWS_RELEASE == needs.preflight.outputs.version }}
+          ALLOW_UNSIGNED_BETA_PUBLICATION: "true"
+          SOURCE_COMMIT: ${{ needs.preflight.outputs.source_commit }}
+          SOURCE_TAG: ${{ needs.preflight.outputs.source_tag }}
+          LOCKFILE_SHA256: ${{ needs.preflight.outputs.lockfile_sha256 }}
+        run: |
+          signed=false
+          args=(
+            --platform "${{ matrix.platform }}"
+            --target "${{ matrix.target }}"
+            --arch "${{ matrix.arch }}"
+            --flavor beta
+            --build-version "${{ needs.preflight.outputs.version }}"
+            --source-commit "$SOURCE_COMMIT"
+            --lockfile-sha256 "$LOCKFILE_SHA256"
+            --verbose
+          )
+
+          if [[ -n "$SOURCE_TAG" ]]; then
+            args+=(--source-tag "$SOURCE_TAG")
+          fi
+
+          has_all() {
+            for value in "$@"; do
+              if [[ -z "$value" ]]; then
+                return 1
+              fi
+            done
+            return 0
+          }
+
+          if [[ "${{ matrix.platform }}" == "mac" ]]; then
+            if has_all "$CSC_LINK" "$CSC_KEY_PASSWORD" "$APPLE_API_KEY" "$APPLE_API_KEY_ID" "$APPLE_API_ISSUER" "$APPLE_TEAM_ID"; then
+              key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+              printf '%s' "$APPLE_API_KEY" > "$key_path"
+              export APPLE_API_KEY="$key_path"
+              echo "macOS signing enabled."
+              signed=true
+              args+=(--signed)
+            elif [[ "$SYNARA_PUBLISH_RELEASE" == "true" ]]; then
+              if [[ "$ALLOW_UNSIGNED_BETA_PUBLICATION" == "true" ]]; then
+                echo "Publishing unsigned macOS beta artifact."
+              else
+                echo "Publishing macOS artifacts requires every signing and notarization secret."
+                exit 1
+              fi
+            else
+              echo "Build-only macOS artifact will be unsigned because publication is disabled."
+            fi
+          elif [[ "${{ matrix.platform }}" == "win" ]]; then
+            if has_all \
+              "$AZURE_TENANT_ID" \
+              "$AZURE_CLIENT_ID" \
+              "$AZURE_CLIENT_SECRET" \
+              "$AZURE_TRUSTED_SIGNING_ENDPOINT" \
+              "$AZURE_TRUSTED_SIGNING_ACCOUNT_NAME" \
+              "$AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME" \
+              "$AZURE_TRUSTED_SIGNING_PUBLISHER_NAME" \
+              "$AZURE_TRUSTED_SIGNING_SUBJECT_DN"; then
+              echo "Windows signing enabled (Azure Trusted Signing)."
+              signed=true
+              args+=(--signed)
+            elif [[ "$SYNARA_PUBLISH_RELEASE" == "true" && "$ALLOW_UNSIGNED_WINDOWS_PUBLICATION" != "true" ]]; then
+              if [[ "$ALLOW_UNSIGNED_BETA_PUBLICATION" == "true" ]]; then
+                echo "Publishing unsigned Windows beta artifact."
+              else
+                echo "Publishing Windows artifacts requires every Azure Trusted Signing secret."
+                exit 1
+              fi
+            else
+              echo "Windows artifact will be unsigned under the explicit version-scoped release exception."
+            fi
+          else
+            echo "Signing disabled for ${{ matrix.platform }}."
+          fi
+
+          if [[ "${{ matrix.platform }}" == "mac" && "${{ matrix.arch }}" == "x64" ]]; then
+            # electron-builder occasionally times out fetching x64 DMG helper bundles on GitHub-hosted macOS runners.
+            # Retry this narrow packaging path so transient upstream 504s do not block the whole release.
+            max_attempts=3
+            for attempt in $(seq 1 "$max_attempts"); do
+              if bun run build:desktop:artifact -- "${args[@]}"; then
+                break
+              fi
+
+              if [[ "$attempt" -eq "$max_attempts" ]]; then
+                echo "macOS x64 desktop artifact build failed after $max_attempts attempts."
+                exit 1
+              fi
+
+              sleep_seconds=$((attempt * 15))
+              echo "macOS x64 desktop artifact build failed on attempt $attempt/$max_attempts. Retrying in ${sleep_seconds}s..."
+              sleep "$sleep_seconds"
+            done
+          else
+            bun run build:desktop:artifact -- "${args[@]}"
+          fi
+
+          echo "signed=$signed" >> "$GITHUB_OUTPUT"
+
+      - name: Collect release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-publish
+
+          shopt -s nullglob
+          for pattern in \
+            "release/*.dmg" \
+            "release/*.zip" \
+            "release/*.AppImage" \
+            "release/*.exe" \
+            "release/*.blockmap" \
+            "release/latest*.yml"; do
+            for file in $pattern; do
+              cp "$file" release-publish/
+            done
+          done
+
+          if [[ "${{ matrix.platform }}" == "mac" && "${{ matrix.arch }}" != "arm64" ]]; then
+            if [[ -f release-publish/latest-mac.yml ]]; then
+              mv release-publish/latest-mac.yml "release-publish/latest-mac-${{ matrix.arch }}.yml"
+            fi
+          fi
+
+      - name: Verify and record artifact provenance
+        shell: bash
+        env:
+          EXPECTED_MAC_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          EXPECTED_WINDOWS_PUBLISHER: ${{ secrets.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
+          EXPECTED_WINDOWS_SUBJECT_DN: ${{ secrets.AZURE_TRUSTED_SIGNING_SUBJECT_DN }}
+          SOURCE_COMMIT: ${{ needs.preflight.outputs.source_commit }}
+          SOURCE_TAG: ${{ needs.preflight.outputs.source_tag }}
+          LOCKFILE_SHA256: ${{ needs.preflight.outputs.lockfile_sha256 }}
+          PUBLISH_RELEASE: ${{ needs.preflight.outputs.publish_release }}
+          SIGNED_ARTIFACT: ${{ steps.build_artifact.outputs.signed }}
+          ALLOW_UNSIGNED_BETA_PUBLICATION: "true"
+          ALLOW_UNSIGNED_WINDOWS_PUBLICATION: ${{ vars.SYNARA_ALLOW_UNSIGNED_WINDOWS_RELEASE == needs.preflight.outputs.version }}
+        run: |
+          provenance_publication="$PUBLISH_RELEASE"
+          allow_unsigned_win="$ALLOW_UNSIGNED_WINDOWS_PUBLICATION"
+          if [[ "$ALLOW_UNSIGNED_BETA_PUBLICATION" == "true" && "$SIGNED_ARTIFACT" != "true" ]]; then
+            provenance_publication="false"
+            allow_unsigned_win="true"
+          fi
+
+          node scripts/write-release-artifact-provenance.ts \
+            --assets-dir release-publish \
+            --platform "${{ matrix.platform }}" \
+            --arch "${{ matrix.arch }}" \
+            --target "${{ matrix.target }}" \
+            --version "${{ needs.preflight.outputs.version }}" \
+            --source-commit "$SOURCE_COMMIT" \
+            --source-tag "$SOURCE_TAG" \
+            --lockfile-sha256 "$LOCKFILE_SHA256" \
+            --publication "$provenance_publication" \
+            --signed "$SIGNED_ARTIFACT" \
+            --allow-unsigned-windows-publication "$allow_unsigned_win" \
+            --expected-mac-team-id "$EXPECTED_MAC_TEAM_ID" \
+            --expected-windows-publisher "$EXPECTED_WINDOWS_PUBLISHER" \
+            --expected-windows-subject-dn "$EXPECTED_WINDOWS_SUBJECT_DN"
+
+      - name: Smoke packaged desktop startup
+        shell: bash
+        run: |
+          node scripts/verify-packaged-desktop-startup.ts \
+            --assets-dir release-publish \
+            --platform "${{ matrix.platform }}" \
+            --arch "${{ matrix.arch }}" \
+            --version "${{ needs.preflight.outputs.version }}"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ matrix.platform }}-${{ matrix.arch }}
+          path: release-publish/*
+          if-no-files-found: error
+
+  build_server_tarball:
+    name: Build server tarball
+    if: ${{ needs.preflight.outputs.publish_release == 'true' }}
+    needs: [preflight, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      - name: Install dependencies
+        # Preflight already validates lifecycle scripts; this job only needs
+        # dependencies available to build the package.
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Build server package
+        run: bun run build --filter=@synara/web --filter=@synara/cli
+
+      - name: Pack server tarball
+        run: node apps/server/scripts/cli.ts pack --out release-server --app-version "${{ needs.preflight.outputs.version }}"
+
+      - name: Upload server tarball
+        uses: actions/upload-artifact@v7
+        with:
+          name: server-tarball
+          path: release-server/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    if: ${{ needs.preflight.outputs.publish_release == 'true' }}
+    needs: [preflight, build, build_server_tarball]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      - name: Download all desktop artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Download server tarball
+        uses: actions/download-artifact@v8
+        with:
+          name: server-tarball
+          path: release-assets
+
+      - name: Merge macOS updater manifests
+        run: |
+          node scripts/merge-mac-update-manifests.ts \
+            release-assets/latest-mac.yml \
+            release-assets/latest-mac-x64.yml
+          rm -f release-assets/latest-mac-x64.yml
+
+      - name: Prepare updater feed metadata
+        run: node scripts/prepare-release-update-feed.ts release-assets
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.preflight.outputs.tag }}
+          target_commitish: ${{ needs.preflight.outputs.ref }}
+          name: Synara Beta v${{ needs.preflight.outputs.version }}
+          generate_release_notes: true
+          prerelease: true
+          make_latest: true
+          files: |
+            release-assets/*.dmg
+            release-assets/*.zip
+            release-assets/*.AppImage
+            release-assets/*.exe
+            release-assets/*.blockmap
+            release-assets/*.yml
+            release-assets/*.provenance.json
+            release-assets/*.tar.gz
+          fail_on_unmatched_files: true

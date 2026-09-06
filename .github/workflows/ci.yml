@@ -1,0 +1,264 @@
+# Lane rule: static is fast checks with no special runtime, unit is bun test, browser owns Playwright and is the long pole, build owns Electron and desktop output.
+# Gate (quality) aggregates only: add no run steps there. A new fast check with no runtime goes to static.
+# Setup-workspace runs once per lane, not once for all: never put checks in the shared action.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+# Stale runs cancelled by a newer push show the gate red, not grey. Main never cancels.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  static:
+    name: Static Checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+
+      - name: Verify Synara identity
+        run: bun run brand:check
+
+      - name: Verify Windows runtime boundary
+        run: bun run windows-runtime:check
+
+      - name: Format
+        run: bun run fmt:check
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Typecheck
+        run: bun run typecheck
+
+  unit:
+    name: Unit Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+
+      - name: Verify Linux terminal PTY native dependency
+        run: node scripts/node-pty-smoke.mjs
+
+      - name: Test
+        run: bun run test
+
+  browser:
+    name: Browser Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('bun.lock') }}
+
+      # Run the workspace-local playwright binary directly: bunx stalled after
+      # the chromium download on hosted runners. The step timeout stops any
+      # remaining apt/download stalls from eating the whole job budget.
+      - name: Install browser test runtime
+        timeout-minutes: 15
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          cd apps/web
+          ./node_modules/.bin/playwright install --with-deps chromium
+
+      - name: Browser test (stable)
+        timeout-minutes: 20
+        run: bun run --cwd apps/web test:browser:stable
+
+      # Pixel/font/layout comparisons are tracked explicitly in
+      # apps/web/BROWSER_TEST_QUARANTINE.md while their Linux rendering is fixed.
+      # All untagged browser tests run in the blocking stable step above.
+      - name: Browser test (Linux geometry quarantine)
+        continue-on-error: true
+        timeout-minutes: 10
+        run: bun run --cwd apps/web test:browser:geometry
+
+  build:
+    name: Desktop Build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          electron: "true"
+
+      - name: Build desktop pipeline
+        run: bun run build:desktop
+
+      - name: Verify preload bundle output
+        run: |
+          test -f apps/desktop/dist-electron/preload.js
+          grep -nE "desktopBridge|getWsUrl|PICK_FOLDER_CHANNEL|wsUrl" apps/desktop/dist-electron/preload.js
+
+  # Aggregate only: no checkout, no run steps. Keep the old display name for branch protection. if: always() is intended, do not remove.
+  quality:
+    name: Format, Lint, Typecheck, Test, Browser Test, Build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    needs: [static, unit, browser, build]
+    if: always()
+    steps:
+      - name: Aggregate lane results
+        env:
+          STATIC: ${{ needs.static.result }}
+          UNIT: ${{ needs.unit.result }}
+          BROWSER: ${{ needs.browser.result }}
+          BUILD: ${{ needs.build.result }}
+        run: |
+          if [ "$STATIC" != "success" ] || [ "$UNIT" != "success" ] || [ "$BROWSER" != "success" ] || [ "$BUILD" != "success" ]; then
+            echo "static=$STATIC unit=$UNIT browser=$BROWSER build=$BUILD"
+            echo "Open the red lane above, not this gate."
+            exit 1
+          fi
+
+  windows_process:
+    name: Windows Process Regression
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      - name: Install dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: bun install --frozen-lockfile
+
+      - name: Verify Windows terminal PTY native dependency under Bun
+        run: bun scripts/node-pty-smoke.mjs
+
+      - name: Verify Windows runtime boundary
+        run: bun run windows-runtime:check
+
+      - name: Test Windows process runtime
+        run: >-
+          bun run --cwd packages/shared test
+          src/windowsProcess.test.ts
+          src/platformProcess.test.ts
+          src/processRuntime.test.ts
+          src/filesystemPlatform.test.ts
+          src/platformEnvironment.test.ts
+
+      - name: Test Windows lifecycle and process trees
+        run: >-
+          bun run --cwd apps/server test
+          src/platform/processTreeController.test.ts
+          src/provider/supervisedProcessTeardown.test.ts
+          src/provider/providerStartupLifecycle.test.ts
+          src/processRunner.test.ts
+
+      - name: Verify Windows credential reader compilation without credentials
+        run: >-
+          bun run --cwd apps/server test
+          src/providerUsage/providers/droidSecureStorage.test.ts
+          -t "compiles the Windows bridge"
+
+      - name: Test Effect Windows process spawn
+        run: bun run --cwd apps/server test src/windowsProcessEffect.test.ts
+
+      - name: Test Windows desktop backend shutdown
+        run: bun run --cwd apps/desktop test src/backendShutdown.windows.integration.test.ts
+
+      # The 0.6.0 wedge hit Windows hardest, and the repair path is built out of
+      # exactly what Windows treats differently: unlinking a marker, reclaiming
+      # stranded partials, and renaming a database file that may still be held
+      # open. Linux-only coverage cannot speak for any of that.
+      - name: Test migration recovery marker
+        run: bun run --cwd packages/shared test src/migrationRecovery.test.ts
+
+      - name: Test desktop migration recovery
+        run: bun run --cwd apps/desktop test src/desktopMigrationRecovery.test.ts
+
+      - name: Test migration backup and restore
+        run: bun run --cwd apps/server test src/persistence/MigrationBackup.test.ts
+
+      - name: Test migration replay
+        run: bun run --cwd apps/server test src/persistence/Migrations/MigrationReplay.test.ts
+
+  # Released (id, name) migration pairs are recorded in every user's
+  # effect_sql_migrations table, so renumbering or renaming one corrupts existing
+  # installs. This job needs the release tags, hence the unshallow checkout; the
+  # guard itself is dependency-free and skips with a warning if tags are missing.
+  migration_lineage:
+    name: Migration Lineage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      - name: Verify released migration lineage
+        run: node scripts/check-migration-lineage.ts
+
+  release_smoke:
+    name: Release Smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Verify Synara identity
+        run: bun run brand:check
+
+      - name: Exercise release-only workflow steps
+        run: node scripts/release-smoke.ts
