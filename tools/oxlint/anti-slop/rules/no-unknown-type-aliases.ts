@@ -41,8 +41,12 @@ export const noUnknownTypeAliasesRule = defineRule({
         resolvesToUnknown = createResolvesToUnknown(refined.aliases, refined.ambiguous);
         for (const [name, list] of collected.declarations) {
           for (const alias of list) {
-            const shadowedAliases = lexicalTypeParameterNames(alias, context.sourceCode.visitorKeys);
-            if (!resolvesToUnknown(alias.typeAnnotation, shadowedAliases, new Set([name]))) continue;
+            const shadowedAliases = lexicalTypeParameterNames(
+              alias,
+              context.sourceCode.visitorKeys,
+            );
+            if (!resolvesToUnknown(alias.typeAnnotation, shadowedAliases, new Set([name])))
+              continue;
             context.report({
               node: alias.id,
               messageId: "unknownAlias",
