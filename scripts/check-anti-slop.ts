@@ -97,9 +97,7 @@ export function collectCurrentViolations(root: string): Map<string, number> {
   return countByRuleAndFile(parseAntiSlopDiagnostics(output));
 }
 
-export function sortedBaselineEntries(
-  current: Map<string, number>,
-): Array<[string, number]> {
+export function sortedBaselineEntries(current: Map<string, number>): Array<[string, number]> {
   return [...current.entries()].sort(([left], [right]) =>
     left < right ? -1 : left > right ? 1 : 0,
   );
