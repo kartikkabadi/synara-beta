@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 export interface OxlintDiagnostic {
   code: string;
   filename: string;
-  severity: string;
+  message: string;
 }
 
 export interface OxlintOutput {
@@ -23,47 +23,89 @@ export interface RatchetReport {
   burnDown: string[];
 }
 
+export interface BaselineEntry {
+  total: number;
+  messages: Record<string, number>;
+}
+
+export type Baseline = Record<string, BaselineEntry>;
+
+/** Maps "rule:file" to per-message-fingerprint violation counts. */
+export type ViolationCounts = Map<string, Map<string, number>>;
+
 export const BASELINE_PATH = "tools/oxlint/anti-slop-baseline.json";
 const ANTI_SLOP_CODE_PREFIX = "anti-slop";
 
 export function parseAntiSlopDiagnostics(
   output: OxlintOutput,
-): Array<{ code: string; filename: string }> {
+): Array<{ code: string; filename: string; message: string }> {
   return output.diagnostics
     .filter((diagnostic) => diagnostic.code.startsWith(ANTI_SLOP_CODE_PREFIX))
-    .map((diagnostic) => ({ code: diagnostic.code, filename: diagnostic.filename }));
+    .map((diagnostic) => ({
+      code: diagnostic.code,
+      filename: diagnostic.filename,
+      message: diagnostic.message,
+    }));
 }
 
-export function countByRuleAndFile(
-  diagnostics: Array<{ code: string; filename: string }>,
-): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const { code, filename } of diagnostics) {
+export function messageFingerprint(message: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < message.length; index++) {
+    hash ^= message.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+export function countViolationsByRuleAndFile(
+  diagnostics: Array<{ code: string; filename: string; message: string }>,
+): ViolationCounts {
+  const counts: ViolationCounts = new Map();
+  for (const { code, filename, message } of diagnostics) {
     const key = `${code}:${filename}`;
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+    const messages = countByMessage(counts, key);
+    const fingerprint = messageFingerprint(message);
+    messages.set(fingerprint, (messages.get(fingerprint) ?? 0) + 1);
   }
   return counts;
 }
 
+function countByMessage(counts: ViolationCounts, key: string): Map<string, number> {
+  const messages = counts.get(key);
+  if (messages !== undefined) return messages;
+  const created = new Map<string, number>();
+  counts.set(key, created);
+  return created;
+}
+
+function totalViolations(messages: ReadonlyMap<string, number>): number {
+  return [...messages.values()].reduce((sum, count) => sum + count, 0);
+}
+
 export function compareAgainstBaseline(
-  baseline: Record<string, number>,
-  current: Map<string, number>,
+  baseline: Baseline,
+  current: ViolationCounts,
 ): RatchetReport {
   const failures: string[] = [];
   const burnDown: string[] = [];
-  for (const [key, count] of current) {
+  for (const [key, messages] of current) {
     const before = baseline[key];
     if (before === undefined) {
-      failures.push(`${key} (new, ${count})`);
-    } else if (before < count) {
-      failures.push(`${key} (grew, ${before} -> ${count})`);
-    } else if (before > count) {
-      burnDown.push(`${key} (${before} -> ${count})`);
+      failures.push(`${key} (new, ${totalViolations(messages)})`);
+      continue;
+    }
+    for (const [fingerprint, count] of messages) {
+      const beforeCount = before.messages[fingerprint] ?? 0;
+      if (count > beforeCount) {
+        failures.push(`${key} [${fingerprint}] (grew, ${beforeCount} -> ${count})`);
+      } else if (count < beforeCount) {
+        burnDown.push(`${key} [${fingerprint}] (${beforeCount} -> ${count})`);
+      }
     }
   }
-  for (const [key, before] of Object.entries(baseline)) {
-    if (!current.has(key) && before > 0) {
-      burnDown.push(`${key} (${before} -> 0)`);
+  for (const [key, entry] of Object.entries(baseline)) {
+    if (!current.has(key) && entry.total > 0) {
+      burnDown.push(`${key} (gone, ${entry.total} -> 0)`);
     }
   }
   return { failures, burnDown };
@@ -74,7 +116,7 @@ function oxlintBinary(root: string): string {
   return process.platform === "win32" ? `${binary}.cmd` : binary;
 }
 
-export function collectCurrentViolations(root: string): Map<string, number> {
+export function collectCurrentViolations(root: string): ViolationCounts {
   const shell = process.platform === "win32";
   const binary = oxlintBinary(root);
   const result = spawnSync(shell ? `"${binary}"` : binary, ["-f", "json"], {
@@ -94,17 +136,26 @@ export function collectCurrentViolations(root: string): Map<string, number> {
     throw new Error(`oxlint produced no JSON output (status ${result.status})`);
   }
   const output = JSON.parse(result.stdout) as OxlintOutput;
-  return countByRuleAndFile(parseAntiSlopDiagnostics(output));
+  return countViolationsByRuleAndFile(parseAntiSlopDiagnostics(output));
 }
 
-export function sortedBaselineEntries(current: Map<string, number>): Array<[string, number]> {
-  return [...current.entries()].sort(([left], [right]) =>
-    left < right ? -1 : left > right ? 1 : 0,
-  );
+export function sortedBaselineEntries(current: ViolationCounts): Baseline {
+  const baseline: Baseline = {};
+  for (const key of [...current.keys()].sort()) {
+    const messages = current.get(key);
+    if (messages === undefined) continue;
+    const sortedMessages: Record<string, number> = {};
+    for (const fingerprint of [...messages.keys()].sort()) {
+      const count = messages.get(fingerprint);
+      if (count !== undefined) sortedMessages[fingerprint] = count;
+    }
+    baseline[key] = { total: totalViolations(messages), messages: sortedMessages };
+  }
+  return baseline;
 }
 
-function readBaseline(root: string): Record<string, number> {
-  return JSON.parse(readFileSync(resolve(root, BASELINE_PATH), "utf8")) as Record<string, number>;
+function readBaseline(root: string): Baseline {
+  return JSON.parse(readFileSync(resolve(root, BASELINE_PATH), "utf8")) as Baseline;
 }
 
 function main(): void {
@@ -115,9 +166,12 @@ function main(): void {
   if (update) {
     writeFileSync(
       resolve(root, BASELINE_PATH),
-      `${JSON.stringify(Object.fromEntries(sortedBaselineEntries(current)), null, 2)}\n`,
+      `${JSON.stringify(sortedBaselineEntries(current), null, 2)}\n`,
     );
-    const total = [...current.values()].reduce((sum, count) => sum + count, 0);
+    const total = [...current.values()].reduce(
+      (sum, messages) => sum + totalViolations(messages),
+      0,
+    );
     console.log(`Baseline updated: ${current.size} rule/file entries, ${total} violations.`);
     return;
   }
@@ -125,7 +179,7 @@ function main(): void {
   const report = compareAgainstBaseline(readBaseline(root), current);
   if (report.burnDown.length > 0) {
     console.log(
-      `Burn-down available: ${report.burnDown.length} rule/file entries shrank. Run \`bun run lint:anti-slop --update\` to record the improvement.`,
+      `Burn-down available: ${report.burnDown.length} entries shrank. Run \`bun run lint:anti-slop --update\` to record the improvement.`,
     );
   }
   if (report.failures.length === 0) {
