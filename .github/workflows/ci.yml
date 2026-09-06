@@ -43,6 +43,8 @@ jobs:
               - '**'
               - '!**/*.md'
               - '!docs/**'
+              - '!**/*.mdx'
+              - '!**/docs/**'
               - '!**/assets/**'
               - '!**/*.png'
               - '!**/*.jpg'
@@ -276,21 +278,6 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version-file: package.json
-
-      # Phase 1c: this lane's uncached install (~5m11s) is the biggest single
-      # waste. Same key scheme as setup-workspace; the frozen install below
-      # still runs for correctness and links from a warm cache.
-      - name: Cache node_modules
-        uses: actions/cache@v5
-        with:
-          path: |
-            node_modules
-            apps/*/node_modules
-            packages/*/node_modules
-            scripts/node_modules
-          key: ${{ runner.os }}-bun-node-modules-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-node-modules-
 
       - name: Install dependencies
         env:

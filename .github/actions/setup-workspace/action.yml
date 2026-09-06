@@ -28,9 +28,10 @@ runs:
           ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}-
     # Phase 1c/3: node_modules survives across jobs keyed on the lockfile.
     # bun install --frozen-lockfile still runs below (correctness), but a warm
-    # cache turns resolve + download into link. Content is identical with or
-    # without the electron runtime (that binary lives in ~/.cache/electron),
-    # so lanes share one key regardless of the electron input.
+    # cache turns resolve + download into link. The key is scoped by the
+    # electron input: Install Electron test runtime extracts the binary into
+    # apps/desktop/node_modules/electron/dist INSIDE node_modules, so the
+    # electron lane's tree differs from other lanes and must not share a blob.
     - name: Cache node_modules
       uses: actions/cache@v5
       with:
@@ -39,9 +40,9 @@ runs:
           apps/*/node_modules
           packages/*/node_modules
           scripts/node_modules
-        key: ${{ runner.os }}-bun-node-modules-${{ hashFiles('bun.lock') }}
+        key: ${{ runner.os }}-bun-node-modules-electron-${{ inputs.electron }}-${{ hashFiles('bun.lock') }}
         restore-keys: |
-          ${{ runner.os }}-bun-node-modules-
+          ${{ runner.os }}-bun-node-modules-electron-${{ inputs.electron }}-
 
     # Phase 3h: persist Turbo's local cache store so cacheable build outputs
     # survive across jobs. Turbo verifies its own fingerprints on hit, so a
