@@ -87,7 +87,7 @@ describe("compareAgainstBaseline", () => {
     expect(report.burnDown).toEqual(["anti-slop(no-runtime-typeof):a.ts (5 -> 2)"]);
   });
 
-  it("ignores baseline entries whose file or rule no longer reports", () => {
+  it("reports burn-down for baseline entries that no longer occur", () => {
     const baseline = {
       "anti-slop(no-runtime-typeof):deleted.ts": 4,
       "anti-slop(no-runtime-typeof):a.ts": 1,
@@ -95,6 +95,13 @@ describe("compareAgainstBaseline", () => {
     const current = new Map([["anti-slop(no-runtime-typeof):a.ts", 1]]);
     const report = compareAgainstBaseline(baseline, current);
     expect(report.failures).toEqual([]);
-    expect(report.burnDown).toEqual([]);
+    expect(report.burnDown).toEqual(["anti-slop(no-runtime-typeof):deleted.ts (4 -> 0)"]);
+  });
+
+  it("keeps zero-count burn-down visible so allowances cannot be reused", () => {
+    const baseline = { "anti-slop(no-runtime-typeof):a.ts": 2 };
+    const current = new Map([["anti-slop(no-runtime-typeof):a.ts", 1]]);
+    const report = compareAgainstBaseline(baseline, current);
+    expect(report.burnDown).toEqual(["anti-slop(no-runtime-typeof):a.ts (2 -> 1)"]);
   });
 });

@@ -61,6 +61,11 @@ export function compareAgainstBaseline(
       burnDown.push(`${key} (${before} -> ${count})`);
     }
   }
+  for (const [key, before] of Object.entries(baseline)) {
+    if (!current.has(key) && before > 0) {
+      burnDown.push(`${key} (${before} -> 0)`);
+    }
+  }
   return { failures, burnDown };
 }
 
