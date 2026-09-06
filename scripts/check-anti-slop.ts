@@ -97,6 +97,14 @@ export function collectCurrentViolations(root: string): Map<string, number> {
   return countByRuleAndFile(parseAntiSlopDiagnostics(output));
 }
 
+export function sortedBaselineEntries(
+  current: Map<string, number>,
+): Array<[string, number]> {
+  return [...current.entries()].sort(([left], [right]) =>
+    left < right ? -1 : left > right ? 1 : 0,
+  );
+}
+
 function readBaseline(root: string): Record<string, number> {
   return JSON.parse(readFileSync(resolve(root, BASELINE_PATH), "utf8")) as Record<string, number>;
 }
@@ -109,7 +117,7 @@ function main(): void {
   if (update) {
     writeFileSync(
       resolve(root, BASELINE_PATH),
-      `${JSON.stringify(Object.fromEntries(current), null, 2)}\n`,
+      `${JSON.stringify(Object.fromEntries(sortedBaselineEntries(current)), null, 2)}\n`,
     );
     const total = [...current.values()].reduce((sum, count) => sum + count, 0);
     console.log(`Baseline updated: ${current.size} rule/file entries, ${total} violations.`);

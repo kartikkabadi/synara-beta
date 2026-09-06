@@ -9,7 +9,23 @@ import {
   countByRuleAndFile,
   compareAgainstBaseline,
   parseAntiSlopDiagnostics,
+  sortedBaselineEntries,
 } from "./check-anti-slop.ts";
+
+describe("sortedBaselineEntries", () => {
+  it("writes entries in stable key order regardless of diagnostic order", () => {
+    const current = new Map<string, number>([
+      ["anti-slop(no-runtime-typeof):b.ts", 1],
+      ["anti-slop(no-module-mocking):a.ts", 2],
+      ["anti-slop(no-runtime-typeof):a.ts", 3],
+    ]);
+    expect(sortedBaselineEntries(current).map(([key]) => key)).toEqual([
+      "anti-slop(no-module-mocking):a.ts",
+      "anti-slop(no-runtime-typeof):a.ts",
+      "anti-slop(no-runtime-typeof):b.ts",
+    ]);
+  });
+});
 
 describe("parseAntiSlopDiagnostics", () => {
   it("keeps anti-slop diagnostics and drops every other plugin", () => {
