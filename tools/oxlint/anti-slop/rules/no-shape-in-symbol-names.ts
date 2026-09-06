@@ -27,16 +27,20 @@ function isDeclaredName(node: NamedNode): boolean {
       return parent.id === node || (parent.params as readonly unknown[]).includes(node);
     case "ArrowFunctionExpression":
     case "TSEmptyBodyFunctionExpression":
-    case "TSDeclareFunction":
       return (parent.params as readonly unknown[]).includes(node);
     case "TSParameterProperty":
       return parent.parameter === node;
     case "PropertyDefinition":
     case "MethodDefinition":
-    case "Property":
     case "TSPropertySignature":
     case "TSMethodSignature":
       return parent.key === node && !parent.computed;
+    case "Property":
+      return parent.parent?.type === "ObjectPattern"
+        ? parent.value === node
+        : parent.key === node && !parent.computed;
+    case "ArrayPattern":
+      return (parent.elements as readonly unknown[]).includes(node);
     case "AssignmentPattern":
       return parent.left === node;
     case "RestElement":
@@ -49,6 +53,8 @@ function isDeclaredName(node: NamedNode): boolean {
       return parent.key === node;
     case "TSIndexSignature":
       return (parent.parameters as readonly unknown[]).includes(node);
+    case "TSDeclareFunction":
+      return parent.id === node || (parent.params as readonly unknown[]).includes(node);
     default:
       return false;
   }
