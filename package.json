@@ -41,6 +41,7 @@
     "typecheck:native": "bun run typecheck",
     "typecheck:legacy": "turbo run typecheck:legacy",
     "lint": "oxlint --report-unused-disable-directives",
+    "lint:anti-slop": "node scripts/check-anti-slop.ts",
     "test": "turbo run test",
     "test:web:focused": "bun run --cwd apps/web test",
     "brand:check": "node scripts/check-brand-identity.ts",
