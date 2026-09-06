@@ -1044,11 +1044,20 @@ export async function undoStableSync(options?: {
   const snapshotDb = path.join(latestSnapshot, SNAPSHOT_DB_FILE);
   if (fsSync.existsSync(snapshotDb)) {
     const betaDb = path.join(betaUserdata, SNAPSHOT_DB_FILE);
-    await fs.copyFile(snapshotDb, betaDb);
-    await fs.chmod(betaDb, PRIVATE_FILE_MODE);
-    await fs.rm(`${betaDb}-wal`, { force: true });
-    await fs.rm(`${betaDb}-shm`, { force: true });
-    restored.push(SNAPSHOT_DB_FILE);
+    // Same guard as the sync path: a raw copy over a live database (with
+    // unsynchronized WAL pages) corrupts it, so restore only a quiet Beta.
+    const { isRunning: isBetaRunning, pid } = await readLifecycleLockOwner(betaDb);
+    if (isBetaRunning) {
+      unrestorable.push(
+        `${SNAPSHOT_DB_FILE} (Beta Synara is running${pid === null ? "" : `, PID ${pid}`}; close it and run --undo again to restore the database)`,
+      );
+    } else {
+      await fs.copyFile(snapshotDb, betaDb);
+      await fs.chmod(betaDb, PRIVATE_FILE_MODE);
+      await fs.rm(`${betaDb}-wal`, { force: true });
+      await fs.rm(`${betaDb}-shm`, { force: true });
+      restored.push(SNAPSHOT_DB_FILE);
+    }
   } else if (manifest?.stateSqlite === "present") {
     unrestorable.push(`${SNAPSHOT_DB_FILE} (snapshot bytes missing)`);
   }

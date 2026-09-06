@@ -73,7 +73,7 @@ bun run sync:stable --no-settings --no-keybindings --no-skills --no-mcp --no-pro
 bun run sync:stable --undo
 ```
 
-Reverts Beta's configuration back to the pre-sync snapshot.
+Reverts Beta's configuration back to the pre-sync snapshot. If Beta Synara is running, file assets are restored but `state.sqlite` is left untouched (the same live-database guard the sync path applies); close Beta and run `--undo` again to restore the database.
 
 ### Continuous Auto-Sync (Watch Mode)
 

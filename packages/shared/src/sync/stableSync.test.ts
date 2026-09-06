@@ -437,6 +437,62 @@ describe("stableSync", () => {
     }
   });
 
+  it("undo skips the database restore while Beta is running", async () => {
+    const rootTmp = await fs.mkdtemp(path.join(os.tmpdir(), "synara-undo-live-"));
+    const betaHome = path.join(rootTmp, "beta");
+    try {
+      await fs.mkdir(path.join(betaHome, "userdata"), { recursive: true });
+      await fs.writeFile(path.join(betaHome, "userdata", "state.sqlite"), "live-beta-db");
+      await fs.writeFile(
+        path.join(betaHome, "userdata", "settings.json"),
+        JSON.stringify({ settings: { appearance: { theme: "synced" } } }),
+      );
+
+      // Simulate a live Beta: lifecycle lock owned by this live test process.
+      const lockDir = path.join(betaHome, "userdata", "state.sqlite.lifecycle-lock");
+      await fs.mkdir(lockDir, { recursive: true });
+      await fs.writeFile(path.join(lockDir, "owner.json"), JSON.stringify({ pid: process.pid }));
+
+      // Hand-built pre-sync snapshot holding an older database plus settings.
+      const snapshotDir = path.join(betaHome, "userdata", "backups", "pre-sync-test");
+      await fs.mkdir(snapshotDir, { recursive: true });
+      await fs.writeFile(path.join(snapshotDir, "state.sqlite"), "pre-sync-db");
+      await fs.writeFile(
+        path.join(snapshotDir, "settings.json"),
+        JSON.stringify({ settings: { appearance: { theme: "pre-sync" } } }),
+      );
+      await fs.writeFile(
+        path.join(snapshotDir, "manifest.json"),
+        JSON.stringify({
+          createdAt: new Date().toISOString(),
+          settingsJson: "present",
+          keybindingsJson: "absent",
+          skills: "absent",
+          mcp: "absent",
+          stateSqlite: "present",
+          importMarker: "absent",
+        }),
+      );
+
+      const undoResult = await undoStableSync({ betaHome });
+      NodeAssert.equal(undoResult.success, true);
+      NodeAssert.match(undoResult.message, /Beta Synara is running/);
+      NodeAssert.match(undoResult.message, /state\.sqlite/);
+
+      // The live database bytes must be untouched; file assets still restore.
+      NodeAssert.equal(
+        await fs.readFile(path.join(betaHome, "userdata", "state.sqlite"), "utf8"),
+        "live-beta-db",
+      );
+      const revertedSettings = JSON.parse(
+        await fs.readFile(path.join(betaHome, "userdata", "settings.json"), "utf8"),
+      );
+      NodeAssert.equal(revertedSettings.settings.appearance.theme, "pre-sync");
+    } finally {
+      await fs.rm(rootTmp, { recursive: true, force: true });
+    }
+  });
+
   it("matches project SQL to the live projection_projects schema", () => {
     const liveColumns = new Set<string>(CURRENT_PROJECT_COLUMNS);
     const select = buildProjectSelect(liveColumns);
