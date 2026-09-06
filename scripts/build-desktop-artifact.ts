@@ -22,6 +22,10 @@ import {
   validateDesktopNativeBuildHost,
 } from "./lib/desktop-platform-build-config.ts";
 import { synaraDesktopIdentity } from "@synara/shared/desktopIdentity";
+import {
+  findUnsatisfiedPeers,
+  type StagedPackageManifest,
+} from "./lib/staged-peer-dependencies.ts";
 import { parseBooleanEnvValue } from "./lib/env-bool.ts";
 import { finalizeSignedMacDmg } from "./lib/mac-dmg-finalize.ts";
 import { finalizeMacUpdateZip } from "./lib/mac-update-zip-finalize.ts";
@@ -649,6 +653,58 @@ const verifyStagedPatchedDependencies = Effect.fn("verifyStagedPatchedDependenci
   }
 });
 
+// The production-only staged install does not fetch peer dependencies unless a
+// workspace package depends on them directly, so a runtime peer that only
+// exists in dev installs (the ACP SDK's zod in v0.8.2) ships missing and
+// crashes the packaged app at first use. Fail the build unless every
+// non-optional peer of every staged package resolves inside the stage.
+const readStagedPackageManifest = (manifestPath: string): StagedPackageManifest | undefined => {
+  try {
+    return JSON.parse(readFileSync(manifestPath, "utf8")) as StagedPackageManifest;
+  } catch {
+    return undefined;
+  }
+};
+
+const verifyStagedPeerDependencies = Effect.fn("verifyStagedPeerDependencies")(function* (
+  stageAppDir: string,
+) {
+  const path = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
+  yield* Effect.log("[desktop-artifact] Verifying staged peer dependencies...");
+  const nodeModulesDir = path.join(stageAppDir, "node_modules");
+  const stagedManifests: StagedPackageManifest[] = [];
+  const present = new Set<string>();
+  const readManifest = (packageDir: string): StagedPackageManifest | undefined =>
+    readStagedPackageManifest(path.join(packageDir, "package.json"));
+  for (const entry of yield* fs.readDirectory(nodeModulesDir)) {
+    const entryPath = path.join(nodeModulesDir, entry);
+    if (entry.startsWith("@")) {
+      for (const scopedEntry of yield* fs.readDirectory(entryPath)) {
+        const manifest = readManifest(path.join(entryPath, scopedEntry));
+        if (manifest !== undefined) {
+          stagedManifests.push(manifest);
+          present.add(`${entry}/${scopedEntry}`);
+        }
+      }
+      continue;
+    }
+    const manifest = readManifest(entryPath);
+    if (manifest !== undefined) {
+      stagedManifests.push(manifest);
+      present.add(entry);
+    }
+  }
+  const unsatisfied = findUnsatisfiedPeers(stagedManifests, present);
+  if (unsatisfied.length === 0) {
+    return;
+  }
+  const described = unsatisfied.map(({ from, peer }) => `${peer} (required by ${from})`).join(", ");
+  return yield* new BuildScriptError({
+    message: `Staged node_modules is missing non-optional peer dependencies: ${described}. Add each peer to the requiring workspace package's dependencies so the production-only staged install ships it.`,
+  });
+});
+
 const installFrozenStageDependencies = Effect.fn("installFrozenStageDependencies")(function* (
   repoRoot: string,
   stageAppDir: string,
@@ -713,6 +769,7 @@ const installFrozenStageDependencies = Effect.fn("installFrozenStageDependencies
   }
 
   yield* verifyStagedPatchedDependencies(repoRoot, stageAppDir);
+  yield* verifyStagedPeerDependencies(stageAppDir);
 
   for (const relativePath of RELEASE_WORKSPACE_MANIFEST_PATHS) {
     if (relativePath !== "package.json") {
