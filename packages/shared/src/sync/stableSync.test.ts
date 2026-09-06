@@ -198,6 +198,12 @@ describe("stableSync", () => {
       });
 
       NodeAssert.equal(result.success, true);
+      NodeAssert.equal(result.items.find((entry) => entry.item === "settings")?.status, "synced");
+      NodeAssert.equal(
+        result.items.find((entry) => entry.item === "keybindings")?.status,
+        "synced",
+      );
+      NodeAssert.equal(result.items.find((entry) => entry.item === "skills")?.status, "synced");
       NodeAssert.ok(result.snapshotBackupPath);
 
       // Verify synced files in Beta
@@ -235,6 +241,40 @@ describe("stableSync", () => {
     }
   });
 
+  it("records a failed keybindings item instead of copying corrupt JSON", async () => {
+    const rootTmp = await fs.mkdtemp(path.join(os.tmpdir(), "synara-bad-keybindings-"));
+    const stableHome = path.join(rootTmp, "stable");
+    const betaHome = path.join(rootTmp, "beta");
+    try {
+      await fs.mkdir(path.join(stableHome, "userdata"), { recursive: true });
+      await fs.mkdir(path.join(betaHome, "userdata"), { recursive: true });
+      await fs.writeFile(path.join(stableHome, "userdata", "keybindings.json"), "{ not valid json");
+      await fs.writeFile(
+        path.join(betaHome, "userdata", "keybindings.json"),
+        JSON.stringify({ "cmd+k": "beta-original" }),
+      );
+
+      const result = await performStableSync({
+        stableHome,
+        betaHome,
+        includeSettings: false,
+        includeSkills: false,
+        includeMcp: false,
+        includeProjects: false,
+      });
+
+      const keybindingsItem = result.items.find((entry) => entry.item === "keybindings");
+      NodeAssert.equal(keybindingsItem?.status, "failed");
+      NodeAssert.equal(result.success, false);
+      const betaKeybindings = JSON.parse(
+        await fs.readFile(path.join(betaHome, "userdata", "keybindings.json"), "utf8"),
+      );
+      NodeAssert.equal(betaKeybindings["cmd+k"], "beta-original");
+    } finally {
+      await fs.rm(rootTmp, { recursive: true, force: true });
+    }
+  });
+
   it("replaces symlinked destination entries instead of following them", async () => {
     if (process.platform === "win32") return;
     const rootTmp = await fs.mkdtemp(path.join(os.tmpdir(), "synara-sneaky-dest-"));
@@ -249,8 +289,10 @@ describe("stableSync", () => {
       await fs.writeFile(path.join(outsideDir, "sentinel.txt"), "do-not-touch");
       try {
         await fs.symlink(outsideDir, path.join(destDir, "sub"));
-      } catch {
-        return;
+      } catch (symlinkError) {
+        NodeAssert.fail(
+          `Symlink setup failed, cannot verify destination replacement: ${String(symlinkError)}`,
+        );
       }
 
       await copyDirectoryTree(srcDir, destDir);

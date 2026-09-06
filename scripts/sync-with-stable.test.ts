@@ -20,7 +20,9 @@ describe("sync-with-stable CLI", () => {
     const parsed = parseSyncArgs([
       "--no-projects",
       "--no-settings",
+      "--no-keybindings",
       "--no-skills",
+      "--no-mcp",
       "--force",
       "--stable-home",
       "/tmp/stable",
@@ -29,7 +31,9 @@ describe("sync-with-stable CLI", () => {
     ]);
     NodeAssert.equal(parsed.includeProjects, false);
     NodeAssert.equal(parsed.includeSettings, false);
+    NodeAssert.equal(parsed.includeKeybindings, false);
     NodeAssert.equal(parsed.includeSkills, false);
+    NodeAssert.equal(parsed.includeMcp, false);
     NodeAssert.equal(parsed.force, true);
     NodeAssert.equal(parsed.stableHome, "/tmp/stable");
     NodeAssert.equal(parsed.betaHome, "/tmp/beta");
@@ -39,7 +43,9 @@ describe("sync-with-stable CLI", () => {
     const parsed = parseSyncArgs([]);
     NodeAssert.equal(parsed.includeProjects, true);
     NodeAssert.equal(parsed.includeSettings, true);
+    NodeAssert.equal(parsed.includeKeybindings, true);
     NodeAssert.equal(parsed.includeSkills, true);
+    NodeAssert.equal(parsed.includeMcp, true);
     NodeAssert.equal(parsed.statusMode, false);
     NodeAssert.equal(parsed.watchMode, false);
     NodeAssert.equal(parsed.unknownOption, undefined);

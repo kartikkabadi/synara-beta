@@ -8,6 +8,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
+import { expandHomePath } from "../synaraHome";
 
 export interface SyncPaths {
   readonly stableHome: string;
@@ -60,8 +61,19 @@ export interface UndoResult {
 const IMPORTED_MARKER_FILE = ".imported-from-stable";
 const STABLE_DEFAULT_DIR = ".synara";
 const BETA_DEFAULT_DIR = ".synara-beta";
+/** Stable-relative file assets the engine reads, shared with the CLI fingerprint. */
+export const STABLE_SYNCED_FILES = [
+  "userdata/settings.json",
+  "userdata/keybindings.json",
+  "userdata/state.sqlite",
+] as const;
+/** Stable-relative directory assets the engine reads, shared with the CLI fingerprint. */
+export const STABLE_SYNCED_DIRS = ["skills", "mcp"] as const;
+
 /** Private file mode so copied credentials are not exposed by group/world-readable umasks. */
 const PRIVATE_FILE_MODE = 0o600;
+/** Owner-execute bit preserved from sources so synced skill scripts stay runnable. */
+const OWNER_EXECUTE_BIT = 0o100;
 /** Private directory mode for created sync directories and snapshots. */
 const PRIVATE_DIR_MODE = 0o700;
 /** Maximum number of pre-sync snapshots retained per Beta home. */
@@ -72,15 +84,19 @@ export function resolveSyncPaths(options?: {
   betaHome?: string | undefined;
 }): SyncPaths {
   const homeDir = os.homedir();
-  const stableHome =
+  const stableHome = expandHomePath(
     options?.stableHome?.trim() ||
-    process.env.SYNARA_STABLE_HOME?.trim() ||
-    path.join(homeDir, STABLE_DEFAULT_DIR);
+      process.env.SYNARA_STABLE_HOME?.trim() ||
+      path.join(homeDir, STABLE_DEFAULT_DIR),
+    homeDir,
+  );
 
-  const betaHome =
+  const betaHome = expandHomePath(
     options?.betaHome?.trim() ||
-    process.env.SYNARA_HOME?.trim() ||
-    path.join(homeDir, BETA_DEFAULT_DIR);
+      process.env.SYNARA_HOME?.trim() ||
+      path.join(homeDir, BETA_DEFAULT_DIR),
+    homeDir,
+  );
 
   return {
     stableHome: path.resolve(stableHome),
@@ -156,13 +172,7 @@ export async function checkSyncAvailability(options?: {
     };
   }
 
-  let stableExists = false;
-  try {
-    const stat = await fs.stat(paths.stableHome);
-    stableExists = stat.isDirectory();
-  } catch {
-    stableExists = false;
-  }
+  const stableExists = isExistingDirectory(paths.stableHome);
 
   if (!stableExists) {
     return {
@@ -186,19 +196,8 @@ export async function checkSyncAvailability(options?: {
   const stableMcpDir = path.join(paths.stableHome, "mcp");
   const stableDbPath = path.join(paths.stableHome, "userdata", "state.sqlite");
 
-  let stableSettingsExists = false;
-  try {
-    stableSettingsExists = (await fs.stat(stableSettingsPath)).isFile();
-  } catch {
-    stableSettingsExists = false;
-  }
-
-  let stableKeybindingsExists = false;
-  try {
-    stableKeybindingsExists = (await fs.stat(stableKeybindingsPath)).isFile();
-  } catch {
-    stableKeybindingsExists = false;
-  }
+  const stableSettingsExists = fsSync.existsSync(stableSettingsPath);
+  const stableKeybindingsExists = fsSync.existsSync(stableKeybindingsPath);
 
   let stableSkillsCount = 0;
   try {
@@ -208,21 +207,11 @@ export async function checkSyncAvailability(options?: {
     stableSkillsCount = 0;
   }
 
-  let stableMcpExists = false;
-  try {
-    stableMcpExists = (await fs.stat(stableMcpDir)).isDirectory();
-  } catch {
-    stableMcpExists = false;
-  }
+  const stableMcpExists = isExistingDirectory(stableMcpDir);
 
-  let betaExists = false;
-  let hasBeenImportedBefore = false;
-  try {
-    betaExists = (await fs.stat(paths.betaHome)).isDirectory();
-    hasBeenImportedBefore = fsSync.existsSync(path.join(paths.betaHome, IMPORTED_MARKER_FILE));
-  } catch {
-    betaExists = false;
-  }
+  const betaExists = isExistingDirectory(paths.betaHome);
+  const hasBeenImportedBefore =
+    betaExists && fsSync.existsSync(path.join(paths.betaHome, IMPORTED_MARKER_FILE));
 
   const { isRunning, pid } = await readLifecycleLockOwner(stableDbPath);
 
@@ -360,7 +349,12 @@ async function copyTreeInto(
     } else if (entry.isFile()) {
       await removeSymlinkedDestination(destPath);
       const content = await fs.readFile(srcPath);
-      await writeAtomicFile(destPath, content, fileMode);
+      // Preserve source owner-execute so synced scripts and hooks stay runnable;
+      // group/other bits always stay private.
+      const srcMode = (await fs.lstat(srcPath)).mode;
+      const destMode =
+        (srcMode & OWNER_EXECUTE_BIT) !== 0 ? fileMode | OWNER_EXECUTE_BIT : fileMode;
+      await writeAtomicFile(destPath, content, destMode);
       copiedCount += 1;
     }
   }
@@ -373,13 +367,13 @@ export type SnapshotAssetPresence = "present" | "absent";
 
 /** Records which Beta assets a snapshot holds, including assets absent before sync. */
 export interface BetaSnapshotManifest {
-  readonly createdAt: string;
-  readonly settingsJson: SnapshotAssetPresence;
-  readonly keybindingsJson: SnapshotAssetPresence;
-  readonly skills: SnapshotAssetPresence;
-  readonly mcp: SnapshotAssetPresence;
-  readonly stateSqlite: SnapshotAssetPresence;
-  readonly importMarker: SnapshotAssetPresence;
+  createdAt: string;
+  settingsJson: SnapshotAssetPresence;
+  keybindingsJson: SnapshotAssetPresence;
+  skills: SnapshotAssetPresence;
+  mcp: SnapshotAssetPresence;
+  stateSqlite: SnapshotAssetPresence;
+  importMarker: SnapshotAssetPresence;
 }
 
 const SNAPSHOT_MANIFEST_FILE = "manifest.json";
@@ -421,7 +415,7 @@ export async function createBetaSnapshot(betaHome: string): Promise<string | und
   const snapshotDir = path.join(backupRoot, `pre-sync-${timestamp}`);
   await fs.mkdir(snapshotDir, { recursive: true, mode: PRIVATE_DIR_MODE });
 
-  const manifest: { -readonly [K in keyof BetaSnapshotManifest]: BetaSnapshotManifest[K] } = {
+  const manifest: BetaSnapshotManifest = {
     createdAt: new Date().toISOString(),
     settingsJson: "absent",
     keybindingsJson: "absent",
@@ -455,14 +449,21 @@ export async function createBetaSnapshot(betaHome: string): Promise<string | und
   }
 
   // Snapshot Beta state.sqlite bytes before any project merge touches them.
+  // When Beta itself is running the file may be mid-write, so skip the byte
+  // snapshot (the projects merge is skipped too) instead of storing a torn copy.
   const betaDb = path.join(betaUserdata, SNAPSHOT_DB_FILE);
-  if (fsSync.existsSync(betaDb)) {
+  const { isRunning: isBetaRunning } = await readLifecycleLockOwner(betaDb);
+  if (!isBetaRunning && fsSync.existsSync(betaDb)) {
     await fs.copyFile(betaDb, path.join(snapshotDir, SNAPSHOT_DB_FILE));
     await fs.chmod(path.join(snapshotDir, SNAPSHOT_DB_FILE), PRIVATE_FILE_MODE);
     manifest.stateSqlite = "present";
   }
 
   if (fsSync.existsSync(betaMarker)) {
+    const markerContent = await fs.readFile(betaMarker);
+    await fs.writeFile(path.join(snapshotDir, IMPORTED_MARKER_FILE), markerContent, {
+      mode: PRIVATE_FILE_MODE,
+    });
     manifest.importMarker = "present";
   }
 
@@ -523,6 +524,7 @@ type SqliteStatement = {
 
 type SqliteDatabase = {
   prepare: (query: string) => SqliteStatement;
+  exec: (sql: string) => void;
   close: () => void;
 };
 
@@ -645,8 +647,10 @@ export async function extractProjectsFromDatabase(
 
 /**
  * Imports projects into Beta's state.sqlite if present.
- * Backs up the Beta database file before mutating it, then upserts with the
- * live projection_projects columns the file actually has.
+ * Upserts inside one transaction with the live projection_projects columns
+ * the file actually has, so a mid-merge failure rolls back instead of
+ * leaving a partially merged registry. The pre-sync snapshot (not a
+ * sidecar file) is the rollback path for undo.
  */
 export async function mergeProjectsIntoBetaDatabase(
   betaDbPath: string,
@@ -657,13 +661,6 @@ export async function mergeProjectsIntoBetaDatabase(
   try {
     const DatabaseSync = loadSqlite();
     if (DatabaseSync === undefined) return 0;
-    try {
-      await fs.copyFile(betaDbPath, `${betaDbPath}.pre-merge-backup`);
-    } catch {
-      // Without a pre-merge backup, mutating Beta state is unsafe. Report
-      // zero merged rows so the caller records a skipped projects item.
-      return 0;
-    }
     const db = new DatabaseSync(betaDbPath, { readOnly: false });
     try {
       const existingColumns = readTableColumns(db, "projection_projects");
@@ -674,14 +671,28 @@ export async function mergeProjectsIntoBetaDatabase(
       if (query === undefined) return 0;
       const stmt = db.prepare(query);
       let mergedCount = 0;
-      for (const project of projects) {
-        if (typeof project.project_id !== "string") continue;
-        const values = writable.map((column) => {
-          const value = project[column];
-          return value === undefined ? projectColumnFallback(column) : value;
-        });
-        stmt.run(...values);
-        mergedCount += 1;
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        for (const project of projects) {
+          if (typeof project.project_id !== "string") continue;
+          const values = writable.map((column) => {
+            const value = project[column];
+            return value === undefined ? projectColumnFallback(column) : value;
+          });
+          stmt.run(...values);
+          mergedCount += 1;
+        }
+        db.exec("COMMIT");
+      } catch (loopError) {
+        try {
+          db.exec("ROLLBACK");
+        } catch (rollbackError) {
+          throw new Error(
+            `Project merge failed (${String(loopError)}) and rollback failed: ${String(rollbackError)}`,
+            { cause: rollbackError },
+          );
+        }
+        throw loopError;
       }
       return mergedCount;
     } finally {
@@ -698,9 +709,184 @@ export async function mergeProjectsIntoBetaDatabase(
 
 /** True for SQLite busy/locked/schema-mismatch failures sync must tolerate. */
 function isTolerableSqliteFailure(error: Error): boolean {
-  return /database is locked|database is busy|database table is locked|readonly|unable to open|no such table|no such column|unknown database|disk i\/o error|database disk image is malformed/i.test(
+  return /database is locked|database is busy|database table is locked|attempt to write a readonly database|unable to open|no such table|no such column|unknown database|disk i\/o error|database disk image is malformed/i.test(
     error.message,
   );
+}
+
+/** Syncs settings.json from Stable, sanitizing embedded credentials. */
+async function syncSettingsAsset(
+  paths: SyncPaths,
+  enabled: boolean,
+  present: boolean,
+): Promise<SyncResultItem> {
+  if (!enabled) {
+    return { item: "settings", status: "skipped", detail: "Settings sync excluded by option." };
+  }
+  if (!present) {
+    return { item: "settings", status: "skipped", detail: "Settings file not present in Stable." };
+  }
+  const stableFile = path.join(paths.stableHome, "userdata", "settings.json");
+  try {
+    const raw = await fs.readFile(stableFile, "utf8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const sanitized = sanitizeSettings(parsed);
+    await writeAtomicFile(
+      path.join(paths.betaHome, "userdata", "settings.json"),
+      JSON.stringify(sanitized, null, 2) + "\n",
+      PRIVATE_FILE_MODE,
+    );
+    return {
+      item: "settings",
+      status: "synced",
+      detail: "Settings synced and sanitized (opencode server password removed).",
+    };
+  } catch (err: unknown) {
+    return { item: "settings", status: "failed", detail: `Settings ${stableFile}: ${String(err)}` };
+  }
+}
+
+/** Syncs keybindings.json verbatim after JSON validation. */
+async function syncKeybindingsAsset(
+  paths: SyncPaths,
+  enabled: boolean,
+  present: boolean,
+): Promise<SyncResultItem> {
+  if (!enabled) {
+    return {
+      item: "keybindings",
+      status: "skipped",
+      detail: "Keybindings sync excluded by option.",
+    };
+  }
+  if (!present) {
+    return {
+      item: "keybindings",
+      status: "skipped",
+      detail: "Keybindings file not present in Stable.",
+    };
+  }
+  const stableFile = path.join(paths.stableHome, "userdata", "keybindings.json");
+  try {
+    const content = await fs.readFile(stableFile, "utf8");
+    JSON.parse(content);
+    await writeAtomicFile(
+      path.join(paths.betaHome, "userdata", "keybindings.json"),
+      content,
+      PRIVATE_FILE_MODE,
+    );
+    return { item: "keybindings", status: "synced", detail: "Keybindings synced." };
+  } catch (err: unknown) {
+    return {
+      item: "keybindings",
+      status: "failed",
+      detail: `Keybindings ${stableFile}: ${String(err)}`,
+    };
+  }
+}
+
+/** Syncs the Stable skills tree into Beta. */
+async function syncSkillsAsset(
+  paths: SyncPaths,
+  enabled: boolean,
+  skillCount: number,
+): Promise<SyncResultItem> {
+  if (!enabled) {
+    return { item: "skills", status: "skipped", detail: "Skills sync excluded by option." };
+  }
+  if (skillCount === 0) {
+    return { item: "skills", status: "skipped", detail: "No custom skills found in Stable." };
+  }
+  const srcSkills = path.join(paths.stableHome, "skills");
+  try {
+    const copied = await copyDirectoryTree(srcSkills, path.join(paths.betaHome, "skills"));
+    return { item: "skills", status: "synced", detail: `Synced ${copied} skills.` };
+  } catch (err: unknown) {
+    return { item: "skills", status: "failed", detail: `Skills ${srcSkills}: ${String(err)}` };
+  }
+}
+
+/** Syncs the Stable MCP configuration tree into Beta. */
+async function syncMcpAsset(
+  paths: SyncPaths,
+  enabled: boolean,
+  present: boolean,
+): Promise<SyncResultItem> {
+  if (!enabled) {
+    return { item: "mcp", status: "skipped", detail: "MCP sync excluded by option." };
+  }
+  if (!present) {
+    return { item: "mcp", status: "skipped", detail: "No MCP configurations found in Stable." };
+  }
+  const srcMcp = path.join(paths.stableHome, "mcp");
+  try {
+    const copied = await copyDirectoryTree(srcMcp, path.join(paths.betaHome, "mcp"));
+    return {
+      item: "mcp",
+      status: "synced",
+      detail: `Synced MCP configurations (${copied} entries).`,
+    };
+  } catch (err: unknown) {
+    return { item: "mcp", status: "failed", detail: `MCP ${srcMcp}: ${String(err)}` };
+  }
+}
+
+/**
+ * Syncs project rows unless a Stable or Beta database is live.
+ * Returns undefined when project sync is excluded by option (no result item).
+ */
+async function syncProjectsAsset(
+  paths: SyncPaths,
+  enabled: boolean,
+  availability: SyncAvailability,
+): Promise<SyncResultItem | undefined> {
+  if (!enabled) return undefined;
+  const stableDbPath = path.join(paths.stableHome, "userdata", "state.sqlite");
+  const betaDbPath = path.join(paths.betaHome, "userdata", "state.sqlite");
+  if (availability.isStableProcessRunning) {
+    return {
+      item: "projects",
+      status: "skipped",
+      detail: `Stable Synara is running (PID ${availability.stablePid}); database is locked. Settings and skills synced safely.`,
+    };
+  }
+  const { isRunning: isBetaRunning } = await readLifecycleLockOwner(betaDbPath);
+  if (isBetaRunning) {
+    return {
+      item: "projects",
+      status: "skipped",
+      detail: "Beta Synara is running; project rows skipped to avoid torn reads and writes.",
+    };
+  }
+  try {
+    const projects = await extractProjectsFromDatabase(stableDbPath);
+    if (projects.length > 0 && fsSync.existsSync(betaDbPath)) {
+      const merged = await mergeProjectsIntoBetaDatabase(betaDbPath, projects);
+      if (merged > 0) {
+        return { item: "projects", status: "synced", detail: `Imported ${merged} projects.` };
+      }
+      return {
+        item: "projects",
+        status: "skipped",
+        detail:
+          "Stable projects could not be merged (Beta database locked or unreadable); file assets synced.",
+      };
+    }
+    return {
+      item: "projects",
+      status: "skipped",
+      detail:
+        projects.length === 0
+          ? "No projects found in Stable database."
+          : "Beta database not yet initialized.",
+    };
+  } catch (err: unknown) {
+    return {
+      item: "projects",
+      status: "failed",
+      detail: `Projects ${stableDbPath}: ${String(err)}`,
+    };
+  }
 }
 
 /** Executes synchronization from Synara Stable into Synara Beta. */
@@ -725,148 +911,50 @@ export async function performStableSync(options?: SyncOptions): Promise<SyncResu
     };
   }
 
-  const items: SyncResultItem[] = [];
+  // Pin Beta userdata to a real directory (replacing a pre-existing symlink)
+  // so atomic file writes and snapshots cannot escape the Beta root.
+  await ensureRealDirectory(path.join(paths.betaHome, "userdata"));
+
   const snapshotPath = await createBetaSnapshot(paths.betaHome);
 
-  // 1. Sync Settings
-  if (options?.includeSettings !== false && availability.stableSettingsExists) {
-    try {
-      const stableSettingsFile = path.join(paths.stableHome, "userdata", "settings.json");
-      const betaSettingsFile = path.join(paths.betaHome, "userdata", "settings.json");
-      const raw = await fs.readFile(stableSettingsFile, "utf8");
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      const sanitized = sanitizeSettings(parsed);
-      await writeAtomicFile(
-        betaSettingsFile,
-        JSON.stringify(sanitized, null, 2) + "\n",
-        PRIVATE_FILE_MODE,
-      );
-      items.push({
-        item: "settings",
-        status: "synced",
-        detail: "Settings synced and sanitized (opencode server password removed).",
-      });
-    } catch (err: unknown) {
-      items.push({ item: "settings", status: "failed", detail: String(err) });
-    }
-  } else {
-    items.push({
-      item: "settings",
-      status: "skipped",
-      detail: "Settings file not present in Stable.",
-    });
-  }
-
-  // 2. Sync Keybindings
-  if (options?.includeKeybindings !== false && availability.stableKeybindingsExists) {
-    try {
-      const stableKeybindingsFile = path.join(paths.stableHome, "userdata", "keybindings.json");
-      const betaKeybindingsFile = path.join(paths.betaHome, "userdata", "keybindings.json");
-      const content = await fs.readFile(stableKeybindingsFile);
-      await writeAtomicFile(betaKeybindingsFile, content, PRIVATE_FILE_MODE);
-    } catch (err: unknown) {
-      items.push({ item: "keybindings", status: "failed", detail: String(err) });
-    }
-  } else {
-    items.push({
-      item: "keybindings",
-      status: "skipped",
-      detail: "Keybindings file not present in Stable.",
-    });
-  }
-
-  // 3. Sync Skills
-  if (options?.includeSkills !== false && availability.stableSkillsCount > 0) {
-    try {
-      const srcSkills = path.join(paths.stableHome, "skills");
-      const destSkills = path.join(paths.betaHome, "skills");
-      const copied = await copyDirectoryTree(srcSkills, destSkills);
-      items.push({ item: "skills", status: "synced", detail: `Synced ${copied} skills.` });
-    } catch (err: unknown) {
-      items.push({ item: "skills", status: "failed", detail: String(err) });
-    }
-  } else {
-    items.push({ item: "skills", status: "skipped", detail: "No custom skills found in Stable." });
-  }
-
-  // 4. Sync MCP Configurations
-  if (options?.includeMcp !== false && availability.stableMcpExists) {
-    try {
-      const srcMcp = path.join(paths.stableHome, "mcp");
-      const destMcp = path.join(paths.betaHome, "mcp");
-      const copied = await copyDirectoryTree(srcMcp, destMcp);
-      items.push({
-        item: "mcp",
-        status: "synced",
-        detail: `Synced MCP configurations (${copied} entries).`,
-      });
-    } catch (err: unknown) {
-      items.push({ item: "mcp", status: "failed", detail: String(err) });
-    }
-  } else {
-    items.push({
-      item: "mcp",
-      status: "skipped",
-      detail: "No MCP configurations found in Stable.",
-    });
-  }
-
-  // 5. Sync Projects (if requested and database is available)
-  if (options?.includeProjects !== false) {
-    const stableDbPath = path.join(paths.stableHome, "userdata", "state.sqlite");
-    const betaDbPath = path.join(paths.betaHome, "userdata", "state.sqlite");
-
-    if (availability.isStableProcessRunning) {
-      items.push({
-        item: "projects",
-        status: "skipped",
-        detail: `Stable Synara is running (PID ${availability.stablePid}); database is locked. Settings and skills synced safely.`,
-      });
-    } else {
-      const projects = await extractProjectsFromDatabase(stableDbPath);
-      if (projects.length > 0 && fsSync.existsSync(betaDbPath)) {
-        const merged = await mergeProjectsIntoBetaDatabase(betaDbPath, projects);
-        if (merged > 0) {
-          items.push({
-            item: "projects",
-            status: "synced",
-            detail: `Imported ${merged} projects.`,
-          });
-        } else {
-          items.push({
-            item: "projects",
-            status: "skipped",
-            detail:
-              "Stable projects could not be merged (Beta database locked or unreadable); file assets synced.",
-          });
-        }
-      } else {
-        items.push({
-          item: "projects",
-          status: "skipped",
-          detail:
-            projects.length === 0
-              ? "No projects found in Stable database."
-              : "Beta database not yet initialized.",
-        });
-      }
-    }
-  }
-
-  // Record import marker
-  await fs.mkdir(paths.betaHome, { recursive: true });
-  await fs.writeFile(
-    path.join(paths.betaHome, IMPORTED_MARKER_FILE),
-    JSON.stringify(
-      { importedAt: new Date().toISOString(), stableHome: paths.stableHome },
-      null,
-      2,
-    ) + "\n",
-    { mode: PRIVATE_FILE_MODE },
+  const items: SyncResultItem[] = [
+    await syncSettingsAsset(
+      paths,
+      options?.includeSettings !== false,
+      availability.stableSettingsExists,
+    ),
+    await syncKeybindingsAsset(
+      paths,
+      options?.includeKeybindings !== false,
+      availability.stableKeybindingsExists,
+    ),
+    await syncSkillsAsset(paths, options?.includeSkills !== false, availability.stableSkillsCount),
+    await syncMcpAsset(paths, options?.includeMcp !== false, availability.stableMcpExists),
+  ];
+  const projectsItem = await syncProjectsAsset(
+    paths,
+    options?.includeProjects !== false,
+    availability,
   );
+  if (projectsItem !== undefined) items.push(projectsItem);
 
-  const anyFailed = items.some((i) => i.status === "failed");
-  const anySynced = items.some((i) => i.status === "synced");
+  const anyFailed = items.some((entry) => entry.status === "failed");
+  const anySynced = items.some((entry) => entry.status === "synced");
+
+  // Record the import marker only when the sync actually changed something,
+  // so a no-op run never flips the previously-imported signal.
+  await fs.mkdir(paths.betaHome, { recursive: true });
+  if (anySynced) {
+    await fs.writeFile(
+      path.join(paths.betaHome, IMPORTED_MARKER_FILE),
+      JSON.stringify(
+        { importedAt: new Date().toISOString(), stableHome: paths.stableHome },
+        null,
+        2,
+      ) + "\n",
+      { mode: PRIVATE_FILE_MODE },
+    );
+  }
 
   return {
     success: anySynced && !anyFailed,
@@ -897,8 +985,7 @@ export async function undoStableSync(options?: {
 
   const snapshots = (await fs.readdir(backupRoot))
     .filter((snapshotName) => snapshotName.startsWith("pre-sync-"))
-    .toSorted()
-    .toReversed();
+    .toSorted((left, right) => (left < right ? 1 : left > right ? -1 : 0));
 
   const latestName = snapshots[0];
   if (latestName === undefined) {
@@ -909,6 +996,7 @@ export async function undoStableSync(options?: {
   const betaUserdata = path.join(paths.betaHome, "userdata");
   const manifest = await readSnapshotManifest(latestSnapshot);
   const restored: string[] = [];
+  const unrestorable: string[] = [];
 
   const snapshotFile = path.join(latestSnapshot, "settings.json");
   if (fsSync.existsSync(snapshotFile)) {
@@ -921,8 +1009,9 @@ export async function undoStableSync(options?: {
   } else if (manifest?.settingsJson === "absent") {
     await fs.rm(path.join(betaUserdata, "settings.json"), { force: true });
     restored.push("settings.json (removed; absent before sync)");
+  } else if (manifest?.settingsJson === "present") {
+    unrestorable.push("settings.json (snapshot bytes missing)");
   }
-
   const snapshotKeybindings = path.join(latestSnapshot, "keybindings.json");
   if (fsSync.existsSync(snapshotKeybindings)) {
     await writeAtomicFile(
@@ -934,8 +1023,9 @@ export async function undoStableSync(options?: {
   } else if (manifest?.keybindingsJson === "absent") {
     await fs.rm(path.join(betaUserdata, "keybindings.json"), { force: true });
     restored.push("keybindings.json (removed; absent before sync)");
+  } else if (manifest?.keybindingsJson === "present") {
+    unrestorable.push("keybindings.json (snapshot bytes missing)");
   }
-
   for (const assetName of ["skills", "mcp"] as const) {
     const snapshotDir = path.join(latestSnapshot, assetName);
     const betaDir = path.join(paths.betaHome, assetName);
@@ -946,6 +1036,8 @@ export async function undoStableSync(options?: {
     } else if (manifest?.[assetName] === "absent") {
       await fs.rm(betaDir, { recursive: true, force: true });
       restored.push(`${assetName}/ (removed; absent before sync)`);
+    } else if (manifest?.[assetName] === "present") {
+      unrestorable.push(`${assetName}/ (snapshot bytes missing)`);
     }
   }
 
@@ -957,20 +1049,36 @@ export async function undoStableSync(options?: {
     await fs.rm(`${betaDb}-wal`, { force: true });
     await fs.rm(`${betaDb}-shm`, { force: true });
     restored.push(SNAPSHOT_DB_FILE);
+  } else if (manifest?.stateSqlite === "present") {
+    unrestorable.push(`${SNAPSHOT_DB_FILE} (snapshot bytes missing)`);
   }
 
+  const snapshotMarker = path.join(latestSnapshot, IMPORTED_MARKER_FILE);
   if (manifest?.importMarker === "absent") {
     await fs.rm(path.join(paths.betaHome, IMPORTED_MARKER_FILE), { force: true });
+  } else if (manifest?.importMarker === "present") {
+    if (fsSync.existsSync(snapshotMarker)) {
+      await writeAtomicFile(
+        path.join(paths.betaHome, IMPORTED_MARKER_FILE),
+        await fs.readFile(snapshotMarker),
+        PRIVATE_FILE_MODE,
+      );
+      restored.push(IMPORTED_MARKER_FILE);
+    } else {
+      unrestorable.push(`${IMPORTED_MARKER_FILE} (snapshot bytes missing)`);
+    }
   }
 
   if (restored.length === 0) {
     return { success: false, message: `Snapshot at ${latestSnapshot} holds no restorable assets.` };
   }
 
+  const unrestorableNote =
+    unrestorable.length > 0 ? ` Unrestorable assets left as-is: ${unrestorable.join(", ")}.` : "";
   return {
     success: true,
     restoredFrom: latestSnapshot,
-    message: `Restored ${restored.join(", ")} from ${latestSnapshot}.`,
+    message: `Restored ${restored.join(", ")} from ${latestSnapshot}.${unrestorableNote}`,
   };
 }
 

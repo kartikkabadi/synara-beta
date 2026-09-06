@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
 import {
+  STABLE_SYNCED_DIRS,
+  STABLE_SYNCED_FILES,
   checkSyncAvailability,
   performStableSync,
   resolveSyncPaths,
@@ -25,7 +27,9 @@ export interface SyncCliOptions {
   readonly watchMode: boolean;
   readonly includeProjects: boolean;
   readonly includeSettings: boolean;
+  readonly includeKeybindings: boolean;
   readonly includeSkills: boolean;
+  readonly includeMcp: boolean;
   readonly force: boolean;
   readonly stableHome: string | undefined;
   readonly betaHome: string | undefined;
@@ -40,7 +44,9 @@ const DEFAULT_CLI_OPTIONS: SyncCliOptions = {
   watchMode: false,
   includeProjects: true,
   includeSettings: true,
+  includeKeybindings: true,
   includeSkills: true,
+  includeMcp: true,
   force: false,
   stableHome: undefined,
   betaHome: undefined,
@@ -65,7 +71,9 @@ export function parseSyncArgs(args: readonly string[]): SyncCliOptions {
     else if (arg === "--force") parsed.force = true;
     else if (arg === "--no-projects") parsed.includeProjects = false;
     else if (arg === "--no-settings") parsed.includeSettings = false;
+    else if (arg === "--no-keybindings") parsed.includeKeybindings = false;
     else if (arg === "--no-skills") parsed.includeSkills = false;
+    else if (arg === "--no-mcp") parsed.includeMcp = false;
     else if (arg === "--stable-home" && i + 1 < args.length) {
       parsed.stableHome = args[++i];
     } else if (arg === "--beta-home" && i + 1 < args.length) {
@@ -126,18 +134,14 @@ function summarizeFile(filePath: string): string {
  * Stable has not changed instead of overwriting Beta edits on every tick.
  */
 export function getStableFingerprint(stableHome: string): string {
-  const entries: string[] = [];
-  entries.push(`settings:${summarizeFile(path.join(stableHome, "userdata", "settings.json"))}`);
-  entries.push(
-    `keybindings:${summarizeFile(path.join(stableHome, "userdata", "keybindings.json"))}`,
+  const entries: string[] = STABLE_SYNCED_FILES.map(
+    (relative) => `${relative}:${summarizeFile(path.join(stableHome, relative))}`,
   );
-  const skillsEntries: string[] = [];
-  summarizeTree(path.join(stableHome, "skills"), skillsEntries);
-  entries.push(`skills:${skillsEntries.join(",")}`);
-  const mcpEntries: string[] = [];
-  summarizeTree(path.join(stableHome, "mcp"), mcpEntries);
-  entries.push(`mcp:${mcpEntries.join(",")}`);
-  entries.push(`db:${summarizeFile(path.join(stableHome, "userdata", "state.sqlite"))}`);
+  for (const relative of STABLE_SYNCED_DIRS) {
+    const treeEntries: string[] = [];
+    summarizeTree(path.join(stableHome, relative), treeEntries);
+    entries.push(`${relative}:${treeEntries.join(",")}`);
+  }
   return entries.join("|");
 }
 
@@ -159,8 +163,10 @@ Options:
   --beta-home <dir>     Path to Synara Beta home (default: ~/.synara-beta)
   --no-projects         Skip SQLite project synchronization
   --no-settings         Skip settings synchronization
+  --no-keybindings      Skip keybindings synchronization
   --no-skills           Skip skills synchronization
-  --force               Force synchronization even if already imported
+  --no-mcp              Skip MCP configuration synchronization
+  --force               Force synchronization when Stable reports no syncable assets
   -h, --help            Show this help message
 
 Examples:
@@ -217,11 +223,12 @@ async function main(): Promise<void> {
       console.log("[Dry Run] Items that would be synced:");
       if (cli.includeSettings && availability.stableSettingsExists)
         console.log("  • userdata/settings.json (sanitized: opencode server password removed)");
-      if (availability.stableKeybindingsExists)
+      if (cli.includeKeybindings && availability.stableKeybindingsExists)
         console.log("  • userdata/keybindings.json (verbatim)");
       if (cli.includeSkills && availability.stableSkillsCount > 0)
         console.log(`  • skills/ (${availability.stableSkillsCount} skills)`);
-      if (availability.stableMcpExists) console.log("  • mcp/ (custom server configurations)");
+      if (cli.includeMcp && availability.stableMcpExists)
+        console.log("  • mcp/ (custom server configurations)");
       if (cli.includeProjects) {
         const stableDbPath = path.join(paths.stableHome, "userdata", "state.sqlite");
         if (availability.isStableProcessRunning) {
@@ -258,14 +265,15 @@ async function main(): Promise<void> {
     stableHome,
     betaHome,
     includeSettings: cli.includeSettings,
+    includeKeybindings: cli.includeKeybindings,
     includeSkills: cli.includeSkills,
+    includeMcp: cli.includeMcp,
     includeProjects: cli.includeProjects,
     force: cli.force,
   });
-
-  for (const item of result.items) {
-    const symbol = item.status === "synced" ? "✓" : item.status === "skipped" ? "○" : "✗";
-    console.log(`  ${symbol} [${item.item}] ${item.detail}`);
+  for (const entry of result.items) {
+    const symbol = entry.status === "synced" ? "✓" : entry.status === "skipped" ? "○" : "✗";
+    console.log(`  ${symbol} [${entry.item}] ${entry.detail}`);
   }
 
   console.log("");
@@ -295,12 +303,14 @@ async function main(): Promise<void> {
             stableHome,
             betaHome,
             includeSettings: cli.includeSettings,
+            includeKeybindings: cli.includeKeybindings,
             includeSkills: cli.includeSkills,
+            includeMcp: cli.includeMcp,
             includeProjects: cli.includeProjects,
           });
           console.log(`[Watch] ${watchResult.message}`);
-        } catch {
-          // Suppress transient poll errors; the next tick retries.
+        } catch (pollError) {
+          console.error(`[Watch] sync poll failed (retrying): ${String(pollError)}`);
         } finally {
           syncInFlight = false;
         }
