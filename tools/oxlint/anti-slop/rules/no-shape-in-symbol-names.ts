@@ -47,6 +47,8 @@ function isDeclaredName(node: NamedNode): boolean {
       return parent.argument === node;
     case "TSEnumMember":
       return parent.id === node;
+    case "CatchClause":
+      return parent.param === node;
     case "TSTypeParameter":
       return parent.name === node;
     case "TSMappedType":
@@ -58,6 +60,16 @@ function isDeclaredName(node: NamedNode): boolean {
     default:
       return false;
   }
+}
+
+function isDeclaredPrivateName(node: NamedNode): boolean {
+  const parent = node.parent;
+  return (
+    parent !== undefined &&
+    parent !== null &&
+    (parent.type === "PropertyDefinition" || parent.type === "MethodDefinition") &&
+    parent.key === node
+  );
 }
 
 /** Ban the case-insensitive substring "shape" in declared JavaScript and TypeScript symbol names. */
@@ -74,9 +86,10 @@ export const noForbiddenTermInSymbolNamesRule = defineRule({
     },
   },
   createOnce(context) {
-    const reportForbiddenSymbolName = (node: ESTree.Node & { name: string }) => {
+    const reportForbiddenSymbolName = (node: NamedNode) => {
       if (!containsForbiddenSymbolName(node.name)) return;
       if (node.type === "Identifier" && !isDeclaredName(node)) return;
+      if (node.type === "PrivateIdentifier" && !isDeclaredPrivateName(node)) return;
       context.report({
         node,
         messageId: "forbiddenSymbolName",
