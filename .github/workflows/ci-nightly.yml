@@ -8,7 +8,7 @@ name: CI Nightly
 on:
   schedule:
     # 02:00 UTC daily.
-    - cron: '0 2 * * *'
+    - cron: "0 2 * * *"
   workflow_dispatch:
 
 # Same rule as CI: a newer run cancels the stale one.
