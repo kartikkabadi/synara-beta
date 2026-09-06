@@ -8,6 +8,7 @@ import {
   firstWinsAliasDeclarations,
   refineAliasAmbiguity,
 } from "../shared/resolves-to-unknown.ts";
+import { lexicalTypeParameterNames } from "../shared/lexical-type-parameters.ts";
 
 /** Ban named aliases that merely conceal TypeScript's unknown top type. */
 export const noUnknownTypeAliasesRule = defineRule({
@@ -40,7 +41,8 @@ export const noUnknownTypeAliasesRule = defineRule({
         resolvesToUnknown = createResolvesToUnknown(refined.aliases, refined.ambiguous);
         for (const [name, list] of collected.declarations) {
           for (const alias of list) {
-            if (!resolvesToUnknown(alias.typeAnnotation, new Set(), new Set([name]))) continue;
+            const shadowedAliases = lexicalTypeParameterNames(alias, context.sourceCode.visitorKeys);
+            if (!resolvesToUnknown(alias.typeAnnotation, shadowedAliases, new Set([name]))) continue;
             context.report({
               node: alias.id,
               messageId: "unknownAlias",
