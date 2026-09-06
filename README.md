@@ -81,7 +81,7 @@ Keep the active conversation directly alongside the surfaces it modifies. Projec
 </p>
 
 - **Project-Aware Context:** Seamlessly navigate between repositories and track related tasks without mixing uncommitted files.
-- **Provider & Model Selection:** Choose the ideal model (Codex, Claude, Cursor, Antigravity, Grok) per task based on complexity and speed.
+- **Provider & Model Selection:** Choose the ideal provider runtime per task based on complexity and speed.
 - **Persistent Goals:** Attach explicit multi-turn objectives with pause/resume, achievement history, and bounded autonomous continuation.
 
 ---
@@ -168,6 +168,7 @@ You can build and run Synara Beta locally using [Bun](https://bun.sh/) and [Node
 - [Bun](https://bun.sh/) (v1.3.12 or newer)
 - [Node.js](https://nodejs.org/) (v24.13.1 or newer recommended)
 - [Git](https://git-scm.com/)
+- Install and authenticate the agent runtime you intend to use before starting a session. For Codex sessions, follow the [Codex CLI setup](https://github.com/openai/codex).
 
 ```bash
 # 1. Clone the repository
@@ -193,8 +194,8 @@ bun run dev:desktop
 
 ```text
 synara-beta/
-├── apps/
 │   ├── desktop/          # Electron desktop application & native OS bridges
+│   ├── marketing/        # Next.js marketing site and documentation
 │   ├── server/           # Node.js WebSocket backend managing agent stdio runtimes
 │   └── web/              # React 19 + Vite web interface and transcript streamer
 ├── packages/
@@ -219,7 +220,7 @@ For setup instructions and permission scopes, see [External MCP Documentation](.
 Contributions, bug reports, and suggestions are warmly welcomed!
 
 - **Found a bug?** [Open an issue](https://github.com/kartikkabadi/synara-beta/issues/new) with the Synara Beta version, operating system, agent runtime, and reproduction steps.
-- **Want to contribute?** Feel free to submit a pull request against `main`. Please ensure code formatting and type checks pass.
+- **Want to contribute?** Feel free to submit a pull request against `main` — see [CONTRIBUTING.md](./CONTRIBUTING.md). Please ensure `bun fmt`, `bun lint`, `bun typecheck`, and `bun run test` pass.
 - **Stay updated:** Follow developments at [trysynara.com](https://www.trysynara.com/).
 
 ---
