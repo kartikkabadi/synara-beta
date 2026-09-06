@@ -3,8 +3,8 @@ import { defineRule } from "@oxlint/plugins";
 import type { ESTree } from "@oxlint/plugins";
 
 import {
+  collectAliasDeclarationsIn,
   createResolvesToUnknown,
-  topLevelAliasDeclarations,
 } from "../shared/resolves-to-unknown.ts";
 import { lexicalTypeParameterNames } from "../shared/lexical-type-parameters.ts";
 
@@ -31,7 +31,7 @@ export const noUnknownReturnsRule = defineRule({
     },
   },
   createOnce(context) {
-    let resolvesToUnknown = createResolvesToUnknown(new Map());
+    let resolvesToUnknown = createResolvesToUnknown(new Map(), new Set());
 
     const checkReturnType = (node: FunctionWithReturnType) => {
       const annotation = node.returnType;
@@ -49,7 +49,8 @@ export const noUnknownReturnsRule = defineRule({
 
     return {
       Program(node) {
-        resolvesToUnknown = createResolvesToUnknown(topLevelAliasDeclarations(node));
+        const collected = collectAliasDeclarationsIn(node, context.sourceCode.visitorKeys);
+        resolvesToUnknown = createResolvesToUnknown(collected.aliases, collected.ambiguous);
       },
       ArrowFunctionExpression: checkReturnType,
       FunctionDeclaration: checkReturnType,

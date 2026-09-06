@@ -2,8 +2,8 @@ import { defineRule } from "@oxlint/plugins";
 import type { ESTree } from "@oxlint/plugins";
 
 import {
+  collectAliasDeclarationsIn,
   createResolvesToUnknown,
-  topLevelAliasDeclarations,
 } from "../shared/resolves-to-unknown.ts";
 import { lexicalTypeParameterNames } from "../shared/lexical-type-parameters.ts";
 
@@ -59,7 +59,7 @@ export const noUnknownParametersRule = defineRule({
     },
   },
   createOnce(context) {
-    let resolvesToUnknown = createResolvesToUnknown(new Map());
+    let resolvesToUnknown = createResolvesToUnknown(new Map(), new Set());
 
     const checkParameters = (node: ParameterOwner) => {
       const shadowedAliases = lexicalTypeParameterNames(node, context.sourceCode.visitorKeys);
@@ -84,7 +84,8 @@ export const noUnknownParametersRule = defineRule({
 
     return {
       Program(node) {
-        resolvesToUnknown = createResolvesToUnknown(topLevelAliasDeclarations(node));
+        const collected = collectAliasDeclarationsIn(node, context.sourceCode.visitorKeys);
+        resolvesToUnknown = createResolvesToUnknown(collected.aliases, collected.ambiguous);
       },
       ArrowFunctionExpression: checkParameters,
       FunctionDeclaration: checkParameters,

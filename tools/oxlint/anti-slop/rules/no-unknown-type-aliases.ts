@@ -3,8 +3,8 @@ import { defineRule } from "@oxlint/plugins";
 import type { ESTree } from "@oxlint/plugins";
 
 import {
+  collectAliasDeclarationsIn,
   createResolvesToUnknown,
-  topLevelAliasDeclarations,
 } from "../shared/resolves-to-unknown.ts";
 
 /** Ban named aliases that merely conceal TypeScript's unknown top type. */
@@ -21,14 +21,14 @@ export const noUnknownTypeAliasesRule = defineRule({
     },
   },
   createOnce(context) {
-    let resolvesToUnknown = createResolvesToUnknown(new Map());
+    let resolvesToUnknown = createResolvesToUnknown(new Map(), new Set());
 
     return {
       Program(node) {
-        resolvesToUnknown = createResolvesToUnknown(topLevelAliasDeclarations(node));
-        for (const [name, alias] of topLevelAliasDeclarations(node)) {
-          if (alias.typeParameters !== null && alias.typeParameters !== undefined) continue;
-          if (!resolvesToUnknown(alias.typeAnnotation, new Set([name]))) continue;
+        const collected = collectAliasDeclarationsIn(node, context.sourceCode.visitorKeys);
+        resolvesToUnknown = createResolvesToUnknown(collected.aliases, collected.ambiguous);
+        for (const [name, alias] of collected.aliases) {
+          if (!resolvesToUnknown(alias.typeAnnotation, new Set(), new Set([name]))) continue;
           context.report({
             node: alias.id,
             messageId: "unknownAlias",
