@@ -102,6 +102,11 @@ export function compareAgainstBaseline(
         burnDown.push(`${key} [${fingerprint}] (${beforeCount} -> ${count})`);
       }
     }
+    for (const [fingerprint, beforeCount] of Object.entries(before.messages)) {
+      if (!messages.has(fingerprint) && beforeCount > 0) {
+        burnDown.push(`${key} [${fingerprint}] (${beforeCount} -> 0)`);
+      }
+    }
   }
   for (const [key, entry] of Object.entries(baseline)) {
     if (!current.has(key) && entry.total > 0) {

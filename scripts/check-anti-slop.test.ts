@@ -165,6 +165,20 @@ describe("compareAgainstBaseline", () => {
     expect(report.failures).toEqual([]);
     expect(report.burnDown).toEqual(["anti-slop(no-runtime-typeof):deleted.ts (gone, 4 -> 0)"]);
   });
+
+  it("reports burn-down for fingerprints missing from an otherwise-present entry", () => {
+    const baseline: Baseline = {
+      "anti-slop(no-runtime-typeof):a.ts": entry(2, { [FINGERPRINT_A]: 1, [FINGERPRINT_B]: 1 }),
+    };
+    const current = countViolationsByRuleAndFile([
+      { code: "anti-slop(no-runtime-typeof)", filename: "a.ts", message: "first message" },
+    ]);
+    const report = compareAgainstBaseline(baseline, current);
+    expect(report.failures).toEqual([]);
+    expect(report.burnDown).toEqual([
+      `anti-slop(no-runtime-typeof):a.ts [${FINGERPRINT_B}] (1 -> 0)`,
+    ]);
+  });
 });
 
 describe("sortedBaselineEntries", () => {
