@@ -41,9 +41,16 @@ function runRules(
     }
     const shell = process.platform === "win32";
     const command = shell ? `"${oxlintBinary}.cmd"` : oxlintBinary;
+    const quoteForShell = (value: string) => (shell ? `"${value}"` : value);
     const result = spawnSync(
       command,
-      ["-f", "json", "--config", join(dir, ".oxlintrc.json"), ...paths],
+      [
+        "-f",
+        "json",
+        "--config",
+        quoteForShell(join(dir, ".oxlintrc.json")),
+        ...paths.map(quoteForShell),
+      ],
       { cwd: repoRoot, encoding: "utf8", maxBuffer: 1 << 26, shell },
     );
     if (!result.stdout) {
@@ -177,6 +184,21 @@ describe("no-unknown-parameters", () => {
     expect(byFile.get("generic-arg.ts")).toEqual(reported);
     expect(byFile.get("typed-arg.ts")).toBeUndefined();
     expect(byFile.get("defaulted.ts")).toEqual(reported);
+  });
+
+  it("resolves forwarded parameters through nested generic aliases without looping", () => {
+    const byFile = runRules(
+      {
+        "forwarded.ts":
+          "type Inner<T> = T;\ntype Outer<T> = Inner<T>;\nexport function f(value: Outer<unknown>) { return value; }\n",
+        "typed-forward.ts":
+          "type Inner<T> = T;\ntype Outer<T> = Inner<T>;\nexport function g(value: Outer<string>) { return value; }\n",
+      },
+      { "anti-slop/no-unknown-parameters": "error" },
+    );
+    const reported = ["anti-slop(no-unknown-parameters)"];
+    expect(byFile.get("forwarded.ts")).toEqual(reported);
+    expect(byFile.get("typed-forward.ts")).toBeUndefined();
   });
 
   it("treats a local Promise alias as the alias, not the built-in wrapper", () => {
