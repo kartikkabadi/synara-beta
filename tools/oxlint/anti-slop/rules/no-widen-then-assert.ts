@@ -26,6 +26,7 @@ function collectShadowedRecordBuiltIns(program: ESTree.Program): ReadonlySet<str
         ? statement.declaration
         : statement;
     if (declaration?.type === "ImportDeclaration") {
+      if (declaration.importKind !== "type") continue;
       for (const specifier of declaration.specifiers) {
         if (recordBuiltInNames.has(specifier.local.name)) shadowed.add(specifier.local.name);
       }
@@ -34,6 +35,7 @@ function collectShadowedRecordBuiltIns(program: ESTree.Program): ReadonlySet<str
     if (
       declaration !== null &&
       declaration !== undefined &&
+      declaration.type !== "FunctionDeclaration" &&
       "id" in declaration &&
       declaration.id !== null &&
       declaration.id !== undefined &&
