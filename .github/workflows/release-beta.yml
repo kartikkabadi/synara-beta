@@ -459,6 +459,12 @@ jobs:
       - name: Prepare updater feed metadata
         run: node scripts/prepare-release-update-feed.ts release-assets
 
+      - name: Generate release checksums
+        shell: bash
+        run: |
+          cd release-assets
+          shasum -a 256 * > SHA256SUMS
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
@@ -477,4 +483,6 @@ jobs:
             release-assets/*.yml
             release-assets/*.provenance.json
             release-assets/*.tar.gz
+            release-assets/SHA256SUMS
           fail_on_unmatched_files: true
+
