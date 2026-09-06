@@ -177,6 +177,7 @@ Top risks:
 Terms: Stable home `~/.synara` is source. Beta home `~/.synara-beta` is target. Import is opt in. Stable is never written.
 
 Architecture boundary:
+
 - Import logic runs in `apps/server` (Node.js runtime with direct filesystem access and Effect atomic file writers).
 - `apps/web` interacts via WebSocket RPC: `import.getAvailability`, `import.execute`, `import.undo`.
 - This keeps filesystem operations out of React and allows comprehensive Vitest test coverage without spinning up Electron.
@@ -256,6 +257,7 @@ Terms: shape fixed. Redaction allow-list based. User consents first. Off by defa
 Today: no crash reporter exists. Logs hold raw paths. `server.log` has no scrub. Desktop tails pass backend text through. Provider native logs hold prompts by design. The diagnose bundle needs manual review per docs.
 
 Integration hooks in Desktop:
+
 - Hook into `apps/desktop/src/main.ts`:
   - `presentBackendStartupGiveUp`: Triggered when backend supervision fails after consecutive attempts.
   - `presentRendererCrashRecovery`: Triggered when renderer reload budget is exhausted.
@@ -382,16 +384,19 @@ Stable guards, in one place:
 Beta starts completely unsigned and transitions seamlessly to official signing whenever credentials are added:
 
 ### Initial Unsigned Distribution
+
 - Enabled via `ALLOW_UNSIGNED_BETA_PUBLICATION=true` in `release-beta.yml`.
 - macOS: Users open via right-click -> Open or run `xattr -cr /Applications/Synara\ Beta.app` to clear Gatekeeper quarantine.
 - Windows: Users bypass SmartScreen warning ("More info" -> "Run anyway").
 - Linux: AppImage runs without code signing friction.
 
 ### Delegation Model with Emanuele (Later / Future Step)
+
 - **Apple Developer Program:** Emanuele invites Kartik as an Organization Team Member (Developer or Admin) in App Store Connect. Kartik creates and manages his own Developer ID Application certificate and App Store Connect API keys directly under the Synara team identity. No raw private keys or personal Apple credentials are exchanged.
 - **Azure Trusted Signing (Windows):** Emanuele assigns Kartik's Microsoft account the "Trusted Signing Certificate Profile Signer" RBAC role in Azure Portal. Windows builds sign via Azure CLI / GitHub Action without handling raw PFX certificates.
 
 ### Unsigned-to-Signed Transition Semantics
+
 - **Zero Code Refactoring:** Packaging configuration (`desktop-platform-build-config.ts`) already has a clean `signed: true/false` toggle. Once secrets are populated in GitHub Secrets, the next tag build automatically signs and notarizes without any app code changes.
 - **Zero Data Loss:** Beta user data is stored in `~/.synara-beta`, including SQLite databases and file-based secrets (`userdata/secrets/*.bin` with 0700 permissions). Because Synara avoids signature-locked macOS Keychain (`safeStorage`) and retains the identical bundle ID (`com.emanueledipietro.synara.beta`), migrating from unsigned to signed preserves 100% of user data, threads, settings, and credentials.
 - **Auto-Updater Transition Caveat:** An unsigned running app cannot silently auto-update to a signed app in the background because macOS Squirrel.Mac (`ShipIt`) and Windows signature verifiers enforce code signature requirements on incoming updates. Users on initial unsigned builds will perform **one manual download** of the signed `.dmg` or `.exe` installer. Once installed, silent in-app auto-updates operate seamlessly for all subsequent releases.

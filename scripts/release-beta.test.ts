@@ -48,7 +48,9 @@ describe("release-beta", () => {
   });
 
   it("throws on invalid version format", () => {
-    expect(() => resolveBetaReleaseVersion("invalid-version", undefined)).toThrow(/Invalid version format/);
+    expect(() => resolveBetaReleaseVersion("invalid-version", undefined)).toThrow(
+      /Invalid version format/,
+    );
   });
 
   it("includes all expected workspace package files", () => {
