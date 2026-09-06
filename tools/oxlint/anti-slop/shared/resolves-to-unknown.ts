@@ -59,6 +59,22 @@ export type ResolvesToUnknown = (
   substitutions?: Substitutions,
 ) => boolean;
 
+function resolveSubstitutionArgument(
+  type: ESTree.TSType,
+  base: Substitutions,
+  resolving: ReadonlySet<string> = new Set(),
+): ESTree.TSType {
+  const unwrapped = type.type === "TSParenthesizedType" ? type.typeAnnotation : type;
+  if (unwrapped.type !== "TSTypeReference" || unwrapped.typeName.type !== "Identifier") return type;
+  const name = unwrapped.typeName.name;
+  if (resolving.has(name)) return type;
+  const substitution = base.get(name);
+  if (substitution === undefined) return type;
+  const nextResolving = new Set(resolving);
+  nextResolving.add(name);
+  return resolveSubstitutionArgument(substitution, base, nextResolving);
+}
+
 /** Builds a resolver that decides whether a type annotation resolves to `unknown`. */
 export function createResolvesToUnknown(
   aliases: AliasDeclarations,
@@ -94,7 +110,10 @@ export function createResolvesToUnknown(
       for (const [index, parameter] of parameters.entries()) {
         const argument = arguments_[index] ?? parameter.default;
         if (argument === null || argument === undefined) return false;
-        nextSubstitutions.set(parameter.name.name, argument);
+        nextSubstitutions.set(
+          parameter.name.name,
+          resolveSubstitutionArgument(argument, substitutions),
+        );
       }
       const nextVisited = new Set(visited);
       nextVisited.add(name);
