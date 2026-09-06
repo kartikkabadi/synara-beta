@@ -76,8 +76,9 @@ function collectTypeDeclarations(
     environment.interfaces.set(node.id.name, declarations);
     if (topLevel && BUILT_INS.has(node.id.name)) environment.shadowedBuiltIns.add(node.id.name);
   } else if (node.type === "ImportDeclaration") {
-    if (node.importKind !== "type") return;
     for (const specifier of node.specifiers) {
+      const kind = "importKind" in specifier ? specifier.importKind : node.importKind;
+      if (kind !== "type") continue;
       if (BUILT_INS.has(specifier.local.name))
         environment.shadowedBuiltIns.add(specifier.local.name);
     }
