@@ -84,7 +84,7 @@ Rules that still apply:
 
 - Conflicts stop and wait for a human. Upstream wins everywhere except overlay files, where beta wins.
 - After each sync pull, confirm that only overlay files differ from upstream (`git diff upstream/main main`).
-- Prefer a reviewed PR for sync pulls that change code; a direct merge pull is fine for routine upstream catch-ups.
+- Sync pulls go through a reviewed PR, like every other change to `main`.
 - If upstream ever rewrites its history, the bridge still points at the pre-rewrite commits: connect the post-rewrite tip with one new bridge merge and update this section.
 
 ## Git discipline
