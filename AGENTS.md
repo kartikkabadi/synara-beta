@@ -124,6 +124,7 @@ Deeper docs: `.docs/` (architecture, provider architecture, transport, CI) and `
 - `bun fmt`, `bun lint`, and `bun typecheck` are heavyweight workspace checks. Do not run them unless the user asks for them in the current conversation; when they are required, bundle them into one final verification pass per task instead of rerunning them during iteration.
 - After a recent full pass, a small follow-up needs no rerun — or only the smallest reasonable re-check — unless the user explicitly asks for full validation again.
 - CI gates: Static Checks, Unit Tests, Browser Tests, Desktop Build, Windows Process Regression, Migration Lineage, Release Smoke, plus a nightly. Typecheck requires a 4 GB Node heap (see `.github/workflows/ci.yml`).
+- The anti-slop ratchet (`bun run lint:anti-slop`) fails on any new or grown `anti-slop/*` oxlint violation against `tools/oxlint/anti-slop-baseline.json`. Existing violations are baselined debt: fix them when touching the file, never silence the rule with inline disables. If the ratchet reports burn-down, run `bun run lint:anti-slop --update` in the same PR.
 - UI-related changes get live end-to-end verification, not unit checks alone. Start an isolated dev instance (see below), exercise the real flow in the web UI, and confirm the WebSocket path end to end: events leaving the server, arriving on the client, and rendering in the transcript. If the change touches a provider session, drive a real session. A green unit suite does not prove a UI change works.
 
 ## Running a dev instance
