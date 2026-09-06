@@ -176,7 +176,9 @@ function getExistingBetaTagNumbers(baseVersion: string): number[] {
     const localTags = runGit(["tag", "-l", `v${baseVersion}-beta.*`]);
     if (localTags.length > 0) {
       for (const tag of localTags.split("\n")) {
-        const match = tag.trim().match(new RegExp(`^v${baseVersion.replace(/\./g, "\\.")}-beta\\.(\\d+)$`));
+        const match = tag
+          .trim()
+          .match(new RegExp(`^v${baseVersion.replace(/\./g, "\\.")}-beta\\.(\\d+)$`));
         if (match) {
           numbers.add(Number.parseInt(match[1]!, 10));
         }
@@ -191,7 +193,9 @@ function getExistingBetaTagNumbers(baseVersion: string): number[] {
     const remoteTags = runGit(["ls-remote", "--tags", "beta", `refs/tags/v${baseVersion}-beta.*`]);
     if (remoteTags.length > 0) {
       for (const line of remoteTags.split("\n")) {
-        const match = line.trim().match(new RegExp(`refs/tags/v${baseVersion.replace(/\./g, "\\.")}-beta\\.(\\d+)`));
+        const match = line
+          .trim()
+          .match(new RegExp(`refs/tags/v${baseVersion.replace(/\./g, "\\.")}-beta\\.(\\d+)`));
         if (match) {
           numbers.add(Number.parseInt(match[1]!, 10));
         }
@@ -394,7 +398,9 @@ export function runReleaseBeta(options: ReleaseBetaOptions): void {
     });
 
     console.log("Staging package files...");
-    const filesToStage = [...BETA_PACKAGE_FILES, "bun.lock"].filter((f) => existsSync(resolve(repoRoot, f)));
+    const filesToStage = [...BETA_PACKAGE_FILES, "bun.lock"].filter((f) =>
+      existsSync(resolve(repoRoot, f)),
+    );
     execFileSync("git", ["add", ...filesToStage], { cwd: repoRoot, stdio: "inherit" });
 
     // Only commit if there are staged changes
