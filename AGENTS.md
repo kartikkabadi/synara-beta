@@ -68,34 +68,24 @@ Read this before any git work in this repo.
 - After each sync pull, confirm that only overlay files differ from upstream. Overlay files: `AGENTS.md`, `CLAUDE.md`, plus whatever `synara-beta-plan.md` lists.
 - Sync conflicts stop and wait for a human. Upstream wins everywhere except overlay files, where beta wins.
 
-### The history reset: how to actually see upstream
+### Sync pulls: normal merges
 
-Beta `main` was seeded on 2026-09-06 from a snapshot of upstream `fb25062c5`, committed as a fresh root (`642c804bd`) plus a small beta overlay (release pipeline, desktop identity, plan docs). The two histories share **no merge-base**. This repo is not a GitHub fork, and history-based tooling lies across the two repos:
+Beta `main` was seeded on 2026-09-06 from a snapshot of upstream `fb25062c5` as a fresh root (`642c804bd`), which left the two histories with no merge-base — every sync was a manual cherry-pick ceremony, and the seed SHA had to be tracked by hand. That ended with the history-bridge merge (`0fd99fe1b`): beta `main` now has upstream `main` as an ancestor, so history-based tooling works normally across the two repos.
 
-- `git merge upstream/main` refuses (unrelated histories). Never bypass with `--allow-unrelated-histories`; it would drag in upstream's entire diverged history.
-- The GitHub "Sync fork" button cannot work (no shared history).
-- `git rev-list --count main...upstream/main` reports upstream's whole history (thousands of commits), not the real gap.
-- `git log main..upstream/main` lists everything upstream ever committed, not what is new.
-
-To see what upstream actually added since the seed:
+To pull upstream work into beta:
 
 ```console
 git fetch upstream --prune --tags
-git log --oneline fb25062c5..upstream/main   # the real gap (6 commits as of 2026-09-06)
-git log -p upstream/main -- <path>           # upstream changes to one area
-git tag --sort=-creatordate | head           # upstream release history
+git log --oneline main..upstream/main   # what is new upstream
+git merge upstream/main                 # normal merge; conflicts stop for a human
 ```
 
-If the seed SHA is ever lost (for example after a re-seed), recover it by tree distance. Walk upstream commits near beta's root-commit date and pick the one with the fewest differing files:
+Rules that still apply:
 
-```console
-ROOT=$(git rev-list --max-parents=0 main)
-for c in $(git log --format='%h' --before='<root date + 1h>' upstream/main | head -20); do
-  echo "$(git diff --name-only $c $ROOT | wc -l | tr -d ' ') $c"
-done | sort -n | head -3
-```
-
-To bring upstream work into beta: cherry-pick single commits onto a branch and open a PR (`git cherry-pick -x <sha>`). Never merge `upstream/main` into beta. Conflicts stop and wait for a human, per the sync rules above.
+- Conflicts stop and wait for a human. Upstream wins everywhere except overlay files, where beta wins.
+- After each sync pull, confirm that only overlay files differ from upstream (`git diff upstream/main main`).
+- Sync pulls go through a reviewed PR, like every other change to `main`.
+- If upstream ever rewrites its history, the bridge still points at the pre-rewrite commits: connect the post-rewrite tip with one new bridge merge and update this section.
 
 ## Git discipline
 
