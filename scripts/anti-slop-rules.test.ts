@@ -180,6 +180,17 @@ describe("no-unknown-parameters", () => {
     expect(byFile.get("same-name-agree.ts")).toEqual(["anti-slop(no-unknown-parameters)"]);
   });
 
+  it("does not report nested aliases whose body references a shadowing type parameter", () => {
+    const byFile = runRules(
+      {
+        "local-param-shadow.ts":
+          "type Mysterious = unknown;\nexport function outer<Mysterious>() {\n  type Inner = Mysterious;\n  return function inner(input: Inner) { return input; };\n}\n",
+      },
+      { "anti-slop/no-unknown-type-aliases": "error" },
+    );
+    expect(byFile.get("local-param-shadow.ts")).toEqual(["anti-slop(no-unknown-type-aliases)"]);
+  });
+
   it("resolves generic alias arguments including unknown", () => {
     const byFile = runRules(
       {
