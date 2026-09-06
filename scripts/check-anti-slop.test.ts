@@ -181,7 +181,8 @@ describe("sortedBaselineEntries", () => {
       "anti-slop(no-runtime-typeof):a.ts",
       "anti-slop(no-runtime-typeof):b.ts",
     ]);
-    expect(Object.keys(baseline["anti-slop(no-runtime-typeof):a.ts"].messages)).toEqual(
+    const entryForA = baseline["anti-slop(no-runtime-typeof):a.ts"];
+    expect(entryForA?.messages && Object.keys(entryForA.messages)).toEqual(
       [FINGERPRINT_A, FINGERPRINT_B].sort(),
     );
   });
