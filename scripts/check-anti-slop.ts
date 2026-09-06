@@ -70,16 +70,23 @@ function oxlintBinary(root: string): string {
 }
 
 export function collectCurrentViolations(root: string): Map<string, number> {
-  const result = spawnSync(oxlintBinary(root), ["-f", "json"], {
+  const shell = process.platform === "win32";
+  const binary = oxlintBinary(root);
+  const result = spawnSync(shell ? `"${binary}"` : binary, ["-f", "json"], {
     cwd: root,
     encoding: "utf8",
     maxBuffer: 1 << 28,
+    shell,
   });
   if (result.error !== undefined) {
     throw result.error;
   }
   if (!result.stdout) {
     throw new Error(`oxlint produced no JSON output (status ${result.status})`);
+  }
+  if (result.status !== 0 && result.status !== 1) {
+    const stderr = (result.stderr ?? "").split("\n").slice(0, 4).join("\n");
+    throw new Error(`oxlint failed with status ${result.status}: ${stderr}`);
   }
   const output = JSON.parse(result.stdout) as OxlintOutput;
   return countByRuleAndFile(parseAntiSlopDiagnostics(output));
