@@ -49,16 +49,16 @@ Instead of locking you into proprietary cloud proxies or web chat wrappers, Syna
 
 Synara Beta brings every local agent into a unified, focused workspace. Switch models on the fly, run different agents on different tasks, and harness your existing subscriptions directly.
 
-| Runtime | Integration Mechanism | Key Strengths |
-| :--- | :--- | :--- |
-| **OpenAI Codex** | Native CLI / `codex app-server` (JSON-RPC over stdio) | High-reasoning agentic turns, structured diff proposals |
-| **Anthropic Claude** | Claude Code CLI integration | Rapid tool use, deep refactoring, architectural planning |
-| **Cursor** | Cursor Agent Runtime | Deep codebase indexing, inline file edits |
-| **Google Antigravity** | Antigravity CLI | Multimodal workflows, tool execution, agent orchestration |
-| **xAI Grok** | Grok Build runtime | Accelerated reasoning, rapid iterative development |
-| **Factory Droid** | Factory Droid CLI | Autonomous developer workflows and spec enforcement |
-| **OpenCode & Pi** | Local & Open-Source LLMs | Self-hosted models via Ollama, vLLM, or custom endpoints |
-| **Devin** | Devin CLI integration | Autonomous multi-step software engineering workflows |
+| Runtime                | Integration Mechanism                                 | Key Strengths                                             |
+| :--------------------- | :---------------------------------------------------- | :-------------------------------------------------------- |
+| **OpenAI Codex**       | Native CLI / `codex app-server` (JSON-RPC over stdio) | High-reasoning agentic turns, structured diff proposals   |
+| **Anthropic Claude**   | Claude Code CLI integration                           | Rapid tool use, deep refactoring, architectural planning  |
+| **Cursor**             | Cursor Agent Runtime                                  | Deep codebase indexing, inline file edits                 |
+| **Google Antigravity** | Antigravity CLI                                       | Multimodal workflows, tool execution, agent orchestration |
+| **xAI Grok**           | Grok Build runtime                                    | Accelerated reasoning, rapid iterative development        |
+| **Factory Droid**      | Factory Droid CLI                                     | Autonomous developer workflows and spec enforcement       |
+| **OpenCode & Pi**      | Local & Open-Source LLMs                              | Self-hosted models via Ollama, vLLM, or custom endpoints  |
+| **Devin**              | Devin CLI integration                                 | Autonomous multi-step software engineering workflows      |
 
 ---
 
@@ -132,11 +132,11 @@ Tailor the environment to your setup and aesthetic preferences.
 
 Synara organizes your workflows into clear, modular layers:
 
-| Layer | Purpose |
-| :--- | :--- |
-| **Project** | Repository context, configuration, and workspace-level settings. |
-| **Thread** | Task-specific conversation, ephemeral state, files, and transcript history. |
-| **Provider Session** | The local, authenticated coding-agent process executing the instructions. |
+| Layer                  | Purpose                                                                     |
+| :--------------------- | :-------------------------------------------------------------------------- |
+| **Project**            | Repository context, configuration, and workspace-level settings.            |
+| **Thread**             | Task-specific conversation, ephemeral state, files, and transcript history. |
+| **Provider Session**   | The local, authenticated coding-agent process executing the instructions.   |
 | **Execution Surfaces** | Diff review, embedded terminal, Chromium browser, file tree, and Git tools. |
 
 ---
@@ -148,15 +148,17 @@ Synara organizes your workflows into clear, modular layers:
 Pre-built binaries for Synara Beta will be published on [trysynara.com](https://www.trysynara.com/) and on the [GitHub Releases](https://github.com/kartikkabadi/synara-beta/releases) page.
 
 Supported native platforms:
+
 - **macOS:** Apple Silicon (`arm64`) & Intel (`x64`)
 - **Windows:** x64
-- **Linux:** x64 (`.AppImage`, `.deb`)
+- **Linux:** x64 (`.AppImage`)
 
 ### Running from Source
 
 You can build and run Synara Beta locally using [Bun](https://bun.sh/) and [Node.js](https://nodejs.org/).
 
 #### Prerequisites
+
 - [Bun](https://bun.sh/) (v1.3.12 or newer)
 - [Node.js](https://nodejs.org/) (v24.13.1 or newer recommended)
 - [Git](https://git-scm.com/)
@@ -174,6 +176,7 @@ bun run dev
 ```
 
 To launch the native desktop shell during development:
+
 ```bash
 bun run dev:desktop
 ```
