@@ -29,7 +29,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="./assets/prod/readme-hero-dark.png">
     <source media="(prefers-color-scheme: light)" srcset="./assets/prod/readme-hero-light.png">
-    <img src="./assets/prod/readme-hero-dark.png" alt="Synara Beta Desktop Interface" width="100%">
+    <img src="./assets/prod/readme-hero-light.png" alt="Synara Beta Desktop Interface" width="100%">
   </picture>
 </p>
 
@@ -60,55 +60,51 @@ Synara Beta brings every local agent into a unified, focused workspace. Switch m
 | **OpenCode & Pi** | Local & Open-Source LLMs | Self-hosted models via Ollama, vLLM, or custom endpoints |
 | **Devin** | Devin CLI integration | Autonomous multi-step software engineering workflows |
 
+---
+
+### 2. Unified Workspace & Thread Orchestration
+
+Keep the active conversation directly alongside the surfaces it modifies. Projects define the workspace context, while threads preserve task-specific history, environment state, and live execution diffs.
+
 <p align="center">
-  <img src="./assets/prod/readme-terminals.png" width="80%" alt="Multi-terminal integration running Claude Code">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/prod/readme-split-view-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="./assets/prod/readme-workspace-light.png">
+    <img src="./assets/prod/readme-workspace-light.png" alt="Synara Multi-Agent Workspace" width="100%">
+  </picture>
 </p>
+
+- **Project-Aware Context:** Seamlessly navigate between repositories and track related tasks without mixing uncommitted files.
+- **Provider & Model Selection:** Choose the ideal model (Codex, Claude, Cursor, Antigravity, Grok) per task based on complexity and speed.
+- **Persistent Goals:** Attach explicit multi-turn objectives with pause/resume, achievement history, and bounded autonomous continuation.
 
 ---
 
-### 2. Dual-Thread Split Views
+### 3. Dual-Thread Split Views & Live Previews
 
 Compare model responses, run parallel investigations, or tackle front-end and back-end tasks simultaneously. Synara’s split-view system lets you pin and control two active agent threads side-by-side with independent context, tokens, and controls.
 
-<p align="center">
-  <img src="./assets/prod/readme-dual-threads.png" width="100%" alt="Dual thread split view comparing Claude Opus and GPT-5.5">
-</p>
+- **Side-by-Side Comparison:** Evaluate how different models approach the same architectural challenge.
+- **Dual Working Panes:** Inspect diffs in one pane while interacting with an agent prompt in the other.
+- **Mobile & Device Simulators:** Place live iOS Simulator or Android device previews directly beside running agent threads.
 
 ---
 
-### 3. Integrated Browser & WebMCP Execution
+### 4. Integrated Browser & WebMCP Execution
 
 Never context-switch to test web apps. Synara embeds a full Chromium-based browser right next to your agent thread.
 
-- **Live Local Previews:** Preview `http://localhost:3000` or local dev servers with automatic reload.
+- **Live Local Previews:** Preview `http://localhost:3000` or local dev servers with automatic hot-reload.
 - **WebMCP Tooling:** Agents can inspect the DOM, interact with buttons and forms, take screenshots, and invoke semantic or page-declared WebMCP actions.
 - **Visual Feedback Loop:** Agents verify their own UI changes before marking tasks complete.
 
-<p align="center">
-  <img src="./assets/prod/readme-browser.png" width="100%" alt="Built-in browser with WebMCP and live preview">
-</p>
-
 ---
 
-### 4. Seamless Cross-Agent Handoffs
+### 5. Seamless Cross-Agent Handoffs
 
 Stuck on a tricky bug or want a second opinion? Pass active work between models with a single click.
 
-Synara's handoff engine carries over conversation history, active project context, and uncommitted diffs to the target agent runtime without manual copying or re-prompting.
-
-<p align="center">
-  <img src="./assets/prod/readme-handoff.png" width="480" alt="Seamless cross-provider handoffs">
-</p>
-
----
-
-### 5. Mobile & Device Simulator Previews
-
-Developing for iOS or Android? Synara connects directly to local device simulators, placing the live simulator display right alongside the running agent thread.
-
-<p align="center">
-  <img src="./assets/prod/readme-split-view-dark.png" width="100%" alt="Synara split view with iOS Simulator preview">
-</p>
+Synara's handoff engine carries over conversation history, active project context, and uncommitted diffs to the target agent runtime without manual copying or re-prompting. Start an architectural plan with Claude, execute heavy edits with Codex, and review with Cursor.
 
 ---
 
@@ -116,13 +112,9 @@ Developing for iOS or Android? Synara connects directly to local device simulato
 
 Avoid dirty working trees and merge conflicts when running multiple concurrent tasks.
 
-- **Managed Worktrees:** Spin up isolated, throwaway Git worktrees per thread. Parallel agents can edit the same repository without colliding.
+- **Managed Worktrees:** Spin up isolated, throwaway Git worktrees per thread so parallel agents can edit the same repository without colliding.
 - **Full Review Surface:** Review diffs, stage files, discard hunks, and commit changes directly from the UI.
 - **One-Click GitHub Integration:** Branch, push, and open pull requests right from your thread.
-
-<p align="center">
-  <img src="./assets/prod/readme-git.png" width="480" alt="Integrated Git actions and PR creation">
-</p>
 
 ---
 
@@ -133,10 +125,6 @@ Tailor the environment to your setup and aesthetic preferences.
 - **Themes:** Dark, Light, Synara, and Codex presets with high-contrast accessibility toggles.
 - **Typography:** Custom UI and monospace coding fonts (e.g. JetBrains Mono, Inter, Fira Code).
 - **Layout Ergonomics:** Adjustable density modes, translucent glass sidebars, and customizable keybindings.
-
-<p align="center">
-  <img src="./assets/prod/readme-appearance-dark.png" width="100%" alt="Appearance and workspace preferences">
-</p>
 
 ---
 
