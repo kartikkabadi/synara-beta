@@ -16,9 +16,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+# Single heap ceiling for every Node lane (typecheck OOM fix): set once here
+# instead of per job so a future bump cannot miss a lane.
+env:
+  NODE_OPTIONS: --max-old-space-size=4096
+
 jobs:
-  # Docs-only filter: PRs touching only *.md / docs / assets run fast-static +
-  # gate only. outputs.code is 'true' when any code file changed.
+  # Docs-only filter: PRs touching only prose, images, or marketing content
+  # run static-fast + gate only. outputs.code is 'true' when any code file changed.
   changes:
     name: Detect code changes
     runs-on: ubuntu-24.04
@@ -40,12 +45,15 @@ jobs:
         with:
           filters: |
             code:
+              # Directory exclusions stay scoped to code-free trees: marketing
+              # src ships .tsx under docs/ dirs and web ships a .ts module
+              # under assets/, so '**/docs/**' / '**/assets/**' would let real
+              # code skip the gate. Binaries are excluded by extension below.
               - '**'
               - '!**/*.md'
               - '!docs/**'
               - '!**/*.mdx'
-              - '!**/docs/**'
-              - '!**/assets/**'
+              - '!apps/marketing/content/**'
               - '!**/*.png'
               - '!**/*.jpg'
               - '!**/*.jpeg'
@@ -85,8 +93,6 @@ jobs:
     timeout-minutes: 15
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    env:
-      NODE_OPTIONS: --max-old-space-size=4096
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -108,6 +114,8 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     strategy:
+      # Deliberate non-default: one shard's failure must not cancel the other
+      # shards, so every lane reports complete signal for the gate.
       fail-fast: false
       matrix:
         include:
@@ -121,10 +129,9 @@ jobs:
             filter: "@synara/desktop"
           - pkg: web
             filter: "@synara/web"
+          # Server lane tests the CLI package (package name @synara/cli).
           - pkg: server
             filter: "@synara/cli"
-    env:
-      NODE_OPTIONS: --max-old-space-size=4096
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -150,11 +157,13 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     strategy:
+      # Deliberate non-default: one shard's failure must not cancel the other
+      # shards, so every lane reports complete signal for the gate.
       fail-fast: false
       matrix:
+        # Single source of the shard count: resharding must also update the /3
+        # in the job name above and the --shard arg in the run step below.
         shard: [1, 2, 3]
-    env:
-      NODE_OPTIONS: --max-old-space-size=4096
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -189,8 +198,6 @@ jobs:
     timeout-minutes: 15
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    env:
-      NODE_OPTIONS: --max-old-space-size=4096
     steps:
       - name: Checkout
         uses: actions/checkout@v6

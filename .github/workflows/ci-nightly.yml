@@ -11,7 +11,8 @@ on:
     - cron: "0 2 * * *"
   workflow_dispatch:
 
-# Same rule as CI: a newer run cancels the stale one.
+# Unlike CI (which spares main), nightly always cancels stale runs, including
+# scheduled main runs: only the newest quarantine signal matters.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
