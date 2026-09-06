@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# One-line Linux installer for Synara Beta (x86_64 and arm64).
+# One-line Linux installer for Synara Beta (x86_64).
 #
-#   t=$(curl -fsSL https://api.github.com/repos/kartikkabadi/synara-beta/releases/latest | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -1); if [ -z "$t" ]; then echo "Could not resolve the latest Synara Beta release." >&2; (exit 1); else f=$(mktemp /tmp/synara-beta-install.XXXXXX) && curl -fsSL -o "$f" "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-linux.sh" && bash "$f" --tag "$t"; rc=$?; rm -f "${f:-/tmp/synara-beta-install-none}"; (exit $rc); fi
+#   t=$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep '"tag_name"' | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | grep -- '-beta' | head -1); if [ -z "$t" ]; then echo "Could not resolve the latest Synara Beta release." >&2; (exit 1); else f=$(mktemp /tmp/synara-beta-install.XXXXXX) && curl -fsSL -o "$f" "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-linux.sh" && bash "$f" --tag "$t"; rc=$?; rm -f "${f:-/tmp/synara-beta-install-none}"; (exit $rc); fi
 #   bash install-linux.sh --tag v0.8.2-beta.1
 #
 # Downloads the GitHub AppImage for the latest beta tag (or --tag), checks
@@ -48,11 +48,11 @@ case "$arch" in
     default_arch="x86_64"
     ;;
   aarch64|arm64)
-    arch_pattern="arm64|aarch64"
-    default_arch="arm64"
+    echo "install-linux.sh: unsupported architecture: $arch (no Linux arm64 AppImage is published; x86_64 required)" >&2
+    exit 1
     ;;
   *)
-    echo "install-linux.sh: unsupported architecture: $arch (need x86_64 or arm64)" >&2
+    echo "install-linux.sh: unsupported architecture: $arch (need x86_64)" >&2
     exit 1
     ;;
 esac
@@ -61,7 +61,8 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 if [ -z "$tag" ]; then
-  tag="$(curl -fsSL https://api.github.com/repos/kartikkabadi/synara-beta/releases/latest | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+  # /releases/latest excludes prereleases, so list releases and pick the newest -beta tag.
+  tag="$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep '"tag_name"' | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | grep -- '-beta' | head -1 || true)"
 fi
 
 if [ -z "$tag" ]; then
@@ -81,7 +82,7 @@ curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS" || {
 }
 
 # Match candidate AppImage in SHA256SUMS
-appimage="$(grep -E "[[:space:]]+\*?Synara.*(${arch_pattern})\.AppImage\$" "$tmp/SHA256SUMS" | head -1 | awk '{print $NF}' | sed 's/^\*//')"
+appimage="$(grep -E "[[:space:]]+\*?Synara.*(${arch_pattern})\.AppImage\$" "$tmp/SHA256SUMS" | head -1 | awk '{print $NF}' | sed 's/^\*//' || true)"
 if [ -z "$appimage" ]; then
   appimage="Synara-Beta-${version}-${default_arch}.AppImage"
 fi

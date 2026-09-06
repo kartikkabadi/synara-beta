@@ -1,6 +1,6 @@
 # One-line Windows installer for Synara Beta (x64).
 #
-#   $t = (Invoke-RestMethod https://api.github.com/repos/kartikkabadi/synara-beta/releases/latest -ErrorAction Stop).tag_name; if ($t) { $f = Join-Path $env:TEMP $("synara-beta-install-$([Guid]::NewGuid()).ps1"); Invoke-WebRequest "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-windows.ps1" -OutFile $f -ErrorAction Stop; try { & $f -Tag $t } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue } } else { throw "Could not resolve the latest Synara Beta release." }
+#   $t = ((Invoke-RestMethod "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" -UseBasicParsing -ErrorAction Stop) | Where-Object { $_.tag_name -like '*-beta*' } | Select-Object -First 1).tag_name; if ($t) { $f = Join-Path $env:TEMP $("synara-beta-install-$([Guid]::NewGuid()).ps1"); Invoke-WebRequest "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-windows.ps1" -UseBasicParsing -OutFile $f -ErrorAction Stop; Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; Unblock-File -Path $f; try { & $f -Tag $t } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue } } else { throw "Could not resolve the latest Synara Beta release." }
 #   install-windows.ps1 -Tag v0.8.2-beta.1
 #
 # Downloads the GitHub exe for the latest beta tag (or -Tag), checks
@@ -24,7 +24,8 @@ if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64' -and $env:PROCESSOR_ARCHITECTURE -ne
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
 if (-not $Tag) {
-  $Tag = (Invoke-RestMethod -Uri 'https://api.github.com/repos/kartikkabadi/synara-beta/releases/latest').tag_name
+  # /releases/latest excludes prereleases, so list releases and pick the newest -beta tag.
+  $Tag = ((Invoke-RestMethod -Uri 'https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100' -UseBasicParsing) | Where-Object { $_.tag_name -like '*-beta*' } | Select-Object -First 1).tag_name
 }
 if (-not $Tag) {
   throw 'install-windows.ps1: could not resolve a release tag.'
@@ -38,7 +39,7 @@ Write-Output "Installing Synara Beta $Tag for Windows ($env:PROCESSOR_ARCHITECTU
 
 $base = "https://github.com/kartikkabadi/synara-beta/releases/download/$Tag"
 $checksumPath = Join-Path $env:TEMP ("SHA256SUMS-" + [Guid]::NewGuid().ToString("N"))
-Invoke-WebRequest -Uri "$base/SHA256SUMS" -OutFile $checksumPath
+Invoke-WebRequest -Uri "$base/SHA256SUMS" -OutFile $checksumPath -UseBasicParsing
 
 $asset = "Synara-Beta-$version-x64.exe"
 $entries = @(Select-String -Path $checksumPath -Pattern ('^[a-fA-F0-9]{64}\s+\*?' + [regex]::Escape($asset) + '$'))
@@ -61,7 +62,7 @@ if ($entries.Count -ne 1) {
 }
 
 $installerPath = Join-Path $env:TEMP $asset
-Invoke-WebRequest -Uri "$base/$asset" -OutFile $installerPath
+Invoke-WebRequest -Uri "$base/$asset" -OutFile $installerPath -UseBasicParsing
 
 Write-Output 'Verifying checksum...'
 $expected = ($entries[0].Line -split '\s+')[0]

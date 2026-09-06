@@ -21,13 +21,14 @@ describe("install-windows.ps1", () => {
     NodeAssert.match(script, /Tls12/);
   });
 
-  it("supports a -Tag override and defaults to the latest release", () => {
+  it("supports a -Tag override and defaults to the newest beta prerelease", () => {
     NodeAssert.match(script, /\$Tag/);
     NodeAssert.match(script, /Invoke-RestMethod/);
     NodeAssert.match(
       script,
-      /https:\/\/api\.github\.com\/repos\/kartikkabadi\/synara-beta\/releases\/latest/,
+      /https:\/\/api\.github\.com\/repos\/kartikkabadi\/synara-beta\/releases\?per_page=100/,
     );
+    NodeAssert.match(script, /-like '\*-beta\*'/);
     NodeAssert.match(script, /if \(-not \$Tag\)/);
   });
 
@@ -35,13 +36,19 @@ describe("install-windows.ps1", () => {
     NodeAssert.match(script, /\^v\\d\+\.\*/);
   });
 
-  it("downloads SHA256SUMS and installer exe", () => {
+  it("downloads SHA256SUMS and installer exe with basic parsing", () => {
     NodeAssert.match(
       script,
       /\$base = "https:\/\/github\.com\/kartikkabadi\/synara-beta\/releases\/download\/\$Tag"/,
     );
-    NodeAssert.match(script, /Invoke-WebRequest -Uri "\$base\/SHA256SUMS" -OutFile \$checksumPath/);
-    NodeAssert.match(script, /Invoke-WebRequest -Uri "\$base\/\$asset" -OutFile \$installerPath/);
+    NodeAssert.match(
+      script,
+      /Invoke-WebRequest -Uri "\$base\/SHA256SUMS" -OutFile \$checksumPath -UseBasicParsing/,
+    );
+    NodeAssert.match(
+      script,
+      /Invoke-WebRequest -Uri "\$base\/\$asset" -OutFile \$installerPath -UseBasicParsing/,
+    );
   });
 
   it("verifies SHA256 checksum with Get-FileHash", () => {
@@ -49,7 +56,7 @@ describe("install-windows.ps1", () => {
     NodeAssert.match(script, /Get-FileHash -Path \$installerPath -Algorithm SHA256/);
     const hashIndex = script.indexOf("Get-FileHash");
     NodeAssert.ok(hashIndex > -1);
-    NodeAssert.ok(script.indexOf("Unblock-File") > hashIndex);
+    NodeAssert.ok(script.lastIndexOf("Unblock-File") > hashIndex);
   });
 
   it("unblocks and runs the installer with Start-Process", () => {

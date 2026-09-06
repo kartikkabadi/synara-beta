@@ -12,11 +12,18 @@ describe("install.sh", () => {
     NodeAssert.match(script, /^set -euo pipefail$/m);
   });
 
-  it("detects Darwin and Linux platforms", () => {
-    NodeAssert.match(script, /Darwin\)/);
-    NodeAssert.match(script, /platform="macos"/);
-    NodeAssert.match(script, /Linux\)/);
-    NodeAssert.match(script, /platform="linux"/);
+  it("maps Darwin to macos and Linux to linux", () => {
+    const darwinBranch = script.indexOf("Darwin)");
+    const linuxBranch = script.indexOf("Linux)");
+    const macosAssign = script.indexOf('platform="macos"');
+    const linuxAssign = script.indexOf('platform="linux"');
+    NodeAssert.ok(darwinBranch > -1, "install.sh must detect Darwin");
+    NodeAssert.ok(linuxBranch > -1, "install.sh must detect Linux");
+    NodeAssert.ok(
+      macosAssign > darwinBranch && macosAssign < linuxBranch,
+      "Darwin branch must assign platform=macos",
+    );
+    NodeAssert.ok(linuxAssign > linuxBranch, "Linux branch must assign platform=linux");
   });
 
   it("provides Windows PowerShell instructions on Windows shells", () => {
@@ -27,6 +34,7 @@ describe("install.sh", () => {
   it("extracts --tag argument when provided", () => {
     NodeAssert.match(script, /--tag/);
     NodeAssert.match(script, /--tag=\*/);
+    NodeAssert.match(script, /tag="\$\{args\[i\+1\]\}"/);
   });
 
   it("uses a temp file with EXIT cleanup", () => {
@@ -34,7 +42,15 @@ describe("install.sh", () => {
     NodeAssert.match(script, /trap 'rm -f "\$tmp_file"' EXIT/);
   });
 
-  it("fetches the platform installer and executes it", () => {
+  it("resolves the newest beta tag and fails instead of falling back to main", () => {
+    NodeAssert.match(
+      script,
+      /curl -fsSL "https:\/\/api\.github\.com\/repos\/kartikkabadi\/synara-beta\/releases\?per_page=100"/,
+    );
+    NodeAssert.match(script, /grep -- '-beta'/);
+    NodeAssert.match(script, /install\.sh: could not resolve a release tag/);
+    NodeAssert.match(script, /install\.sh: failed to download/);
+    NodeAssert.doesNotMatch(script, /main\/scripts\/install-/);
     NodeAssert.match(script, /curl -fsSL -o "\$tmp_file"/);
     NodeAssert.match(script, /bash "\$tmp_file" "\$\{args\[@\]\}"/);
   });
