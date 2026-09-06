@@ -157,7 +157,7 @@ You can build and run Synara Beta locally using [Bun](https://bun.sh/) and [Node
 
 #### Prerequisites
 
-- [Bun](https://bun.sh/) (v1.3.12 or newer)
+- [Bun](https://bun.sh/) (v1.4.2 or newer)
 - [Node.js](https://nodejs.org/) (v24.13.1 or newer recommended)
 - [Git](https://git-scm.com/)
 - Install and authenticate the agent runtime you intend to use before starting a session. For Codex sessions, follow the [Codex CLI setup](https://github.com/openai/codex).
