@@ -49,6 +49,12 @@ Instead of locking you into proprietary cloud proxies or web chat wrappers, Syna
 
 Synara Beta brings every local agent into a unified, focused workspace. Switch models on the fly, run different agents on different tasks, and harness your existing subscriptions directly.
 
+<p align="center">
+  <picture>
+    <img src="./assets/prod/readme-provider-runtime.png" alt="Synara provider picker with Codex, Claude, Cursor, Antigravity, Grok, Droid, OpenCode, Pi, and Devin" width="100%">
+  </picture>
+</p>
+
 | Runtime                | Integration Mechanism                                 | Key Strengths                                             |
 | :--------------------- | :---------------------------------------------------- | :-------------------------------------------------------- |
 | **OpenAI Codex**       | Native CLI / `codex app-server` (JSON-RPC over stdio) | High-reasoning agentic turns, structured diff proposals   |
