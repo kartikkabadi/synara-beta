@@ -43,6 +43,11 @@ jobs:
         id: filter
         uses: dorny/paths-filter@v3
         with:
+          # Default quantifier is 'some': any matching pattern includes the file,
+          # so '!**/*.md' style exclusions never exclude anything and every PR
+          # classifies as code. 'every' requires all patterns to match, which is
+          # what makes the include-all + exclude-docs combination work.
+          predicate-quantifier: "every"
           filters: |
             code:
               # Directory exclusions stay scoped to code-free trees: marketing
