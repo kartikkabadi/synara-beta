@@ -1,5 +1,7 @@
-# Lane rule: static is fast checks with no special runtime, unit is bun test, browser owns Playwright and is the long pole, build owns Electron and desktop output.
-# Gate (quality) aggregates only: add no run steps there. A new fast check with no runtime goes to static.
+# Lane rule: static-fast is fast checks with no special runtime, static-typecheck is tsc,
+# unit is bun test per package, browser owns Playwright (stable only, sharded) and is the long pole,
+# build owns Electron and desktop output. Geometry quarantine lives in ci-nightly.yml.
+# Gate (quality) aggregates only: add no run steps there. A new fast check with no runtime goes to static-fast.
 # Setup-workspace runs once per lane, not once for all: never put checks in the shared action.
 name: CI
 
@@ -15,12 +17,42 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  static:
-    name: Static Checks
+  # Docs-only filter: PRs touching only *.md / docs / assets run fast-static +
+  # gate only. outputs.code is 'true' when any code file changed.
+  changes:
+    name: Detect code changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Filter docs-only changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            code:
+              - '**'
+              - '!**/*.md'
+              - '!docs/**'
+              - '!**/assets/**'
+              - '!**/*.png'
+              - '!**/*.jpg'
+              - '!**/*.jpeg'
+              - '!**/*.gif'
+              - '!**/*.svg'
+              - '!**/*.webp'
+              - '!**/*.ico'
+
+  # Phase 1b: the old static lane split. Fast checks (no special runtime) stay
+  # unblocked so docs-only PRs get a signal in ~1min.
+  static-fast:
+    name: Static Checks (fast)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    env:
-      NODE_OPTIONS: --max-old-space-size=4096
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -40,13 +72,50 @@ jobs:
       - name: Lint
         run: bun run lint
 
+  static-typecheck:
+    name: Static Checks (typecheck)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+
       - name: Typecheck
         run: bun run typecheck
 
+  # Phase 2f: one shard per workspace package via --filter. Going through turbo
+  # keeps the ^build contract (test dependsOn ^build) working per shard. The
+  # server package script keeps its serial flags (--maxWorkers=1
+  # --no-file-parallelism) inside its own shard.
   unit:
-    name: Unit Tests
+    name: Unit Tests (${{ matrix.pkg }})
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pkg: contracts
+            filter: '@synara/contracts'
+          - pkg: shared
+            filter: '@synara/shared'
+          - pkg: scripts
+            filter: '@synara/scripts'
+          - pkg: desktop
+            filter: '@synara/desktop'
+          - pkg: web
+            filter: '@synara/web'
+          - pkg: server
+            filter: '@synara/cli'
     env:
       NODE_OPTIONS: --max-old-space-size=4096
     steps:
@@ -57,15 +126,26 @@ jobs:
         uses: ./.github/actions/setup-workspace
 
       - name: Verify Linux terminal PTY native dependency
+        if: matrix.pkg == 'server'
         run: node scripts/node-pty-smoke.mjs
 
-      - name: Test
-        run: bun run test
+      - name: Test (${{ matrix.pkg }})
+        run: bunx turbo run test --filter=${{ matrix.filter }}
 
+  # Phase 2e: stable browser suite split 3 ways. fileParallelism:false stays in
+  # vitest.browser.stable.config.ts (untouched); --shard splits test FILES
+  # across shards, never parallelizes within a file. Each shard provisions its
+  # own chromium on its own runner.
   browser:
-    name: Browser Tests
+    name: Browser Tests (stable ${{ matrix.shard }}/3)
     runs-on: ubuntu-24.04
-    timeout-minutes: 55
+    timeout-minutes: 30
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     env:
       NODE_OPTIONS: --max-old-space-size=4096
     steps:
@@ -92,22 +172,16 @@ jobs:
           cd apps/web
           ./node_modules/.bin/playwright install --with-deps chromium
 
-      - name: Browser test (stable)
+      - name: Browser test (stable shard ${{ matrix.shard }}/3)
         timeout-minutes: 20
-        run: bun run --cwd apps/web test:browser:stable
-
-      # Pixel/font/layout comparisons are tracked explicitly in
-      # apps/web/BROWSER_TEST_QUARANTINE.md while their Linux rendering is fixed.
-      # All untagged browser tests run in the blocking stable step above.
-      - name: Browser test (Linux geometry quarantine)
-        continue-on-error: true
-        timeout-minutes: 10
-        run: bun run --cwd apps/web test:browser:geometry
+        run: bun run --cwd apps/web test:browser:stable -- --shard=${{ matrix.shard }}/3
 
   build:
     name: Desktop Build
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     env:
       NODE_OPTIONS: --max-old-space-size=4096
     steps:
@@ -128,22 +202,52 @@ jobs:
           grep -nE "desktopBridge|getWsUrl|PICK_FOLDER_CHANNEL|wsUrl" apps/desktop/dist-electron/preload.js
 
   # Aggregate only: no checkout, no run steps. Keep the old display name for branch protection. if: always() is intended, do not remove.
+  # Phase 2g: needs every required lane. Matrix jobs report one result covering
+  # all shards, so ANY failed shard fails the gate. Docs-only runs pass with
+  # heavy lanes skipped (static-fast must still succeed).
   quality:
     name: Format, Lint, Typecheck, Test, Browser Test, Build
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    needs: [static, unit, browser, build]
+    needs: [changes, static-fast, static-typecheck, unit, browser, build]
     if: always()
     steps:
       - name: Aggregate lane results
         env:
-          STATIC: ${{ needs.static.result }}
+          CHANGES: ${{ needs.changes.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+          STATIC_FAST: ${{ needs.static-fast.result }}
+          TYPECHECK: ${{ needs.static-typecheck.result }}
           UNIT: ${{ needs.unit.result }}
           BROWSER: ${{ needs.browser.result }}
           BUILD: ${{ needs.build.result }}
         run: |
-          if [ "$STATIC" != "success" ] || [ "$UNIT" != "success" ] || [ "$BROWSER" != "success" ] || [ "$BUILD" != "success" ]; then
-            echo "static=$STATIC unit=$UNIT browser=$BROWSER build=$BUILD"
+          fail=0
+          # The docs-only filter itself must have run: without it a skip proves nothing.
+          if [ "$CHANGES" != "success" ]; then
+            echo "changes=$CHANGES (filter must succeed)"
+            fail=1
+          fi
+          # Fast static always runs, docs-only or not.
+          if [ "$STATIC_FAST" != "success" ]; then
+            echo "static-fast=$STATIC_FAST"
+            fail=1
+          fi
+          for lane in "typecheck=$TYPECHECK" "unit=$UNIT" "browser=$BROWSER" "build=$BUILD"; do
+            name="${lane%%=*}"
+            result="${lane#*=}"
+            if [ "$CODE" != "true" ]; then
+              # Docs-only run: heavy lanes must be skipped, never failed.
+              if [ "$result" != "skipped" ]; then
+                echo "$name=$result (docs-only run: expected skipped)"
+                fail=1
+              fi
+            elif [ "$result" != "success" ]; then
+              echo "$name=$result"
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
             echo "Open the red lane above, not this gate."
             exit 1
           fi
@@ -152,6 +256,8 @@ jobs:
     name: Windows Process Regression
     runs-on: windows-2022
     timeout-minutes: 15
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -165,6 +271,21 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version-file: package.json
+
+      # Phase 1c: this lane's uncached install (~5m11s) is the biggest single
+      # waste. Same key scheme as setup-workspace; the frozen install below
+      # still runs for correctness and links from a warm cache.
+      - name: Cache node_modules
+        uses: actions/cache@v5
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+            scripts/node_modules
+          key: ${{ runner.os }}-bun-node-modules-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-node-modules-
 
       - name: Install dependencies
         env:
@@ -230,6 +351,8 @@ jobs:
     name: Migration Lineage
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -248,6 +371,8 @@ jobs:
     name: Release Smoke
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v6
