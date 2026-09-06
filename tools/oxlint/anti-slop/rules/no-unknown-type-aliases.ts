@@ -38,13 +38,15 @@ export const noUnknownTypeAliasesRule = defineRule({
           (type, name) => conservative(type, new Set(), new Set([name])),
         );
         resolvesToUnknown = createResolvesToUnknown(refined.aliases, refined.ambiguous);
-        for (const [name, alias] of refined.aliases) {
-          if (!resolvesToUnknown(alias.typeAnnotation, new Set(), new Set([name]))) continue;
-          context.report({
-            node: alias.id,
-            messageId: "unknownAlias",
-            data: { alias: name },
-          });
+        for (const [name, list] of collected.declarations) {
+          for (const alias of list) {
+            if (!resolvesToUnknown(alias.typeAnnotation, new Set(), new Set([name]))) continue;
+            context.report({
+              node: alias.id,
+              messageId: "unknownAlias",
+              data: { alias: name },
+            });
+          }
         }
       },
     };
