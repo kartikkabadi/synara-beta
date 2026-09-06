@@ -47,7 +47,7 @@ jobs:
           # so '!**/*.md' style exclusions never exclude anything and every PR
           # classifies as code. 'every' requires all patterns to match, which is
           # what makes the include-all + exclude-docs combination work.
-          predicate-quantifier: 'every'
+          predicate-quantifier: "every"
           filters: |
             code:
               # Directory exclusions stay scoped to code-free trees: marketing
