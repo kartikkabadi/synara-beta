@@ -88,10 +88,7 @@ function isBroadRecordType(type: ESTree.TSType): boolean {
   const unwrapped = unwrapTypeParentheses(type);
 
   if (unwrapped.type === "TSTypeReference") {
-    if (
-      typeReferenceName(unwrapped) === "Readonly" &&
-      !shadowedRecordBuiltIns.has("Readonly")
-    ) {
+    if (typeReferenceName(unwrapped) === "Readonly" && !shadowedRecordBuiltIns.has("Readonly")) {
       const [inner] = unwrapped.typeArguments?.params ?? [];
       return inner !== undefined && isBroadRecordType(inner);
     }

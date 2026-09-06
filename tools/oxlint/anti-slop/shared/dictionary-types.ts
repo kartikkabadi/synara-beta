@@ -72,7 +72,8 @@ function collectTypeDeclarations(
     if (BUILT_INS.has(node.id.name)) environment.shadowedBuiltIns.add(node.id.name);
   } else if (node.type === "ImportDeclaration") {
     for (const specifier of node.specifiers) {
-      if (BUILT_INS.has(specifier.local.name)) environment.shadowedBuiltIns.add(specifier.local.name);
+      if (BUILT_INS.has(specifier.local.name))
+        environment.shadowedBuiltIns.add(specifier.local.name);
     }
   } else if (
     (node.type === "TSEnumDeclaration" ||

@@ -96,7 +96,8 @@ describe("reflect rules", () => {
   it("reports Reflect through parentheses and type assertions", () => {
     const byFile = runRules(
       {
-        "paren.ts": "export function f(target: object) {\n  return (Reflect).get(target, 'k');\n}\n",
+        "paren.ts":
+          "export function f(target: object) {\n  return (Reflect).get(target, 'k');\n}\n",
         "asserted.ts":
           "export function g(target: object) {\n  return (Reflect as typeof Reflect).apply(Object.keys, target, []);\n}\n",
         "direct.ts": "export function h(target: object) {\n  return Reflect.get(target, 'k');\n}\n",
@@ -129,7 +130,8 @@ describe("no-unknown-parameters", () => {
       {
         "paren.ts": "export function f(input: (unknown)) { return input; }\n",
         "union.ts": "export function g(input: unknown | string) { return input; }\n",
-        "alias.ts": "type Mysterious = unknown;\nexport function h(input: Mysterious) { return input; }\n",
+        "alias.ts":
+          "type Mysterious = unknown;\nexport function h(input: Mysterious) { return input; }\n",
         "generic.ts": "export function t<T>(input: T) { return input; }\n",
         "cause.ts": "export function e(cause: unknown) { return cause; }\n",
       },
@@ -158,7 +160,8 @@ describe("no-unsafe-dictionary-type", () => {
   it("flags bare uses of generic aliases whose default is unsafe", () => {
     const byFile = runRules(
       {
-        "generic-default.ts": "type Dict<T = unknown> = Record<string, T>;\nexport let d: Dict = {};\n",
+        "generic-default.ts":
+          "type Dict<T = unknown> = Record<string, T>;\nexport let d: Dict = {};\n",
       },
       { "anti-slop/no-unsafe-dictionary-type": "error" },
     );
@@ -183,7 +186,8 @@ describe("no-unknown-returns", () => {
       {
         "infer-shadow.ts":
           "type Alias = unknown;\nexport type Wrapper<T> = T extends (U extends infer Alias ? string : never) ? { m(): Alias } : never;\n",
-        "control.ts": "type Alias = unknown;\nexport function f(): Alias { return null as never; }\n",
+        "control.ts":
+          "type Alias = unknown;\nexport function f(): Alias { return null as never; }\n",
       },
       { "anti-slop/no-unknown-returns": "error" },
     );
