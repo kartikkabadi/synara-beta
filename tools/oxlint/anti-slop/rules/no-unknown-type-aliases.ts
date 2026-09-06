@@ -5,6 +5,8 @@ import type { ESTree } from "@oxlint/plugins";
 import {
   collectAliasDeclarationsIn,
   createResolvesToUnknown,
+  firstWinsAliasDeclarations,
+  refineAliasAmbiguity,
 } from "../shared/resolves-to-unknown.ts";
 
 /** Ban named aliases that merely conceal TypeScript's unknown top type. */
@@ -26,8 +28,17 @@ export const noUnknownTypeAliasesRule = defineRule({
     return {
       Program(node) {
         const collected = collectAliasDeclarationsIn(node, context.sourceCode.visitorKeys);
-        resolvesToUnknown = createResolvesToUnknown(collected.aliases, collected.ambiguous);
-        for (const [name, alias] of collected.aliases) {
+        const conservative = createResolvesToUnknown(
+          firstWinsAliasDeclarations(collected.declarations),
+          collected.ambiguous,
+        );
+        const refined = refineAliasAmbiguity(
+          collected.declarations,
+          collected.ambiguous,
+          (type, name) => conservative(type, new Set(), new Set([name])),
+        );
+        resolvesToUnknown = createResolvesToUnknown(refined.aliases, refined.ambiguous);
+        for (const [name, alias] of refined.aliases) {
           if (!resolvesToUnknown(alias.typeAnnotation, new Set(), new Set([name]))) continue;
           context.report({
             node: alias.id,
