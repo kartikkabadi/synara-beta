@@ -96,6 +96,10 @@
       "types": "./src/desktopIdentity.ts",
       "import": "./src/desktopIdentity.ts"
     },
+    "./stableSync": {
+      "types": "./src/sync/stableSync.ts",
+      "import": "./src/sync/stableSync.ts"
+    },
     "./Net": {
       "types": "./src/Net.ts",
       "import": "./src/Net.ts"
