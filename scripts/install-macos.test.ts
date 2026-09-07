@@ -74,8 +74,8 @@ describe("install-macos.sh", () => {
     NodeAssert.match(missing.stderr, /--tag requires a value/);
   });
 
-  it("accepts valid vX.Y.Z and beta tags", () => {
-    NodeAssert.match(script, /\[\[ "\$tag" =~ \^v\[0-9\]\+\.\* \]\]/);
+  it("accepts only strict vX.Y.Z-beta.N tags", () => {
+    NodeAssert.match(script, /\[\[ "\$tag" =~ \^v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+-beta\\\.\[0-9\]\+\$ \]\]/);
   });
 
   it("downloads SHA256SUMS and DMG from release base", () => {
