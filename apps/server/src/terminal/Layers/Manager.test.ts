@@ -1209,6 +1209,28 @@ describe("TerminalManager", () => {
     manager.dispose();
   });
 
+  it("tracks running processes across open, close, and exit escalation", async () => {
+    const { manager, ptyAdapter } = makeManager(5, { processKillGraceMs: 200 });
+    expect(manager.hasRunningProcess("thread-1")).toBe(false);
+
+    await manager.open(openInput({ threadId: "thread-1" }));
+    const process = ptyAdapter.processes[0];
+    expect(process).toBeDefined();
+    if (!process) return;
+
+    expect(manager.hasRunningProcess("thread-1")).toBe(true);
+
+    await manager.close({ threadId: "thread-1" });
+    // Process has been sent SIGTERM but has not emitted exit yet
+    expect(manager.hasRunningProcess("thread-1")).toBe(true);
+
+    // Process exits
+    process.emitExit({ exitCode: 0, signal: 15 });
+    expect(manager.hasRunningProcess("thread-1")).toBe(false);
+
+    manager.dispose();
+  });
+
   it("keeps captured-child SIGKILL escalation after root exit without re-signaling the root", async () => {
     const treeSignals: Array<{
       rootPid: number;
