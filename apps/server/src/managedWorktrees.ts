@@ -248,13 +248,13 @@ export function detectMergedManagedWorktreePaths(input: {
           if (prSummary && prSummary.state !== undefined) {
             prStatusKnown = true;
             isMerged = prSummary.state === "merged";
-          } else if (thread.lastKnownPr.state !== undefined) {
+          } else if (thread.lastKnownPr.state === "merged") {
             prStatusKnown = true;
-            isMerged = thread.lastKnownPr.state === "merged";
+            isMerged = true;
           }
-        } else if (thread.lastKnownPr.state !== undefined) {
+        } else if (thread.lastKnownPr.state === "merged") {
           prStatusKnown = true;
-          isMerged = thread.lastKnownPr.state === "merged";
+          isMerged = true;
         }
       }
 

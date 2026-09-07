@@ -280,6 +280,7 @@ describe("managed worktrees", () => {
     const git = makeGit({ removals });
     const gitHubCli = makeGitHubCli({
       "https://github.com/org/repo/pull/1": { state: "merged" },
+      "https://github.com/org/repo/pull/2": { state: "open" },
     });
 
     const snapshotQuery = {
@@ -688,6 +689,40 @@ describe("managed worktrees", () => {
     );
 
     expect(Array.from(merged)).toEqual(["/wt/offline-merged"]);
+  });
+
+  it("falls back to local ancestry when GitHub CLI fails and cached PR state was open", async () => {
+    const inventory = [{ path: "/wt/offline-open-merged", workspaceRoot: "/repo" }];
+    const canonicalByRecordedPath = new Map(inventory.map((entry) => [entry.path, entry.path]));
+    const git = makeGit({
+      removals: [],
+      headShaByCwd: { "/wt/offline-open-merged": "4444444444444444444444444444444444444444" },
+      isAncestor: (sha, base) =>
+        sha === "4444444444444444444444444444444444444444" && base === "origin/main",
+    });
+    const gitHubCli = makeGitHubCli({
+      "https://github.com/org/repo/pull/101": new Error("network down"),
+    });
+
+    const merged = await Effect.runPromise(
+      detectMergedManagedWorktreePaths({
+        inventory,
+        canonicalByRecordedPath,
+        git,
+        gitHubCli,
+        threads: [
+          {
+            id: "thread-offline-open",
+            worktreePath: "/wt/offline-open-merged",
+            archivedAt: "2026-01-01T00:00:00.000Z",
+            deletedAt: null,
+            lastKnownPr: makeThreadPr({ number: 101, state: "open" }),
+          },
+        ],
+      }),
+    );
+
+    expect(Array.from(merged)).toEqual(["/wt/offline-open-merged"]);
   });
 
   it("falls back to local git merge-base when commit is merged to main without PR", async () => {
