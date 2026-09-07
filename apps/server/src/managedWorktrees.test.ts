@@ -1180,4 +1180,61 @@ describe("managed worktrees", () => {
     expect(removals).toEqual([worktreePath]);
     expect(remaining).toHaveLength(0);
   });
+
+  it("prunes shared worktree when only a later thread's non-main custom base contains HEAD", async () => {
+    const { root, paths } = await makeManagedRoot(1);
+    const worktreePath = paths[0]!;
+    const removals: string[] = [];
+    const git = makeGit({
+      removals,
+      headShaByCwd: { [worktreePath]: "1111111111111111111111111111111111111111" },
+      isAncestor: (headSha, baseRef) =>
+        headSha === "1111111111111111111111111111111111111111" && baseRef.includes("release/v1.0"),
+    });
+
+    // Thread 1 had a PR that was merged on GitHub, but its base was 'main'
+    // Thread 2 has a custom base 'release/v1.0' that contains the worktree's HEAD commit
+    const gitHubCli = makeGitHubCli({
+      "https://github.com/org/repo/pull/1": {
+        state: "merged",
+        headRefOid: "1111111111111111111111111111111111111111",
+      },
+      "https://github.com/org/repo/pull/2": null,
+    });
+
+    const threads = [
+      {
+        id: "thread-first",
+        worktreePath,
+        associatedWorktreePath: worktreePath,
+        archivedAt: "2026-01-01T00:00:00.000Z",
+        deletedAt: null,
+        lastKnownPr: makeThreadPr({ number: 1, state: "merged", baseBranch: "main" }),
+      },
+      {
+        id: "thread-second-custom-base",
+        worktreePath,
+        associatedWorktreePath: worktreePath,
+        archivedAt: "2026-01-01T00:00:00.000Z",
+        deletedAt: null,
+        lastKnownPr: makeThreadPr({ number: 2, state: "open", baseBranch: "release/v1.0" }),
+      },
+    ] as unknown as OrchestrationThread[];
+
+    const remaining = await Effect.runPromise(
+      pruneArchivedManagedWorktrees({
+        worktreesDir: root,
+        snapshotsDir: path.join(root, "snapshots"),
+        threads,
+        git,
+        pruneAfterMerge: true,
+        gitHubCli,
+      }),
+    );
+
+    // Thread 1 selected as candidate, but successfulBaseRefs preserved 'release/v1.0'
+    // so revalidation under mutation lock succeeded
+    expect(removals).toEqual([worktreePath]);
+    expect(remaining).toHaveLength(0);
+  });
 });

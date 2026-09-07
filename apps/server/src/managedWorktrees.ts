@@ -38,6 +38,7 @@ export interface MergedWorktreeInfo {
   readonly path: string;
   readonly detectedHeadSha: string | null;
   readonly mergeSource: "pr" | "ancestry";
+  readonly successfulBaseRefs?: ReadonlyArray<string> | undefined;
   readonly prHeadSha?: string | null | undefined;
 }
 
@@ -61,6 +62,7 @@ export interface ManagedWorktreeRemovalCandidate {
   readonly reason: ManagedWorktreeRemovalReason;
   readonly detectedHeadSha?: string | null | undefined;
   readonly mergeSource?: "pr" | "ancestry" | undefined;
+  readonly successfulBaseRefs?: ReadonlyArray<string> | undefined;
   readonly prHeadSha?: string | null | undefined;
 }
 
@@ -224,6 +226,7 @@ export function detectMergedManagedWorktreePaths(input: {
     readonly isMerged: boolean;
     readonly detectedHeadSha: string | null;
     readonly mergeSource: "pr" | "ancestry";
+    readonly successfulBaseRef?: string | undefined;
     readonly prHeadSha?: string | null | undefined;
   }> =>
     Effect.gen(function* () {
@@ -232,6 +235,7 @@ export function detectMergedManagedWorktreePaths(input: {
       let mergeSource: "pr" | "ancestry" = "pr";
       let headSha: string | null = null;
       let prHeadSha: string | null = null;
+      let successfulBaseRef: string | undefined = undefined;
 
       // Read current worktree HEAD SHA first to compare against PR head commit or use for ancestry
       const revParseResult = yield* input.git
@@ -334,6 +338,7 @@ export function detectMergedManagedWorktreePaths(input: {
             if (mergeBaseResult && mergeBaseResult.code === 0) {
               isMerged = true;
               mergeSource = "ancestry";
+              successfulBaseRef = baseRef;
               break;
             }
           }
@@ -344,6 +349,7 @@ export function detectMergedManagedWorktreePaths(input: {
         isMerged,
         detectedHeadSha: headSha,
         mergeSource,
+        ...(successfulBaseRef ? { successfulBaseRef } : {}),
         ...(prHeadSha ? { prHeadSha } : {}),
       };
     });
@@ -363,6 +369,7 @@ export function detectMergedManagedWorktreePaths(input: {
           let allArchivedMerged = true;
           let detectedHeadSha: string | null = null;
           let mergeSource: "pr" | "ancestry" = "pr";
+          const successfulBaseRefs: string[] = [];
           let prHeadSha: string | null = null;
 
           for (const thread of archivedOnly) {
@@ -377,6 +384,9 @@ export function detectMergedManagedWorktreePaths(input: {
             if (check.mergeSource === "ancestry") {
               mergeSource = "ancestry";
             }
+            if (check.successfulBaseRef && !successfulBaseRefs.includes(check.successfulBaseRef)) {
+              successfulBaseRefs.push(check.successfulBaseRef);
+            }
             if (check.prHeadSha) {
               prHeadSha = check.prHeadSha;
             }
@@ -387,6 +397,7 @@ export function detectMergedManagedWorktreePaths(input: {
             path: entry.path,
             detectedHeadSha,
             mergeSource,
+            ...(successfulBaseRefs.length > 0 ? { successfulBaseRefs } : {}),
             ...(prHeadSha ? { prHeadSha } : {}),
           };
         }),
@@ -481,6 +492,9 @@ export function classifyManagedWorktreeRemovalCandidates(input: {
         reason: "merged",
         detectedHeadSha: mergedInfo?.detectedHeadSha,
         mergeSource: mergedInfo?.mergeSource ?? "pr",
+        ...(mergedInfo?.successfulBaseRefs
+          ? { successfulBaseRefs: mergedInfo.successfulBaseRefs }
+          : {}),
         ...(mergedInfo?.prHeadSha ? { prHeadSha: mergedInfo.prHeadSha } : {}),
       });
     }
@@ -633,6 +647,9 @@ function removeManagedWorktreeSafely(input: {
             (input.candidate.prHeadSha && currentHeadSha !== input.candidate.prHeadSha)
           ) {
             const baseCandidates: string[] = [];
+            if (input.candidate.successfulBaseRefs) {
+              baseCandidates.push(...input.candidate.successfulBaseRefs);
+            }
             if (thread.lastKnownPr?.baseBranch) {
               baseCandidates.push(
                 thread.lastKnownPr.baseBranch,
