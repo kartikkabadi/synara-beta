@@ -131,12 +131,12 @@ Implemented in [PR #2](https://github.com/kartikkabadi/synara-beta/pull/2) (`fea
   - Downloads the NSIS `.exe` installer.
   - Verifies file integrity and launches the installer.
 
-### Cryptographic Verification (`SHA256SUMS.sig`)
+### Cryptographic Verification (Proposed in PR #2)
 
-- **Introduced in PR #2:** Adds automated generation of `SHA256SUMS` across all compiled distribution artifacts in `.github/workflows/release-beta.yml`.
-- **Signing Pipeline:** Signs `SHA256SUMS` using `ssh-keygen -Y sign` with a private SSH key stored in GitHub Repository Secrets (`SYNARA_RELEASE_SIGNING_KEY`).
-- **Client-Side Verification:** Installers download `SHA256SUMS` and `SHA256SUMS.sig`, verifying authenticity via `ssh-keygen -Y verify` against the public key pinned in `scripts/release-signing.pub`.
-- Downloaded binaries are checked against the verified checksums before execution. Note: baseline `release-beta.yml` on `main` currently publishes unsigned assets until PR #2 is merged and the secret is set.
+- **Introduced in Open PR #2:** Proposes automated generation of `SHA256SUMS` across all compiled distribution artifacts in `.github/workflows/release-beta.yml`.
+- **Signing Pipeline (Planned):** In PR #2, the release workflow signs `SHA256SUMS` using `ssh-keygen -Y sign` with a private SSH key stored in GitHub Repository Secrets (`SYNARA_RELEASE_SIGNING_KEY`).
+- **Client-Side Verification:** Installers in PR #2 verify authenticity via `ssh-keygen -Y verify` against the public key committed in `scripts/release-signing.pub` on that branch.
+- **Current Baseline on main:** The merged release workflow (`.github/workflows/release-beta.yml`) on `main` currently publishes unsigned assets without checksum signatures until PR #2 is merged and the repository secret is configured.
 
 ### In-Place Updates & Downgrade Protection
 
@@ -266,16 +266,16 @@ Run via `bun run release:beta -- <version> [betaNumber] [options]`.
 
 ### Current Progress Matrix (2026-09-08)
 
-| Phase        | Description                       | Key Deliverables                                                                                                    | Status                          |
-| :----------- | :-------------------------------- | :------------------------------------------------------------------------------------------------------------------ | :------------------------------ |
-| **Phase 1**  | Mirror & Connected Git History    | PR #22 (connected upstream ancestry), PR #11 (agent guidance), PR #12 (upstream sync docs).                         | **Completed & Merged**          |
-| **Phase 2**  | Beta Identity & Packaging         | `desktopIdentity.ts`, `desktop-platform-build-config.ts`, `main.ts`, embedded `synaraFlavor`. PR #29 (Linux arm64). | **Completed & Merged**          |
-| **Phase 3**  | Release Automation                | `release-beta.yml`, `scripts/release-beta.ts` preflight & tag bump. PR #2 (`SHA256SUMS` + SSH signing).             | **Completed & Merged**          |
-| **Phase 4**  | Initial Beta Release Cut          | Push initial tag (`v0.8.3-beta.1`) to `origin`, trigger CI release run, publish GitHub Release.                     | **Ready for Execution**         |
-| **Phase 5A** | Coexistence Auto-Sync Engine      | PR #3 (`@synara/shared/stableSync`, `bun run sync:stable`, `--undo`, `--watch`, `docs/sync.md`).                    | **Completed & Merged**          |
-| **Phase 5B** | One-Line Cross-Platform Installer | PR #2 (`install.sh`, `install-macos.sh`, `install-linux.sh`, `install-windows.ps1`, `docs/install.md`).             | **Open (PR #2)**                |
-| **Phase 5C** | Telemetry & Crash Reporting       | Deploy OpenAnalytics on VPS; add settings toggle and 23-field crash reporter in `apps/desktop`.                     | **Pending Design / Deployment** |
-| **Phase 6**  | Clean Upstream PRs                | Non-blocking backports to upstream `Emanuele-web04/synara`.                                                         | **Deferred / Non-blocking**     |
+| Phase        | Description                       | Key Deliverables                                                                                                                  | Status                          |
+| :----------- | :-------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------- | :------------------------------ |
+| **Phase 1**  | Mirror & Connected Git History    | PR #22 (connected upstream ancestry), PR #11 (agent guidance), PR #12 (upstream sync docs).                                       | **Completed & Merged**          |
+| **Phase 2**  | Beta Identity & Packaging         | `desktopIdentity.ts`, `desktop-platform-build-config.ts`, `main.ts`, embedded `synaraFlavor`. PR #29 (Linux arm64).               | **Completed & Merged**          |
+| **Phase 3**  | Release Automation                | `release-beta.yml` baseline, `scripts/release-beta.ts` preflight & tag bump.                                                      | **Completed & Merged**          |
+| **Phase 4**  | Initial Beta Release Cut          | Push initial tag (`v0.8.3-beta.1`) to `origin`, trigger CI release run, publish GitHub Release.                                   | **Ready for Execution**         |
+| **Phase 5A** | Coexistence Auto-Sync Engine      | PR #3 (`@synara/shared/stableSync`, `bun run sync:stable`, `--undo`, `--watch`, `docs/sync.md`).                                  | **Completed & Merged**          |
+| **Phase 5B** | One-Line Cross-Platform Installer | PR #2 (`install.sh`, `install-macos.sh`, `install-linux.sh`, `install-windows.ps1`, SHA256SUMS + SSH signing, `docs/install.md`). | **Open (PR #2)**                |
+| **Phase 5C** | Telemetry & Crash Reporting       | Deploy OpenAnalytics on VPS; add settings toggle and 23-field crash reporter in `apps/desktop`.                                   | **Pending Design / Deployment** |
+| **Phase 6**  | Clean Upstream PRs                | Non-blocking backports to upstream `Emanuele-web04/synara`.                                                                       | **Deferred / Non-blocking**     |
 
 ---
 
