@@ -35,7 +35,7 @@ import type { GitHubCliError } from "../Errors.ts";
  * that cost; if status polling ever feels slow, this field is the first suspect.
  */
 export const PULL_REQUEST_SUMMARY_JSON_FIELDS =
-  "number,title,url,baseRefName,headRefName,state,mergedAt,isDraft,mergeable,additions,deletions,changedFiles,isCrossRepository,headRepository,headRepositoryOwner,updatedAt";
+  "number,title,url,baseRefName,headRefName,state,mergedAt,isDraft,mergeable,additions,deletions,changedFiles,isCrossRepository,headRepository,headRepositoryOwner,updatedAt,headRefOid";
 
 export interface GitHubPullRequestSummary {
   readonly number: number;
@@ -54,6 +54,7 @@ export interface GitHubPullRequestSummary {
   readonly headRepositoryOwnerLogin?: string | null;
   /** ISO timestamp of the last PR update; used to rank multiple PRs for one branch. */
   readonly updatedAt?: string | null;
+  readonly headRefOid?: string | null | undefined;
 }
 
 export interface GitHubRepositoryCloneUrls {
