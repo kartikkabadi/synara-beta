@@ -40,6 +40,6 @@ CI installs Electron and Playwright explicitly and verifies the Linux `node-pty`
 
 ## Desktop releases
 
-`.github/workflows/release.yml` builds tagged desktop releases for macOS arm64/x64, Linux x64, and Windows x64 from one verified source commit. Publication uses platform signing/notarization credentials where required; build-only workflow runs may produce unsigned artifacts when publication is disabled.
+`.github/workflows/release.yml` builds tagged desktop releases for macOS arm64/x64, Linux arm64/x64, and Windows x64 from one verified source commit. Publication uses platform signing/notarization credentials where required; build-only workflow runs may produce unsigned artifacts when publication is disabled.
 
 The release workflow also verifies source and artifact provenance before publication. See `docs/release.md` for the current signing, provenance, and release checklist.

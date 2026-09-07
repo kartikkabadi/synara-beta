@@ -149,7 +149,7 @@ Supported native platforms:
 
 - **macOS:** Apple Silicon (`arm64`) & Intel (`x64`)
 - **Windows:** x64
-- **Linux:** x64 (`.AppImage`)
+- **Linux:** x64 and arm64 (`.AppImage`)
 
 ### Running from Source
 
