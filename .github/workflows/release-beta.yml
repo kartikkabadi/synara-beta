@@ -466,6 +466,27 @@ jobs:
           rm -f SHA256SUMS
           shasum -a 256 -- * > SHA256SUMS
 
+      - name: Sign release checksums
+        env:
+          SYNARA_RELEASE_SIGNING_KEY: ${{ secrets.SYNARA_RELEASE_SIGNING_KEY }}
+        shell: bash
+        run: |
+          cd release-assets
+          if [ -z "$SYNARA_RELEASE_SIGNING_KEY" ]; then
+            echo "SYNARA_RELEASE_SIGNING_KEY is not set; refusing to publish an unsigned release." >&2
+            echo "Generate a signing key (ssh-keygen -t ed25519 -C synara-beta-release-signing), store the" >&2
+            echo "private key in the SYNARA_RELEASE_SIGNING_KEY secret, and commit the public key to" >&2
+            echo "scripts/release-signing.pub (installers pin it)." >&2
+            exit 1
+          fi
+          key_file="$(mktemp)"
+          cleanup() { rm -f "$key_file"; }
+          trap cleanup EXIT
+          printf '%s\n' "$SYNARA_RELEASE_SIGNING_KEY" > "$key_file"
+          chmod 600 "$key_file"
+          ssh-keygen -Y sign -f "$key_file" -n synara-beta SHA256SUMS
+          test -f SHA256SUMS.sig
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
@@ -485,4 +506,5 @@ jobs:
             release-assets/*.provenance.json
             release-assets/*.tar.gz
             release-assets/SHA256SUMS
+            release-assets/SHA256SUMS.sig
           fail_on_unmatched_files: true

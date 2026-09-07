@@ -29,7 +29,7 @@ describe("install-windows.ps1", () => {
       script,
       /https:\/\/api\.github\.com\/repos\/kartikkabadi\/synara-beta\/releases\?per_page=100/,
     );
-    NodeAssert.match(script, /-like '\*-beta\*'/);
+    NodeAssert.match(script, /tag_name -match '\^v\\d\+\\\.\\d\+\\\.\\d\+-beta\\\.\\d\+\$'/);
     NodeAssert.match(script, /if \(-not \$Tag\)/);
   });
 

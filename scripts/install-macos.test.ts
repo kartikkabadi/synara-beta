@@ -20,12 +20,27 @@ describe("install-macos.sh", () => {
     NodeAssert.match(script, /x86_64\)/);
   });
 
-  it("uses a temp dir cleaned by an EXIT trap", () => {
+  it("uses a temp dir cleaned by an EXIT trap that restores interrupted upgrades", () => {
     NodeAssert.match(script, /^tmp="\$\(mktemp -d\)"$/m);
+    NodeAssert.match(script, /^trap restore_on_exit EXIT$/m);
+    NodeAssert.match(script, /if \[ -n "\$\{swap_started:-\}" \] && \[ ! -d "\$app" \] && \[ -d "\$old_app" \]; then/);
+    NodeAssert.match(script, /previous installation restored/);
+  });
+
+  it("verifies the release signature before trusting checksums", () => {
     NodeAssert.match(
       script,
-      /^trap 'hdiutil detach "\$mnt" >\/dev\/null 2>&1 \|\| true; rm -rf "\$tmp"' EXIT$/m,
+      /ssh-keygen -Y verify -f "\$tmp\/allowed_signers" -I synara-beta-releases -s "\$tmp\/SHA256SUMS\.sig" -n synara-beta < "\$tmp\/SHA256SUMS"/,
     );
+    NodeAssert.match(script, /release signature verification failed/);
+    NodeAssert.match(script, /ALLOWED_SIGNERS="synara-beta-releases ssh-ed25519 /);
+  });
+
+  it("detects the installed version and refuses same-version and downgrade installs", () => {
+    NodeAssert.match(script, /CFBundleShortVersionString/);
+    NodeAssert.match(script, /is already installed/);
+    NodeAssert.match(script, /Pass --force to downgrade/);
+    NodeAssert.match(script, /--force\)/);
   });
 
   it("supports a --tag override and defaults to the newest beta prerelease", () => {
@@ -35,7 +50,10 @@ describe("install-macos.sh", () => {
       script,
       /curl -fsSL "https:\/\/api\.github\.com\/repos\/kartikkabadi\/synara-beta\/releases\?per_page=100"/,
     );
-    NodeAssert.match(script, /grep -- '-beta'/);
+    NodeAssert.match(
+      script,
+      /grep -E '\^v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+-beta\\\.\[0-9\]\+\$'/,
+    );
     NodeAssert.match(script, /if \[ -z "\$tag" \]; then/);
   });
 

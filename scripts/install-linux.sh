@@ -2,7 +2,7 @@
 #
 # One-line Linux installer for Synara Beta (x86_64).
 #
-#   t=$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep '"tag_name"' | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | grep -- '-beta' | head -1); if [ -z "$t" ]; then echo "Could not resolve the latest Synara Beta release." >&2; (exit 1); else f=$(mktemp /tmp/synara-beta-install.XXXXXX) && curl -fsSL -o "$f" "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-linux.sh" && bash "$f" --tag "$t"; rc=$?; rm -f "${f:-/tmp/synara-beta-install-none}"; (exit $rc); fi
+#   t=$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep '"tag_name"' | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$' | head -1); if [ -z "$t" ]; then echo "Could not resolve the latest Synara Beta release." >&2; (exit 1); else f=$(mktemp /tmp/synara-beta-install.XXXXXX) && curl -fsSL -o "$f" "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-linux.sh" && bash "$f" --tag "$t"; rc=$?; rm -f "${f:-/tmp/synara-beta-install-none}"; (exit $rc); fi
 #   bash install-linux.sh --tag v0.8.2-beta.1
 #
 # Downloads the GitHub AppImage for the latest beta tag (or --tag), checks
@@ -11,6 +11,13 @@
 
 set -euo pipefail
 
+# Pinned release-signing public key (scripts/release-signing.pub at the tag the
+# installer ships from). SHA256SUMS is signed with the matching private key
+# during the release workflow; verification happens before any checksum is
+# trusted. Rotate by updating the workflow secret and this line together.
+ALLOWED_SIGNERS="synara-beta-releases ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFA61LZNkb3QTME3wdqznC/zghISZ9nsS2BnUMUQ1JRo"
+
+force=0
 tag=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -26,14 +33,19 @@ while [ "$#" -gt 0 ]; do
       tag="${1#--tag=}"
       shift
       ;;
+    --force)
+      force=1
+      shift
+      ;;
     -h|--help)
-      echo "usage: install-linux.sh [--tag vX.Y.Z]"
+      echo "usage: install-linux.sh [--tag vX.Y.Z] [--force]"
       echo "installs Synara Beta AppImage to ~/.local/bin/synara-beta"
+      echo "re-running with a newer tag updates in place; ~/.synara-beta is never touched"
       exit 0
       ;;
     *)
       echo "install-linux.sh: unknown argument: $1" >&2
-      echo "usage: install-linux.sh [--tag vX.Y.Z]" >&2
+      echo "usage: install-linux.sh [--tag vX.Y.Z] [--force]" >&2
       exit 1
       ;;
   esac
@@ -64,8 +76,10 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 if [ -z "$tag" ]; then
-  # /releases/latest excludes prereleases, so list releases and pick the newest -beta tag.
-  tag="$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep '"tag_name"' | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | grep -- '-beta' | head -1 || true)"
+  # /releases/latest excludes prereleases, so list releases and pick the newest
+  # beta tag. The pattern matches exactly the tags the beta release workflow
+  # publishes (vX.Y.Z-beta.N) so unrelated prerelease names are never selected.
+  tag="$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep '"tag_name"' | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$' | head -1 || true)"
 fi
 
 if [ -z "$tag" ]; then
@@ -79,6 +93,26 @@ if ! [[ "$tag" =~ ^v[0-9]+.* ]]; then
 fi
 
 version="${tag#v}"
+
+# Update semantics: re-running this installer is the update path. The installed
+# version is stamped under XDG_STATE_HOME (never inside the app's ~/.synara-beta
+# data directory); skip when it already matches, refuse downgrades without --force.
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/synara-beta-installer"
+version_stamp="$state_dir/installed-version"
+if [ -f "$version_stamp" ]; then
+  installed_version="$(cat "$version_stamp" 2>/dev/null || echo "")"
+  if [ -n "$installed_version" ]; then
+    if [ "$installed_version" = "$version" ] && [ "$force" -ne 1 ]; then
+      echo "Synara Beta $installed_version is already installed. Re-run with --force to reinstall."
+      exit 0
+    fi
+    if [ "$force" -ne 1 ] && [ "$(printf '%s\n%s\n' "$installed_version" "$version" | sort -V | head -1)" = "$version" ]; then
+      echo "install-linux.sh: installed Synara Beta $installed_version is newer than $tag. Pass --force to downgrade." >&2
+      exit 1
+    fi
+  fi
+fi
+
 echo "Installing Synara Beta $tag for Linux ($arch)..."
 
 base="https://github.com/kartikkabadi/synara-beta/releases/download/${tag}"
@@ -86,6 +120,18 @@ curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS" || {
   echo "install-linux.sh: failed to fetch SHA256SUMS from $base/SHA256SUMS" >&2
   exit 1
 }
+
+curl -fsSL -o "$tmp/SHA256SUMS.sig" "$base/SHA256SUMS.sig" || {
+  echo "install-linux.sh: failed to fetch SHA256SUMS.sig from $base/SHA256SUMS.sig" >&2
+  exit 1
+}
+
+printf '%s\n' "$ALLOWED_SIGNERS" > "$tmp/allowed_signers"
+echo "Verifying release signature..."
+if ! ssh-keygen -Y verify -f "$tmp/allowed_signers" -I synara-beta-releases -s "$tmp/SHA256SUMS.sig" -n synara-beta < "$tmp/SHA256SUMS" >/dev/null 2>&1; then
+  echo "install-linux.sh: release signature verification failed for SHA256SUMS. Refusing to install." >&2
+  exit 1
+fi
 
 # Match candidate AppImage in SHA256SUMS
 appimage="$(grep -E "[[:space:]]+\*?Synara.*(${arch_pattern})\.AppImage\$" "$tmp/SHA256SUMS" | head -1 | awk '{print $NF}' | sed 's/^\*//' || true)"
@@ -127,14 +173,15 @@ fi
 
 mv -f "$staged" "$dest"
 
-# Register desktop entry
+# Register desktop entry. The Exec value is quoted so home paths containing
+# spaces do not split into multiple arguments.
 desktop_dir="$HOME/.local/share/applications"
 if mkdir -p "$desktop_dir" 2>/dev/null; then
   cat << DESKTOP_ENTRY > "$desktop_dir/synara-beta.desktop" || echo "install-linux.sh: warning: could not write desktop entry" >&2
 [Desktop Entry]
 Name=Synara Beta
 Comment=Coding Agent Workspace
-Exec=$HOME/.local/bin/synara-beta %U
+Exec="$HOME/.local/bin/synara-beta" %U
 Icon=synara-beta
 Terminal=false
 Type=Application
@@ -143,6 +190,11 @@ Categories=Development;
 DESKTOP_ENTRY
   chmod +x "$desktop_dir/synara-beta.desktop" 2>/dev/null || true
 fi
+
+# Stamp the installed version so re-runs can detect "already up to date" and
+# refuse downgrades. Lives under XDG_STATE_HOME, never inside ~/.synara-beta.
+mkdir -p "$state_dir"
+printf '%s\n' "$version" > "$version_stamp"
 
 echo "Installed Synara Beta $tag."
 case ":$PATH:" in
