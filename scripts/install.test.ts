@@ -20,7 +20,11 @@ interface InstallSandbox {
   selfPath: string;
 }
 
-function makeSandbox(options: { uname: string; releases: string; platformScript?: string }): InstallSandbox {
+function makeSandbox(options: {
+  uname: string;
+  releases: string;
+  platformScript?: string;
+}): InstallSandbox {
   const sandbox = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "synara-install-router-"));
   const stubBin = NodePath.join(sandbox, "bin");
   NodeFS.mkdirSync(stubBin, { recursive: true });
