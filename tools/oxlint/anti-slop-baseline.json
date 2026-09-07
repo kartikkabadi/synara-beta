@@ -5326,6 +5326,12 @@
       "c05d5eee": 1
     }
   },
+  "anti-slop(no-module-mocking):apps/web/src/components/DiffPanel.browser.tsx": {
+    "total": 3,
+    "messages": {
+      "c05d5eee": 3
+    }
+  },
   "anti-slop(no-module-mocking):apps/web/src/components/EditorWorkspaceView.test.tsx": {
     "total": 2,
     "messages": {
