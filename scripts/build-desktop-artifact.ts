@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
@@ -271,6 +271,10 @@ const BuildEnvConfig = Config.all({
   mockUpdates: Config.string("SYNARA_DESKTOP_MOCK_UPDATES").pipe(Config.option),
   mockUpdateServerPort: Config.string("SYNARA_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(Config.option),
 });
+
+function resolveElectronRebuildCliPath(): string {
+  return join(dirname(requireFromScriptsWorkspace.resolve("@electron/rebuild")), "cli.js");
+}
 
 const resolveBooleanFlag = (flag: Option.Option<boolean>, envValue: boolean) =>
   Option.getOrElse(flag, () => envValue);
@@ -653,6 +657,8 @@ const installFrozenStageDependencies = Effect.fn("installFrozenStageDependencies
   repoRoot: string,
   stageAppDir: string,
   platform: typeof BuildPlatform.Type,
+  arch: Exclude<typeof BuildArch.Type, "universal">,
+  electronVersion: string,
   verbose: boolean,
 ) {
   const path = yield* Path.Path;
@@ -699,16 +705,14 @@ const installFrozenStageDependencies = Effect.fn("installFrozenStageDependencies
   }
 
   if (platform === "linux") {
-    // node-pty's npm package does not ship Linux prebuilds. Keep the frozen
-    // install's blanket lifecycle-script block, then rebuild only node-pty so
-    // npm supplies node-gyp to its install script and compiles the native
-    // binding required by the packaged terminal.
-    yield* Effect.log("[desktop-artifact] Building staged Linux node-pty binding...");
+    // Rebuild only node-pty against Electron. Other optional native packages
+    // ship N-API prebuilds and must not be needlessly compiled against V8.
+    yield* Effect.log("[desktop-artifact] Building staged Linux node-pty binding for Electron...");
     yield* runCommand(
       ChildProcess.make({
         cwd: stageAppDir,
         ...commandOutputOptions(verbose),
-      })`npm rebuild node-pty --foreground-scripts`,
+      })`${process.execPath} ${resolveElectronRebuildCliPath()} --version ${electronVersion} --module-dir ${stageAppDir} --arch ${arch} --platform linux --which-module node-pty`,
     );
   }
 
@@ -777,6 +781,9 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   } as const;
 
   Object.assign(buildConfig, createDesktopPlatformBuildConfig(platformBuildConfigInput));
+  if (platform === "linux") {
+    buildConfig.npmRebuild = false;
+  }
 
   return {
     buildConfig,
@@ -1088,7 +1095,14 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     },
   };
 
-  yield* installFrozenStageDependencies(repoRoot, stageAppDir, options.platform, options.verbose);
+  yield* installFrozenStageDependencies(
+    repoRoot,
+    stageAppDir,
+    options.platform,
+    options.arch === "universal" ? "x64" : options.arch,
+    electronVersion,
+    options.verbose,
+  );
 
   const stagePackageJsonString = yield* encodeJsonString(stagePackageJson);
   yield* fs.writeFileString(path.join(stageAppDir, "package.json"), `${stagePackageJsonString}\n`);

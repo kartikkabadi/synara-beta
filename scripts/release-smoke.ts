@@ -407,13 +407,18 @@ function verifyDesktopStageLockAuthority(): void {
   );
   assertContains(
     buildScript,
-    ")`npm rebuild node-pty --foreground-scripts`,",
-    "Expected Linux desktop staging to build only node-pty after the script-free frozen install.",
+    "--which-module node-pty`,",
+    "Expected Linux desktop staging to rebuild only node-pty for Electron after the script-free frozen install.",
   );
   assertNotContains(
     buildScript,
-    "npm rebuild --foreground-scripts",
-    "Desktop staging must never enable every dependency lifecycle script.",
+    "npm rebuild node-pty",
+    "Desktop staging must use Electron's ABI-aware rebuild path for node-pty.",
+  );
+  assertContains(
+    buildScript,
+    "buildConfig.npmRebuild = false",
+    "Desktop staging must disable electron-builder's broad native dependency rebuild.",
   );
   assertNotContains(
     buildScript,

@@ -218,6 +218,7 @@
       "devDependencies": {
         "@effect/language-service": "catalog:",
         "@effect/vitest": "catalog:",
+        "@electron/rebuild": "4.2.0",
         "@types/bun": "catalog:",
         "electron-builder": "26.15.3",
         "typescript": "catalog:",
