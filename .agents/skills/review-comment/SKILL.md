@@ -62,7 +62,7 @@ The body is GitHub-flavored Markdown. Use single backticks for short identifiers
        -f start_line=174 \
        -f side=RIGHT \
        -f start_side=RIGHT \
-       -f body="Thanks for the PR..."
+       -f body="Thank you for the PR..."
      ```
 
    - Update an existing line comment (JSON body avoids quoting issues):
@@ -86,7 +86,7 @@ The body is GitHub-flavored Markdown. Use single backticks for short identifiers
 ## Example
 
 ```
-Thanks for the PR. The `glm` and `deepseek` casing fixes are right, but `rawNameIsIdentifier` looks like it will regress provider-branded names that aren't in `MODEL_TOKEN_DISPLAY_NAMES`.
+Thank you for the PR. The `glm` and `deepseek` casing fixes are right, but `rawNameIsIdentifier` looks like it will regress provider-branded names that aren't in `MODEL_TOKEN_DISPLAY_NAMES`.
 
 OpenCode serves `opencode/minimax-m2.5-free` with `name: "MiniMax M2.5 Free"`. With this check, `modelDisplayIdentity("MiniMax M2.5 Free")` equals `modelDisplayIdentity("minimax-m2.5-free")`, so the provider-supplied name is discarded and the fallback is `humanizeModelSlug`. That function only restores casing for `deepseek` and `glm`, so `minimax` becomes `Minimax` and the rendered label is `Minimax M2.5 Free` — losing the brand casing.
 
