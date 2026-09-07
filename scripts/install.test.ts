@@ -14,11 +14,11 @@ const script = NodeFS.readFileSync(scriptPath, "utf8");
  * script that records how it was invoked. `platformScript` is the body of the
  * delegated installer the stub curl serves.
  */
-function makeSandbox(options: {
-  uname: string;
-  releases: string;
-  platformScript?: string;
-}): { sandbox: string; recordPath: string; selfPath: string } {
+function makeSandbox(options: { uname: string; releases: string; platformScript?: string }): {
+  sandbox: string;
+  recordPath: string;
+  selfPath: string;
+} {
   const sandbox = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "synara-install-router-"));
   const stubBin = NodePath.join(sandbox, "bin");
   NodeFS.mkdirSync(stubBin, { recursive: true });
@@ -104,13 +104,12 @@ describe("install.sh", () => {
       try {
         const result = tryBash(scriptPath, [], sandboxEnv(sandbox));
         NodeAssert.equal(result.status, 0);
-        const fetched = NodeFS.readFileSync(
-          NodePath.join(sandbox, "fetched-urls.txt"),
-          "utf8",
-        );
+        const fetched = NodeFS.readFileSync(NodePath.join(sandbox, "fetched-urls.txt"), "utf8");
         NodeAssert.match(
           fetched,
-          new RegExp(`raw\\.githubusercontent\\.com/kartikkabadi/synara-beta/[^/]+/scripts/${expectedScript}`),
+          new RegExp(
+            `raw\\.githubusercontent\\.com/kartikkabadi/synara-beta/[^/]+/scripts/${expectedScript}`,
+          ),
         );
         NodeAssert.equal(NodeFS.existsSync(recordPath), true);
       } finally {

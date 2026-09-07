@@ -23,7 +23,10 @@ describe("install-macos.sh", () => {
   it("uses a temp dir cleaned by an EXIT trap that restores interrupted upgrades", () => {
     NodeAssert.match(script, /^tmp="\$\(mktemp -d\)"$/m);
     NodeAssert.match(script, /^trap restore_on_exit EXIT$/m);
-    NodeAssert.match(script, /if \[ -n "\$\{swap_started:-\}" \] && \[ ! -d "\$app" \] && \[ -d "\$old_app" \]; then/);
+    NodeAssert.match(
+      script,
+      /if \[ -n "\$\{swap_started:-\}" \] && \[ ! -d "\$app" \] && \[ -d "\$old_app" \]; then/,
+    );
     NodeAssert.match(script, /previous installation restored/);
   });
 
