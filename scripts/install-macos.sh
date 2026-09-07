@@ -10,6 +10,24 @@
 
 set -euo pipefail
 
+# Portable version key: vX.Y.Z-beta.N -> fixed-width sortable string where a
+# stable release sorts after its beta previews. Avoids GNU sort -V, which the
+# stock macOS sort does not support.
+version_key() {
+  local v="${1#v}"
+  local base="${v%%-*}"
+  local beta="9999"
+  case "$v" in
+    *-beta.*) beta="${v#*-beta.}" ;;
+  esac
+  local a="" b="" c=""
+  IFS=. read -r a b c <<KEY_EOF
+$base
+KEY_EOF
+  printf '%06d%06d%06d%06d' "${a:-0}" "${b:-0}" "${c:-0}" "${beta:-9999}"
+}
+
+
 # Pinned release-signing public key (scripts/release-signing.pub at the tag the
 # installer ships from). SHA256SUMS is signed with the matching private key
 # during the release workflow; verification happens before any checksum is
@@ -115,7 +133,7 @@ if [ -d "$app" ]; then
       echo "Synara Beta $installed_version is already installed. Re-run with --force to reinstall."
       exit 0
     fi
-    if [ "$force" -ne 1 ] && [ "$(printf '%s\n%s\n' "$installed_version" "$version" | sort -V | head -1)" = "$version" ] && [ "$installed_version" != "$version" ]; then
+    if [ "$force" -ne 1 ] && [[ "$(version_key "$installed_version")" > "$(version_key "$version")" ]]; then
       echo "install-macos.sh: installed Synara Beta $installed_version is newer than $tag. Pass --force to downgrade." >&2
       exit 1
     fi

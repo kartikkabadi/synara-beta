@@ -366,7 +366,8 @@ jobs:
             --assets-dir release-publish \
             --platform "${{ matrix.platform }}" \
             --arch "${{ matrix.arch }}" \
-            --version "${{ needs.preflight.outputs.version }}"
+            --version "${{ needs.preflight.outputs.version }}" \
+            --executable-name synara-beta
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7

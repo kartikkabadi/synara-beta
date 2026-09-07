@@ -11,6 +11,23 @@
 
 set -euo pipefail
 
+# Portable version key: vX.Y.Z-beta.N -> fixed-width sortable string where a
+# stable release sorts after its beta.
+version_key() {
+  local v="${1#v}"
+  local base="${v%%-*}"
+  local beta="9999"
+  case "$v" in
+    *-beta.*) beta="${v#*-beta.}" ;;
+  esac
+  local a="" b="" c=""
+  IFS=. read -r a b c <<KEY_EOF
+$base
+KEY_EOF
+  printf '%06d%06d%06d%06d' "${a:-0}" "${b:-0}" "${c:-0}" "${beta:-9999}"
+}
+
+
 # Pinned release-signing public key (scripts/release-signing.pub at the tag the
 # installer ships from). SHA256SUMS is signed with the matching private key
 # during the release workflow; verification happens before any checksum is
@@ -99,14 +116,16 @@ version="${tag#v}"
 # data directory); skip when it already matches, refuse downgrades without --force.
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/synara-beta-installer"
 version_stamp="$state_dir/installed-version"
-if [ -f "$version_stamp" ]; then
+# A matching stamp only means "up to date" when the binary is actually present;
+# if it was removed, fall through and reinstall.
+if [ -f "$version_stamp" ] && [ -x "$HOME/.local/bin/synara-beta" ]; then
   installed_version="$(cat "$version_stamp" 2>/dev/null || echo "")"
   if [ -n "$installed_version" ]; then
     if [ "$installed_version" = "$version" ] && [ "$force" -ne 1 ]; then
       echo "Synara Beta $installed_version is already installed. Re-run with --force to reinstall."
       exit 0
     fi
-    if [ "$force" -ne 1 ] && [ "$(printf '%s\n%s\n' "$installed_version" "$version" | sort -V | head -1)" = "$version" ]; then
+    if [ "$force" -ne 1 ] && [ "$(version_key "$installed_version")" \> "$(version_key "$version")" ]; then
       echo "install-linux.sh: installed Synara Beta $installed_version is newer than $tag. Pass --force to downgrade." >&2
       exit 1
     fi
