@@ -179,6 +179,11 @@ jobs:
             platform: linux
             target: AppImage
             arch: x64
+          - label: Linux arm64
+            runner: ubuntu-24.04-arm
+            platform: linux
+            target: AppImage
+            arch: arm64
           - label: Windows x64
             runner: windows-2022
             platform: win
@@ -341,6 +346,11 @@ jobs:
             fi
           fi
 
+          if [[ "${{ matrix.platform }}" == "linux" ]]; then
+            node scripts/merge-linux-update-manifests.ts normalize \
+              release-publish "${{ matrix.arch }}"
+          fi
+
       - name: Verify and record artifact provenance
         shell: bash
         env:
@@ -497,12 +507,13 @@ jobs:
           name: server-tarball
           path: release-assets
 
-      - name: Merge macOS updater manifests
+      - name: Merge updater manifests
         run: |
           node scripts/merge-mac-update-manifests.ts \
             release-assets/latest-mac.yml \
             release-assets/latest-mac-x64.yml
           rm -f release-assets/latest-mac-x64.yml
+          node scripts/merge-linux-update-manifests.ts merge release-assets
 
       - name: Prepare updater feed metadata
         run: node scripts/prepare-release-update-feed.ts release-assets

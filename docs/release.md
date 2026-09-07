@@ -9,10 +9,10 @@ This document covers build-only native validation and publishing desktop release
   - A pushed tag matching `v*.*.*` publishes after successful builds.
   - Manual publication requires the explicit `publish_release=true` input.
 - Runs quality gates first: lint, typecheck, test.
-- Builds four artifacts in parallel:
+- Builds five artifacts in parallel:
   - macOS `arm64` DMG
   - macOS `x64` DMG
-  - Linux `x64` AppImage
+  - Linux `x64` and `arm64` AppImages
   - Windows `x64` NSIS installer
 - Publishes one versioned GitHub Release with all produced files.
   - Versions with a suffix after `X.Y.Z` (for example `1.2.3-alpha.1`) are published as GitHub prereleases.
@@ -39,11 +39,11 @@ This document covers build-only native validation and publishing desktop release
   - otherwise `GITHUB_REPOSITORY` from GitHub Actions.
 - Required Synara release assets for updater:
   - platform installers (`.exe`, `.dmg`, `.AppImage`, plus macOS `.zip` for Squirrel.Mac update payloads)
-  - `synara-mac.yml`, `synara.yml`, and `synara-linux.yml` metadata
-  - every stable release includes both `synara-mac.yml`, `synara.yml`, `synara-linux.yml` and `latest-mac.yml`, `latest.yml`, `latest-linux.yml`
+  - `synara-mac.yml`, `synara.yml`, `synara-linux.yml`, and `synara-linux-arm64.yml` metadata
+  - every stable release includes `synara-mac.yml`, `synara.yml`, `synara-linux.yml`, `synara-linux-arm64.yml`, `latest-mac.yml`, `latest.yml`, `latest-linux.yml`, and `latest-linux-arm64.yml`
   - `*.blockmap` files, except the macOS update `.zip.blockmap` removed after zip repack
 - Enforced upgrade path:
-  - Stable clean Synara releases are created with `make_latest=true` and carry both six-manifest filenames in the versioned release.
+  - Stable clean Synara releases are created with `make_latest=true` and carry all eight updater manifest filenames in the versioned release.
   - The historical 0.4.x compatibility release remains available for predecessor migration and is never overwritten by a clean-lane release.
   - Clean releases do not mirror payloads onto the historical compatibility release, so the 0.4.x line remains immutable.
   - Clean-release publication fails closed if either the default Latest manifests or the dedicated `synara` aliases are missing.
@@ -53,6 +53,8 @@ This document covers build-only native validation and publishing desktop release
   - The workflow merges the per-arch macOS metadata, then keeps the merged manifest as `latest-mac.yml` and copies it to `synara-mac.yml` for stable releases.
   - The desktop build script repacks the macOS update `.zip` with `ditto`, verifies Electron framework symlinks, extracts the zip, validates the extracted app signature, patches the matching `latest-mac*.yml` hash/size, and removes the stale `.zip.blockmap`.
   - macOS updater downloads intentionally use the full zip payload so Squirrel.Mac installs the exact signed archive validated by release build.
+- Linux metadata note:
+  - Linux x64 and arm64 builds are published through `latest-linux.yml` and `latest-linux-arm64.yml`; the release workflow merges both artifact entries and copies the combined feed to both architecture-specific names.
 - Local smoke test:
   - Run `bun run release:smoke:mac-update -- --skip-build --build-version 0.1.5` on macOS after local desktop/server/web dist files exist.
   - The smoke builds a mock update artifact, validates manifest hash/size, serves a HEAD-only local endpoint, confirms the manifest and zip are addressable without downloading the zip body, then cleans up its temp output.
@@ -94,7 +96,7 @@ Use this before publication to validate the real native macOS, Linux, and Window
 2. Start the workflow in build-only mode:
    - `gh workflow run release.yml --ref BRANCH -f version=X.Y.Z -f publish_release=false`
 3. Wait for `.github/workflows/release.yml` to finish.
-4. Confirm preflight and all four native matrix builds pass.
+4. Confirm preflight and all five native matrix builds pass.
 5. Download the workflow artifacts and sanity-check installation on each OS.
 
 To publish from a manual dispatch instead of a tag push, pass `publish_release=true`. This is intentionally opt-in.

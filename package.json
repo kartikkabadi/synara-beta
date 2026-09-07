@@ -59,6 +59,7 @@
     "dist:desktop:dmg:arm64": "node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch arm64",
     "dist:desktop:dmg:x64": "node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64",
     "dist:desktop:linux": "node scripts/build-desktop-artifact.ts --platform linux --target AppImage --arch x64",
+    "dist:desktop:linux:arm64": "node scripts/build-desktop-artifact.ts --platform linux --target AppImage --arch arm64",
     "dist:desktop:win": "node scripts/build-desktop-artifact.ts --platform win --target nsis --arch x64",
     "release:beta": "bun run scripts/release-beta.ts",
     "sync:stable": "bun run scripts/sync-with-stable.ts",

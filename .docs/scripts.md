@@ -14,6 +14,7 @@
 - `bun run dist:desktop:dmg` — Builds a shareable macOS `.dmg` into `./release`.
 - `bun run dist:desktop:dmg:x64` — Builds an Intel macOS `.dmg`.
 - `bun run dist:desktop:linux` — Builds a Linux AppImage into `./release`.
+- `bun run dist:desktop:linux:arm64` — Builds an arm64 Linux AppImage into `./release`.
 - `bun run dist:desktop:win` — Builds a Windows NSIS installer into `./release`.
 
 ## Desktop `.dmg` packaging notes

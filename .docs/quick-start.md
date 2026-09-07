@@ -31,6 +31,9 @@ bun run dist:desktop:dmg
 # Linux AppImage
 bun run dist:desktop:linux
 
+# Linux arm64 AppImage
+bun run dist:desktop:linux:arm64
+
 # Windows NSIS installer
 bun run dist:desktop:win
 ```

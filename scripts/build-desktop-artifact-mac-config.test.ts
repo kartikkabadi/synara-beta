@@ -146,6 +146,16 @@ describe("createDesktopPlatformBuildConfig", () => {
     assert.equal(
       validateDesktopNativeBuildHost({
         platform: "linux",
+        arch: "arm64",
+        hostPlatform: "linux",
+        hostArch: "arm64",
+      }),
+      null,
+    );
+
+    assert.equal(
+      validateDesktopNativeBuildHost({
+        platform: "linux",
         arch: "universal",
         hostPlatform: "linux",
         hostArch: "x64",
@@ -161,6 +171,15 @@ describe("createDesktopPlatformBuildConfig", () => {
     });
 
     assert.ok(issue?.includes("Build linux/x64 on a matching Linux host"));
+
+    const armIssue = validateDesktopNativeBuildHost({
+      platform: "linux",
+      arch: "arm64",
+      hostPlatform: "linux",
+      hostArch: "x64",
+    });
+
+    assert.ok(armIssue?.includes("Build linux/arm64 on a matching Linux host"));
   });
 
   it("requires a macOS host for the native Swift AppSnap helper", () => {

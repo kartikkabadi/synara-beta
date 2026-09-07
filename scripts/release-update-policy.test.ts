@@ -15,7 +15,12 @@ const cleanConfig: ReleaseUpdatePolicyConfig = {
   bridgeVersion: "0.4.2",
   channel: "synara",
 };
-const defaultManifestNames = ["latest-mac.yml", "latest.yml", "latest-linux.yml"] as const;
+const defaultManifestNames = [
+  "latest-mac.yml",
+  "latest.yml",
+  "latest-linux.yml",
+  "latest-linux-arm64.yml",
+] as const;
 
 describe("release update policy", () => {
   it("publishes stable clean releases to Latest and keeps prereleases off it", () => {
@@ -128,7 +133,7 @@ describe("release update policy", () => {
       writeFileSync(resolve(root, "latest-mac.yml"), "bridge");
 
       expect(() => prepareReleaseUpdateManifests(root, cleanConfig)).toThrow(
-        "Latest release is missing update manifests: latest.yml, latest-linux.yml",
+        "Latest release is missing update manifests: latest.yml, latest-linux.yml, latest-linux-arm64.yml",
       );
     } finally {
       rmSync(root, { recursive: true, force: true });

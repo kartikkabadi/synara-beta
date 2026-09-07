@@ -1,10 +1,18 @@
 // FILE: release-smoke.ts
-// Purpose: Smoke-tests release version alignment and merged macOS updater manifests.
+// Purpose: Smoke-tests release version alignment and merged desktop updater manifests.
 // Layer: Release verification script
-// Depends on: update-release-package-versions.ts and merge-mac-update-manifests.ts.
+// Depends on: update-release-package-versions.ts and merge-*update-manifests.ts.
 
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +26,10 @@ import {
   readReleaseUpdatePolicyConfig,
   resolveReleaseUpdatePolicy,
 } from "./lib/release-update-policy.ts";
+import {
+  normalizeLinuxUpdateManifest,
+  prepareMergedLinuxUpdateManifests,
+} from "./merge-linux-update-manifests.ts";
 import {
   RELEASE_LOCKFILE_PATH,
   RELEASE_PATCHES_PATH,
@@ -73,6 +85,36 @@ releaseDate: '2026-03-08T10:36:07.540Z'
   );
 
   return { arm64Path, x64Path };
+}
+
+function writeLinuxManifestFixtures(targetRoot: string): string {
+  const assetDirectory = resolve(targetRoot, "release-assets-linux");
+  mkdirSync(assetDirectory, { recursive: true });
+  writeFileSync(
+    resolve(assetDirectory, "latest-linux.yml"),
+    `version: 9.9.9-smoke.0
+files:
+  - url: Synara-9.9.9-smoke.0-x64.AppImage
+    sha512: x64appimage
+    size: 142000112
+path: Synara-9.9.9-smoke.0-x64.AppImage
+sha512: x64appimage
+releaseDate: '2026-03-08T10:36:07.540Z'
+`,
+  );
+  writeFileSync(
+    resolve(assetDirectory, "latest-linux-arm64.yml"),
+    `version: 9.9.9-smoke.0
+files:
+  - url: Synara-9.9.9-smoke.0-arm64.AppImage
+    sha512: arm64appimage
+    size: 145621344
+path: Synara-9.9.9-smoke.0-arm64.AppImage
+sha512: arm64appimage
+releaseDate: '2026-03-08T10:32:14.587Z'
+`,
+  );
+  return assetDirectory;
 }
 
 function assertContains(haystack: string, needle: string, message: string): void {
@@ -365,13 +407,18 @@ function verifyDesktopStageLockAuthority(): void {
   );
   assertContains(
     buildScript,
-    ")`npm rebuild node-pty --foreground-scripts`,",
-    "Expected Linux desktop staging to build only node-pty after the script-free frozen install.",
+    "--which-module node-pty`,",
+    "Expected Linux desktop staging to rebuild only node-pty for Electron after the script-free frozen install.",
   );
   assertNotContains(
     buildScript,
-    "npm rebuild --foreground-scripts",
-    "Desktop staging must never enable every dependency lifecycle script.",
+    "npm rebuild node-pty",
+    "Desktop staging must use Electron's ABI-aware rebuild path for node-pty.",
+  );
+  assertContains(
+    buildScript,
+    "buildConfig.npmRebuild = false",
+    "Desktop staging must disable electron-builder's broad native dependency rebuild.",
   );
   assertNotContains(
     buildScript,
@@ -488,6 +535,34 @@ try {
     ".dmg",
     "macOS updater manifests must describe only the finalized ZIP artifacts.",
   );
+
+  const linuxAssetDirectory = writeLinuxManifestFixtures(tempRoot);
+  normalizeLinuxUpdateManifest(linuxAssetDirectory, "x64");
+  normalizeLinuxUpdateManifest(linuxAssetDirectory, "arm64");
+  prepareMergedLinuxUpdateManifests(linuxAssetDirectory);
+
+  const linuxMergedManifest = readFileSync(
+    resolve(linuxAssetDirectory, "latest-linux.yml"),
+    "utf8",
+  );
+  assertContains(
+    linuxMergedManifest,
+    "Synara-9.9.9-smoke.0-arm64.AppImage",
+    "Merged Linux manifest is missing the arm64 AppImage.",
+  );
+  assertContains(
+    linuxMergedManifest,
+    "Synara-9.9.9-smoke.0-x64.AppImage",
+    "Merged Linux manifest is missing the x64 AppImage.",
+  );
+  assertContains(
+    readFileSync(resolve(linuxAssetDirectory, "latest-linux-arm64.yml"), "utf8"),
+    "Synara-9.9.9-smoke.0-arm64.AppImage",
+    "Linux arm64 updater alias is missing the merged arm64 AppImage.",
+  );
+  if (existsSync(resolve(linuxAssetDirectory, "latest-linux-x64.yml"))) {
+    throw new Error("Linux x64 staging manifest was not removed after merging.");
+  }
 
   console.log("Release smoke checks passed.");
 } finally {

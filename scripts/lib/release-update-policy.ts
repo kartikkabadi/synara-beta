@@ -108,7 +108,12 @@ export function channelManifestNames(channel: string): readonly string[] {
   if (!CHANNEL_PATTERN.test(channel) || channel === "latest") {
     throw new Error(`Invalid dedicated update channel: ${channel}`);
   }
-  return [`${channel}-mac.yml`, `${channel}.yml`, `${channel}-linux.yml`];
+  return [
+    `${channel}-mac.yml`,
+    `${channel}.yml`,
+    `${channel}-linux.yml`,
+    `${channel}-linux-arm64.yml`,
+  ];
 }
 
 function copyChannelManifests(
@@ -136,7 +141,12 @@ export function prepareReleaseUpdateManifests(
   config: ReleaseUpdatePolicyConfig,
 ): readonly string[] {
   const normalizedConfig = validateReleaseUpdatePolicyConfig(config);
-  const sourceNames = ["latest-mac.yml", "latest.yml", "latest-linux.yml"] as const;
+  const sourceNames = [
+    "latest-mac.yml",
+    "latest.yml",
+    "latest-linux.yml",
+    "latest-linux-arm64.yml",
+  ] as const;
   const destinationNames = channelManifestNames(normalizedConfig.channel);
   if (normalizedConfig.lane === "bridge") {
     const missing = sourceNames.filter((name) => !existsSync(resolve(assetDirectory, name)));
