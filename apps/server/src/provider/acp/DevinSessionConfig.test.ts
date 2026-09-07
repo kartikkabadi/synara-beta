@@ -124,4 +124,30 @@ describe("createDevinSessionConfig", () => {
     });
     expect(await readFile(sourceConfig, "utf8")).not.toContain("synara");
   });
+
+  it("mirrors user tool configurations (such as gh and git) into the overlay root", async () => {
+    const input = await makeInput();
+    const ghDir = path.join(input.env.XDG_CONFIG_HOME, "gh");
+    const gitDir = path.join(input.env.XDG_CONFIG_HOME, "git");
+    await mkdir(ghDir, { recursive: true });
+    await mkdir(gitDir, { recursive: true });
+    await writeFile(path.join(ghDir, "hosts.yml"), "github.com:\n  user: octocat\n");
+    await writeFile(path.join(gitDir, "config"), "[user]\n  name = Octo Cat\n");
+
+    const config = await createDevinSessionConfig(input);
+    configs.push(config);
+
+    const overlayXdg = config.childEnvironment.XDG_CONFIG_HOME!;
+    const mirroredGhHosts = await readFile(path.join(overlayXdg, "gh", "hosts.yml"), "utf8");
+    const mirroredGitConfig = await readFile(path.join(overlayXdg, "git", "config"), "utf8");
+
+    expect(mirroredGhHosts).toBe("github.com:\n  user: octocat\n");
+    expect(mirroredGitConfig).toBe("[user]\n  name = Octo Cat\n");
+
+    // Devin's own mcp_config.json in the overlay contains the synara bridge
+    const devinConfig = JSON.parse(
+      await readFile(path.join(overlayXdg, "devin", "mcp_config.json"), "utf8"),
+    );
+    expect(devinConfig.mcpServers.synara).toBeDefined();
+  });
 });
