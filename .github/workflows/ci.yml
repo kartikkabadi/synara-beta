@@ -87,6 +87,9 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      - name: Anti-slop ratchet
+        run: bun run lint:anti-slop
+
   static-typecheck:
     name: Static Checks (typecheck)
     runs-on: ubuntu-24.04
