@@ -893,14 +893,14 @@ describe("managed worktrees", () => {
     expect(remaining).toHaveLength(1);
   });
 
-  it("skips pruning a merged PR worktree if it has newer unmerged commits", async () => {
+  it("prunes a squash-merged PR worktree even when git ancestry check returns false", async () => {
     const { root, paths } = await makeManagedRoot(1);
     const removals: string[] = [];
-    // Worktree HEAD is '222222...', which is NOT contained in the base branch
+    // Git ancestry returns false (simulating a squash merge where branch commits are not in main history)
     const git = makeGit({
       removals,
-      headShaByCwd: { [paths[0]!]: "2222222222222222222222222222222222222222" },
-      isAncestor: (headSha) => headSha !== "2222222222222222222222222222222222222222",
+      headShaByCwd: { [paths[0]!]: "1111111111111111111111111111111111111111" },
+      isAncestor: () => false,
     });
     const gitHubCli = makeGitHubCli({
       "https://github.com/org/repo/pull/1": { state: "merged" },
@@ -908,7 +908,7 @@ describe("managed worktrees", () => {
 
     const threads = [
       {
-        id: "thread-newer-commits",
+        id: "thread-squash-merged",
         worktreePath: paths[0],
         associatedWorktreePath: paths[0],
         archivedAt: "2026-01-01T00:00:00.000Z",
@@ -928,7 +928,63 @@ describe("managed worktrees", () => {
       }),
     );
 
-    // Refused removal to prevent data loss
+    // Pruned successfully because GitHub confirmed merged and HEAD was unchanged
+    expect(removals).toEqual([paths[0]]);
+    expect(remaining).toHaveLength(0);
+  });
+
+  it("skips pruning an ancestry-merged worktree if its HEAD is not contained in base", async () => {
+    const { root, paths } = await makeManagedRoot(1);
+    const removals: string[] = [];
+    // Detection initially sees ancestor = true, but under mutation lock ancestor = false
+    let removalAttempted = false;
+    const git = {
+      ...makeGit({ removals }),
+      execute: ({ cwd, args }: { cwd: string; args?: readonly string[] }) => {
+        if (args && args[0] === "rev-parse" && args[1] === "HEAD") {
+          return Effect.succeed({
+            code: 0,
+            stdout: "1111111111111111111111111111111111111111\n",
+            stderr: "",
+          });
+        }
+        if (args && args[0] === "merge-base" && args[1] === "--is-ancestor") {
+          return Effect.succeed({ code: removalAttempted ? 1 : 0, stdout: "", stderr: "" });
+        }
+        return Effect.succeed({
+          code: 0,
+          stdout: `worktree /repo/project\nHEAD abc\nbranch refs/heads/main\n\nworktree ${cwd}\nHEAD abc\ndetached\n`,
+          stderr: "",
+        });
+      },
+      withMutation: (_cwd: string, effect: Effect.Effect<unknown, unknown, unknown>) => {
+        removalAttempted = true;
+        return effect;
+      },
+    } as unknown as GitCoreShape;
+
+    // No PR: detection relies entirely on ancestry fallback
+    const threads = [
+      {
+        id: "thread-ancestry-unmerged",
+        worktreePath: paths[0],
+        associatedWorktreePath: paths[0],
+        archivedAt: "2026-01-01T00:00:00.000Z",
+        deletedAt: null,
+      },
+    ] as unknown as OrchestrationThread[];
+
+    const remaining = await Effect.runPromise(
+      pruneArchivedManagedWorktrees({
+        worktreesDir: root,
+        snapshotsDir: path.join(root, "snapshots"),
+        threads,
+        git,
+        pruneAfterMerge: true,
+      }),
+    );
+
+    // Refused removal to prevent data loss when ancestry check fails for ancestry-merged candidate
     expect(removals).toEqual([]);
     expect(remaining).toHaveLength(1);
     expect(remaining[0]?.path).toBe(paths[0]);
@@ -938,8 +994,8 @@ describe("managed worktrees", () => {
     const { root, paths } = await makeManagedRoot(1);
     const removals: string[] = [];
     let removalAttempted = false;
-    // On detection, HEAD is merged (ancestor = true).
-    // Between detection and removal, a new commit is created (HEAD changes to unmerged '333333...').
+    // On detection, HEAD is '111111...'.
+    // Between detection and removal, a new commit is created (HEAD changes to '333333...').
     const git = {
       ...makeGit({ removals }),
       execute: ({ cwd, args }: { cwd: string; args?: readonly string[] }) => {
@@ -950,10 +1006,7 @@ describe("managed worktrees", () => {
           return Effect.succeed({ code: 0, stdout: `${sha}\n`, stderr: "" });
         }
         if (args && args[0] === "merge-base" && args[1] === "--is-ancestor") {
-          const headSha = args[2]!;
-          // '333333...' is NOT an ancestor
-          const ancestor = headSha === "1111111111111111111111111111111111111111";
-          return Effect.succeed({ code: ancestor ? 0 : 1, stdout: "", stderr: "" });
+          return Effect.succeed({ code: 0, stdout: "", stderr: "" });
         }
         return Effect.succeed({
           code: 0,

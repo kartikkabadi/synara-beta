@@ -34,10 +34,32 @@ export interface ManagedWorktreeThreadRef {
 
 export type ManagedWorktreeRemovalReason = "deleted" | "archived-retention" | "merged";
 
+export interface MergedWorktreeInfo {
+  readonly path: string;
+  readonly detectedHeadSha: string | null;
+  readonly mergeSource: "pr" | "ancestry";
+}
+
+export class MergedWorktreeSet extends Set<string> {
+  private readonly infoByPath = new Map<string, MergedWorktreeInfo>();
+
+  addInfo(info: MergedWorktreeInfo): this {
+    this.add(info.path);
+    this.infoByPath.set(info.path, info);
+    return this;
+  }
+
+  getInfo(path: string): MergedWorktreeInfo | undefined {
+    return this.infoByPath.get(path);
+  }
+}
+
 export interface ManagedWorktreeRemovalCandidate {
   readonly entry: ServerManagedWorktree;
   readonly thread: ManagedWorktreeThreadRef;
   readonly reason: ManagedWorktreeRemovalReason;
+  readonly detectedHeadSha?: string | null;
+  readonly mergeSource?: "pr" | "ancestry";
 }
 
 async function findLinkedWorktreeRoots(root: string, current = root, depth = 0): Promise<string[]> {
@@ -196,10 +218,16 @@ export function detectMergedManagedWorktreePaths(input: {
   const checkThreadMerged = (
     entry: ServerManagedWorktree,
     thread: ManagedWorktreeThreadRef,
-  ): Effect.Effect<boolean> =>
+  ): Effect.Effect<{
+    readonly isMerged: boolean;
+    readonly detectedHeadSha: string | null;
+    readonly mergeSource: "pr" | "ancestry";
+  }> =>
     Effect.gen(function* () {
       let isMerged = false;
       let prStatusKnown = false;
+      let mergeSource: "pr" | "ancestry" = "pr";
+      let headSha: string | null = null;
 
       // Signal 1: PR check via GitHub CLI or recorded lastKnownPr
       if (thread.lastKnownPr) {
@@ -230,35 +258,31 @@ export function detectMergedManagedWorktreePaths(input: {
         }
       }
 
+      // Read current worktree HEAD SHA to record detectedHeadSha, or for ancestry fallback
+      const revParseResult = yield* input.git
+        .execute({
+          operation: "ManagedWorktrees.revParseHead",
+          cwd: entry.path,
+          args: ["rev-parse", "HEAD"],
+          timeoutMs: 3_000,
+          allowNonZeroExit: true,
+        })
+        .pipe(Effect.catch(() => Effect.succeed(null)));
+
+      if (revParseResult && revParseResult.code === 0 && revParseResult.stdout.trim().length > 0) {
+        headSha = revParseResult.stdout.trim();
+      } else if (
+        thread.associatedWorktreeRef &&
+        /^[0-9a-f]{40}$/iu.test(thread.associatedWorktreeRef)
+      ) {
+        headSha = thread.associatedWorktreeRef;
+      }
+
       // Signal 2: Local git ancestry fallback.
       // Crucial safeguard: ONLY run local ancestry fallback when no PR exists or the
       // GitHub lookup failed. When GitHub confirms a PR is closed or open, that
       // authoritative remote status must NOT be overridden by local branch ancestry.
       if (!isMerged && !prStatusKnown) {
-        let headSha: string | null = null;
-        const revParseResult = yield* input.git
-          .execute({
-            operation: "ManagedWorktrees.revParseHead",
-            cwd: entry.path,
-            args: ["rev-parse", "HEAD"],
-            timeoutMs: 3_000,
-            allowNonZeroExit: true,
-          })
-          .pipe(Effect.catch(() => Effect.succeed(null)));
-
-        if (
-          revParseResult &&
-          revParseResult.code === 0 &&
-          revParseResult.stdout.trim().length > 0
-        ) {
-          headSha = revParseResult.stdout.trim();
-        } else if (
-          thread.associatedWorktreeRef &&
-          /^[0-9a-f]{40}$/iu.test(thread.associatedWorktreeRef)
-        ) {
-          headSha = thread.associatedWorktreeRef;
-        }
-
         if (headSha) {
           const baseCandidates: string[] = [];
           if (thread.lastKnownPr?.baseBranch) {
@@ -290,13 +314,14 @@ export function detectMergedManagedWorktreePaths(input: {
 
             if (mergeBaseResult && mergeBaseResult.code === 0) {
               isMerged = true;
+              mergeSource = "ancestry";
               break;
             }
           }
         }
       }
 
-      return isMerged;
+      return { isMerged, detectedHeadSha: headSha, mergeSource };
     });
 
   return Effect.gen(function* () {
@@ -311,22 +336,42 @@ export function detectMergedManagedWorktreePaths(input: {
           const archivedOnly = linked.filter(isArchivedOnlyManagedWorktreeThread);
           if (archivedOnly.length === 0) return null;
 
+          let allArchivedMerged = true;
+          let detectedHeadSha: string | null = null;
+          let mergeSource: "pr" | "ancestry" = "pr";
+
           for (const thread of archivedOnly) {
-            const threadMerged = yield* checkThreadMerged(entry, thread);
-            if (!threadMerged) return null;
+            const check = yield* checkThreadMerged(entry, thread);
+            if (!check.isMerged) {
+              allArchivedMerged = false;
+              break;
+            }
+            if (check.detectedHeadSha) {
+              detectedHeadSha = check.detectedHeadSha;
+            }
+            if (check.mergeSource === "ancestry") {
+              mergeSource = "ancestry";
+            }
           }
 
-          return entry.path;
+          if (!allArchivedMerged) return null;
+          return { path: entry.path, detectedHeadSha, mergeSource };
         }),
       { concurrency: 4 },
     );
 
-    return new Set(mergedResults.filter((path): path is string => path !== null));
+    const mergedSet = new MergedWorktreeSet();
+    for (const item of mergedResults) {
+      if (item) {
+        mergedSet.addInfo(item);
+      }
+    }
+    return mergedSet;
   }).pipe(
     Effect.catchCause((cause) =>
       Effect.logWarning("managed worktree merge detection failed", {
         cause: String(cause),
-      }).pipe(Effect.as(new Set<string>())),
+      }).pipe(Effect.as(new MergedWorktreeSet())),
     ),
   );
 }
@@ -393,7 +438,17 @@ export function classifyManagedWorktreeRemovalCandidates(input: {
       const entry = inventoryByPath.get(worktreePath);
       if (!entry) continue;
       seenMergedPaths.add(worktreePath);
-      mergedCandidates.push({ entry, thread, reason: "merged" });
+      const mergedInfo =
+        input.mergedWorktreePaths instanceof MergedWorktreeSet
+          ? input.mergedWorktreePaths.getInfo(worktreePath)
+          : undefined;
+      mergedCandidates.push({
+        entry,
+        thread,
+        reason: "merged",
+        detectedHeadSha: mergedInfo?.detectedHeadSha,
+        mergeSource: mergedInfo?.mergeSource ?? "pr",
+      });
     }
   }
 
@@ -522,42 +577,10 @@ function removeManagedWorktreeSafely(input: {
             return false;
           }
 
-          const baseCandidates: string[] = [];
-          if (thread.lastKnownPr?.baseBranch) {
-            baseCandidates.push(
-              thread.lastKnownPr.baseBranch,
-              `origin/${thread.lastKnownPr.baseBranch}`,
-              `upstream/${thread.lastKnownPr.baseBranch}`,
-            );
-          }
-          baseCandidates.push(
-            "origin/main",
-            "upstream/main",
-            "main",
-            "origin/master",
-            "upstream/master",
-            "master",
-          );
-
-          let headIsContained = false;
-          for (const baseRef of baseCandidates) {
-            const isAncestorResult = yield* input.git
-              .execute({
-                operation: "ManagedWorktrees.revalidateHeadIsAncestor",
-                cwd: entry.workspaceRoot,
-                args: ["merge-base", "--is-ancestor", currentHeadSha, baseRef],
-                timeoutMs: 3_000,
-                allowNonZeroExit: true,
-              })
-              .pipe(Effect.catch(() => Effect.succeed(null)));
-
-            if (isAncestorResult && isAncestorResult.code === 0) {
-              headIsContained = true;
-              break;
-            }
-          }
-
-          if (!headIsContained) {
+          if (
+            input.candidate.detectedHeadSha &&
+            currentHeadSha !== input.candidate.detectedHeadSha
+          ) {
             yield* Effect.logWarning(
               "managed worktree cleanup skipped merged worktree with unmerged commits; refusing data loss",
               {
@@ -565,9 +588,60 @@ function removeManagedWorktreeSafely(input: {
                 worktreePath: entry.path,
                 reason,
                 headSha: currentHeadSha,
+                expectedHeadSha: input.candidate.detectedHeadSha,
               },
             );
             return false;
+          }
+
+          if (input.candidate.mergeSource === "ancestry") {
+            const baseCandidates: string[] = [];
+            if (thread.lastKnownPr?.baseBranch) {
+              baseCandidates.push(
+                thread.lastKnownPr.baseBranch,
+                `origin/${thread.lastKnownPr.baseBranch}`,
+                `upstream/${thread.lastKnownPr.baseBranch}`,
+              );
+            }
+            baseCandidates.push(
+              "origin/main",
+              "upstream/main",
+              "main",
+              "origin/master",
+              "upstream/master",
+              "master",
+            );
+
+            let headIsContained = false;
+            for (const baseRef of baseCandidates) {
+              const isAncestorResult = yield* input.git
+                .execute({
+                  operation: "ManagedWorktrees.revalidateHeadIsAncestor",
+                  cwd: entry.workspaceRoot,
+                  args: ["merge-base", "--is-ancestor", currentHeadSha, baseRef],
+                  timeoutMs: 3_000,
+                  allowNonZeroExit: true,
+                })
+                .pipe(Effect.catch(() => Effect.succeed(null)));
+
+              if (isAncestorResult && isAncestorResult.code === 0) {
+                headIsContained = true;
+                break;
+              }
+            }
+
+            if (!headIsContained) {
+              yield* Effect.logWarning(
+                "managed worktree cleanup skipped ancestry-merged worktree whose HEAD is not contained in base; refusing data loss",
+                {
+                  threadId: thread.id,
+                  worktreePath: entry.path,
+                  reason,
+                  headSha: currentHeadSha,
+                },
+              );
+              return false;
+            }
           }
         }
 
