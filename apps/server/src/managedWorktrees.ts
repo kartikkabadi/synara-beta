@@ -58,8 +58,8 @@ export interface ManagedWorktreeRemovalCandidate {
   readonly entry: ServerManagedWorktree;
   readonly thread: ManagedWorktreeThreadRef;
   readonly reason: ManagedWorktreeRemovalReason;
-  readonly detectedHeadSha?: string | null;
-  readonly mergeSource?: "pr" | "ancestry";
+  readonly detectedHeadSha?: string | null | undefined;
+  readonly mergeSource?: "pr" | "ancestry" | undefined;
 }
 
 async function findLinkedWorktreeRoots(root: string, current = root, depth = 0): Promise<string[]> {
