@@ -605,7 +605,7 @@ describe("managed worktrees", () => {
       }),
     );
 
-    expect(Array.from(merged)).toEqual(["/wt/pr-merged"]);
+    expect(Array.from(merged.keys())).toEqual(["/wt/pr-merged"]);
   });
 
   it("does not mark merged if GitHub CLI PR is closed even if local ancestry reports ancestor", async () => {
@@ -634,7 +634,7 @@ describe("managed worktrees", () => {
       }),
     );
 
-    expect(Array.from(merged)).toEqual([]);
+    expect(Array.from(merged.keys())).toEqual([]);
   });
 
   it("falls back to projection lastKnownPr.state when GitHub CLI fails", async () => {
@@ -663,7 +663,7 @@ describe("managed worktrees", () => {
       }),
     );
 
-    expect(Array.from(merged)).toEqual(["/wt/offline-merged"]);
+    expect(Array.from(merged.keys())).toEqual(["/wt/offline-merged"]);
   });
 
   it("falls back to local ancestry when GitHub CLI fails and cached PR state was open", async () => {
@@ -697,7 +697,7 @@ describe("managed worktrees", () => {
       }),
     );
 
-    expect(Array.from(merged)).toEqual(["/wt/offline-open-merged"]);
+    expect(Array.from(merged.keys())).toEqual(["/wt/offline-open-merged"]);
   });
 
   it("falls back to local git merge-base when commit is merged to main without PR", async () => {
@@ -726,7 +726,7 @@ describe("managed worktrees", () => {
       }),
     );
 
-    expect(Array.from(merged)).toEqual(["/wt/local-merged"]);
+    expect(Array.from(merged.keys())).toEqual(["/wt/local-merged"]);
   });
 
   it("protects shared worktree if an archived sibling thread is unmerged", async () => {
@@ -763,7 +763,7 @@ describe("managed worktrees", () => {
       }),
     );
 
-    expect(Array.from(merged)).toEqual([]);
+    expect(Array.from(merged.keys())).toEqual([]);
   });
 
   it("protects shared worktree when any active thread points to it", async () => {
@@ -798,7 +798,7 @@ describe("managed worktrees", () => {
       }),
     );
 
-    expect(Array.from(merged)).toEqual([]);
+    expect(Array.from(merged.keys())).toEqual([]);
   });
 
   it("prunes merged worktrees immediately when pruneAfterMerge is enabled, even within retention limit", async () => {

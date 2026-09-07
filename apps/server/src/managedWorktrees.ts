@@ -42,20 +42,6 @@ export interface MergedWorktreeInfo {
   readonly prHeadSha?: string | null | undefined;
 }
 
-export class MergedWorktreeSet extends Set<string> {
-  private readonly infoByPath = new Map<string, MergedWorktreeInfo>();
-
-  addInfo(info: MergedWorktreeInfo): this {
-    this.add(info.path);
-    this.infoByPath.set(info.path, info);
-    return this;
-  }
-
-  getInfo(path: string): MergedWorktreeInfo | undefined {
-    return this.infoByPath.get(path);
-  }
-}
-
 export interface ManagedWorktreeRemovalCandidate {
   readonly entry: ServerManagedWorktree;
   readonly thread: ManagedWorktreeThreadRef;
@@ -256,7 +242,7 @@ export function detectMergedManagedWorktreePaths(input: {
   readonly canonicalByRecordedPath: ReadonlyMap<string, string>;
   readonly git: GitCoreShape;
   readonly gitHubCli?: GitHubCliShape | undefined;
-}): Effect.Effect<ReadonlySet<string>, never> {
+}): Effect.Effect<ReadonlyMap<string, MergedWorktreeInfo>, never> {
   const canonicalThreadPath = (thread: ManagedWorktreeThreadRef): string | null => {
     const recordedPath = threadManagedWorktreePath(thread);
     return recordedPath === null ? null : (input.canonicalByRecordedPath.get(recordedPath) ?? null);
@@ -438,18 +424,18 @@ export function detectMergedManagedWorktreePaths(input: {
       { concurrency: 4 },
     );
 
-    const mergedSet = new MergedWorktreeSet();
+    const mergedMap = new Map<string, MergedWorktreeInfo>();
     for (const item of mergedResults) {
       if (item) {
-        mergedSet.addInfo(item);
+        mergedMap.set(item.path, item);
       }
     }
-    return mergedSet;
+    return mergedMap;
   }).pipe(
     Effect.catchCause((cause) =>
       Effect.logWarning("managed worktree merge detection failed", {
         cause: String(cause),
-      }).pipe(Effect.as(new MergedWorktreeSet())),
+      }).pipe(Effect.as(new Map<string, MergedWorktreeInfo>())),
     ),
   );
 }
@@ -465,7 +451,10 @@ export function classifyManagedWorktreeRemovalCandidates(input: {
   readonly inventory: ReadonlyArray<ServerManagedWorktree>;
   readonly threads: ReadonlyArray<ManagedWorktreeThreadRef>;
   readonly canonicalByRecordedPath: ReadonlyMap<string, string>;
-  readonly mergedWorktreePaths?: ReadonlySet<string> | undefined;
+  readonly mergedWorktreePaths?:
+    | ReadonlyMap<string, MergedWorktreeInfo>
+    | ReadonlySet<string>
+    | undefined;
 }): ReadonlyArray<ManagedWorktreeRemovalCandidate> {
   const canonicalThreadPath = (thread: ManagedWorktreeThreadRef): string | null => {
     const recordedPath = threadManagedWorktreePath(thread);
@@ -517,8 +506,8 @@ export function classifyManagedWorktreeRemovalCandidates(input: {
       if (!entry) continue;
       seenMergedPaths.add(worktreePath);
       const mergedInfo =
-        input.mergedWorktreePaths instanceof MergedWorktreeSet
-          ? input.mergedWorktreePaths.getInfo(worktreePath)
+        input.mergedWorktreePaths instanceof Map
+          ? input.mergedWorktreePaths.get(worktreePath)
           : undefined;
       mergedCandidates.push({
         entry,
