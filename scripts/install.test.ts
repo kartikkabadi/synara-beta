@@ -14,11 +14,13 @@ const script = NodeFS.readFileSync(scriptPath, "utf8");
  * script that records how it was invoked. `platformScript` is the body of the
  * delegated installer the stub curl serves.
  */
-function makeSandbox(options: { uname: string; releases: string; platformScript?: string }): {
+interface InstallSandbox {
   sandbox: string;
   recordPath: string;
   selfPath: string;
-} {
+}
+
+function makeSandbox(options: { uname: string; releases: string; platformScript?: string }): InstallSandbox {
   const sandbox = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "synara-install-router-"));
   const stubBin = NodePath.join(sandbox, "bin");
   NodeFS.mkdirSync(stubBin, { recursive: true });
