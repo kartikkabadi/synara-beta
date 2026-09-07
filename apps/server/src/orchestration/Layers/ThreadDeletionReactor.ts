@@ -96,7 +96,7 @@ const make = Effect.gen(function* () {
   const gitHubCli = Option.getOrUndefined(yield* Effect.serviceOption(GitHubCli));
 
   const pruneManagedWorktreesAfterLifecycle = (context: {
-    readonly eventType: ThreadDeletedEvent["type"];
+    readonly eventType: ThreadLifecycleCleanupEvent["type"];
     readonly threadId?: string;
   }) =>
     Effect.gen(function* () {
@@ -253,7 +253,13 @@ const make = Effect.gen(function* () {
         false,
         event.payload.archivedAt,
       );
-      if (terminalCleanupSucceeded) return;
+      if (terminalCleanupSucceeded) {
+        yield* pruneManagedWorktreesAfterLifecycle({
+          eventType: event.type,
+          threadId,
+        });
+        return;
+      }
       if (attempt < ARCHIVE_CLEANUP_RETRY_ATTEMPTS) {
         yield* Effect.sleep(ARCHIVE_CLEANUP_RETRY_DELAY_MS);
       }
@@ -261,6 +267,10 @@ const make = Effect.gen(function* () {
     yield* Effect.logWarning("thread archive cleanup exhausted retries", {
       threadId,
       attempts: ARCHIVE_CLEANUP_RETRY_ATTEMPTS,
+    });
+    yield* pruneManagedWorktreesAfterLifecycle({
+      eventType: event.type,
+      threadId,
     });
   });
 
