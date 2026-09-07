@@ -93,7 +93,7 @@ git checkout -b sync/upstream-$(date +%Y-%m-%d) origin/main
 git merge upstream/main
 
 # 5. Confirm that ONLY overlay files differ from upstream
-git diff upstream/main main
+git diff upstream/main HEAD
 
 # 6. Run local validation
 bun run test
