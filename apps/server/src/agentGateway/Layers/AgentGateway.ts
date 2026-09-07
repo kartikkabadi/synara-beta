@@ -31,6 +31,7 @@ import { Effect, Layer, Option } from "effect";
 
 import { GitCore } from "../../git/Services/GitCore.ts";
 import { GitManager } from "../../git/Services/GitManager.ts";
+import { GitHubCli } from "../../git/Services/GitHubCli.ts";
 import { ServerConfig } from "../../config.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -132,6 +133,7 @@ export const makeAgentGateway = Effect.gen(function* () {
   // it) the agent never sees the device_* tools at all, rather than being
   // offered eleven tools that can only report an unsupported platform.
   const deviceService = Option.getOrUndefined(yield* Effect.serviceOption(DeviceService));
+  const gitHubCli = Option.getOrUndefined(yield* Effect.serviceOption(GitHubCli));
   const loadProviderAvailabilities = Effect.gen(function* () {
     const [settings, statuses] = yield* Effect.all([
       serverSettings.getSettings,
@@ -654,6 +656,7 @@ export const makeAgentGateway = Effect.gen(function* () {
               snapshotQuery,
               git,
               pruneAfterMerge: settings.worktrees.pruneAfterMerge,
+              gitHubCli,
             }).pipe(
               Effect.catchCause((cause) =>
                 Effect.logWarning("agent gateway managed worktree retention failed", {
