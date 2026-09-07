@@ -40,7 +40,7 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --tag)
       if [ "$#" -lt 2 ]; then
-        echo "install-linux.sh: --tag requires a value (vX.Y.Z or vX.Y.Z-beta.N)" >&2
+        echo "install-linux.sh: --tag requires a value (vX.Y.Z-beta.N)" >&2
         exit 1
       fi
       tag="$2"
@@ -55,14 +55,14 @@ while [ "$#" -gt 0 ]; do
       shift
       ;;
     -h|--help)
-      echo "usage: install-linux.sh [--tag vX.Y.Z] [--force]"
+      echo "usage: install-linux.sh [--tag vX.Y.Z-beta.N] [--force]"
       echo "installs Synara Beta AppImage to ~/.local/bin/synara-beta"
       echo "re-running with a newer tag updates in place; ~/.synara-beta is never touched"
       exit 0
       ;;
     *)
       echo "install-linux.sh: unknown argument: $1" >&2
-      echo "usage: install-linux.sh [--tag vX.Y.Z] [--force]" >&2
+      echo "usage: install-linux.sh [--tag vX.Y.Z-beta.N] [--force]" >&2
       exit 1
       ;;
   esac

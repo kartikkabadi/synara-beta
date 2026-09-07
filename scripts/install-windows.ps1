@@ -14,7 +14,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 if ($Help) {
-  Write-Output 'usage: install-windows.ps1 [-Tag vX.Y.Z] [-Force]'
+  Write-Output 'usage: install-windows.ps1 [-Tag vX.Y.Z-beta.N] [-Force]'
   Write-Output 're-running with a newer tag updates in place; ~/.synara-beta is never touched'
   exit 0
 }
@@ -61,7 +61,7 @@ try {
   # secret; the matching public key is pinned in scripts/release-signing.pub.
   $allowedSigners = 'synara-beta-releases ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFA61LZNkb3QTME3wdqznC/zghISZ9nsS2BnUMUQ1JRo'
   Invoke-WebRequest -Uri "$base/SHA256SUMS.sig" -OutFile $signaturePath -UseBasicParsing
-  Set-Content -Path $signersPath -Value $allowedSigners
+  Set-Content -Path $signersPath -Value $allowedSigners -Encoding ascii
   Write-Output 'Verifying release signature...'
   # ssh-keygen -Y verify reads the signed content from stdin; PowerShell has no
   # < redirection, so route through cmd with the redirect attached.
