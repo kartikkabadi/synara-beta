@@ -33,8 +33,8 @@ describe("install-windows.ps1", () => {
     NodeAssert.match(script, /if \(-not \$Tag\)/);
   });
 
-  it("accepts valid tag shapes", () => {
-    NodeAssert.match(script, /\^v\\d\+\.\*/);
+  it("accepts only strict vX.Y.Z-beta.N tags", () => {
+    NodeAssert.match(script, /\^v\\d\+\\\.\\d\+\\\.\\d\+-beta\\\.\\d\+\$/);
   });
 
   it("downloads SHA256SUMS and installer exe with basic parsing", () => {

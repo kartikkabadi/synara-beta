@@ -38,8 +38,9 @@ if (-not $Tag) {
 if (-not $Tag) {
   throw 'install-windows.ps1: could not resolve a release tag (API rate-limited? pass -Tag vX.Y.Z-beta.N).'
 }
-if ($Tag -notmatch '^v\d+.*') {
-  throw "install-windows.ps1: invalid tag '$Tag'. Expected vX.Y.Z or vX.Y.Z-beta.N."
+# Strict validation: the tag flows into URLs and regex patterns below.
+if ($Tag -notmatch '^v\d+\.\d+\.\d+-beta\.\d+$') {
+  throw "install-windows.ps1: invalid tag '$Tag'. Expected vX.Y.Z-beta.N."
 }
 
 $version = $Tag.TrimStart('v')

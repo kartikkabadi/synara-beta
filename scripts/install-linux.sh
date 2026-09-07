@@ -104,8 +104,10 @@ if [ -z "$tag" ]; then
   exit 1
 fi
 
-if ! [[ "$tag" =~ ^v[0-9]+.* ]]; then
-  echo "install-linux.sh: invalid tag '$tag'. Expected vX.Y.Z or vX.Y.Z-beta.N." >&2
+# Strict validation: the tag flows into URLs and grep patterns below, so only
+# the exact release shape is accepted (no metacharacters, no substitution).
+if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]; then
+  echo "install-linux.sh: invalid tag '$tag'. Expected vX.Y.Z-beta.N." >&2
   exit 1
 fi
 
