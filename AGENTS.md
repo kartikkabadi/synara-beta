@@ -87,6 +87,15 @@ Rules that still apply:
 - Sync pulls go through a reviewed PR, like every other change to `main`.
 - If upstream ever rewrites its history, the bridge still points at the pre-rewrite commits: connect the post-rewrite tip with one new bridge merge and update this section.
 
+## External review bots
+
+PRs are machine-reviewed by cubic (`cubic-dev-ai[bot]`) and Devin (`devin-ai-integration[bot]`), and CodeRabbit where enabled. Findings land as review threads on the PR.
+
+- Always run the review-fix loop: triage every finding, fix the valid ones at the root cause, reply with evidence on the rest, resolve the thread, push, and repeat until every reviewer reports no issues and no unresolved threads remain. A PR is merge-ready only when CI is green and the reviewer loop has converged.
+- Devin reviews are initialized manually: open `https://app.devin.ai/review` in ego lite (`ego-browser`), paste the PR URL into the "Jump to pull request" box at the top right, and press Enter. The bot initializes for that PR and posts its review to GitHub.
+- cubic reviews automatically on push. If it skips, re-trigger from the cubic.dev link in the PR check, or comment `@cubic review` for a full review.
+- The beta/upstream dynamic lives in the Sync discipline section above: upstream `main` is production truth, beta pulls from it through reviewed sync PRs, and beta fixes flow back as small upstream PRs - never direct pushes.
+
 ## Git discipline
 
 - Feature branches and pull requests only. Never push or merge directly to `main`.
