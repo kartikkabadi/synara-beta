@@ -13,10 +13,25 @@ function resolveVariable(
   return null;
 }
 
+function unwrapValueExpression(expression: ESTree.Expression): ESTree.Expression {
+  let current = expression;
+  while (
+    current.type === "ParenthesizedExpression" ||
+    current.type === "TSAsExpression" ||
+    current.type === "TSSatisfiesExpression" ||
+    current.type === "TSNonNullExpression" ||
+    current.type === "TSTypeAssertion"
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
 function isGlobalReflect(sourceCode: SourceCode, expression: ESTree.Expression): boolean {
-  if (expression.type !== "Identifier" || expression.name !== "Reflect") return false;
-  if (sourceCode.isGlobalReference(expression)) return true;
-  const variable = resolveVariable(sourceCode, expression);
+  const unwrapped = unwrapValueExpression(expression);
+  if (unwrapped.type !== "Identifier" || unwrapped.name !== "Reflect") return false;
+  if (sourceCode.isGlobalReference(unwrapped)) return true;
+  const variable = resolveVariable(sourceCode, unwrapped);
   return variable === null || variable.defs.length === 0;
 }
 

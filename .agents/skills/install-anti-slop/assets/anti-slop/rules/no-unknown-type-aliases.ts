@@ -2,15 +2,13 @@ import { defineRule } from "@oxlint/plugins";
 
 import type { ESTree } from "@oxlint/plugins";
 
-function referencedAliasName(type: ESTree.TSType): string | null {
-  if (type.type === "TSParenthesizedType") return referencedAliasName(type.typeAnnotation);
-  if (type.type !== "TSTypeReference" || type.typeName.type !== "Identifier") return null;
-  return type.typeArguments === null ||
-    type.typeArguments === undefined ||
-    type.typeArguments.params.length === 0
-    ? type.typeName.name
-    : null;
-}
+import {
+  collectAliasDeclarationsIn,
+  createResolvesToUnknown,
+  firstWinsAliasDeclarations,
+  refineAliasAmbiguity,
+} from "../shared/resolves-to-unknown.ts";
+import { lexicalTypeParameterNames } from "../shared/lexical-type-parameters.ts";
 
 /** Ban named aliases that merely conceal TypeScript's unknown top type. */
 export const noUnknownTypeAliasesRule = defineRule({
@@ -26,43 +24,35 @@ export const noUnknownTypeAliasesRule = defineRule({
     },
   },
   createOnce(context) {
-    const aliases = new Map<string, ESTree.TSTypeAliasDeclaration>();
-
-    const resolvesToUnknown = (type: ESTree.TSType, visited = new Set<string>()): boolean => {
-      if (type.type === "TSUnknownKeyword") return true;
-      if (type.type === "TSParenthesizedType")
-        return resolvesToUnknown(type.typeAnnotation, visited);
-      const name = referencedAliasName(type);
-      if (name === null || visited.has(name)) return false;
-      const alias = aliases.get(name);
-      if (
-        alias === undefined ||
-        (alias.typeParameters !== null && alias.typeParameters !== undefined)
-      ) {
-        return false;
-      }
-      const nextVisited = new Set(visited);
-      nextVisited.add(name);
-      return resolvesToUnknown(alias.typeAnnotation, nextVisited);
-    };
+    let resolvesToUnknown = createResolvesToUnknown(new Map(), new Set());
 
     return {
       Program(node) {
-        aliases.clear();
-        for (const statement of node.body) {
-          const declaration =
-            statement.type === "ExportNamedDeclaration" ? statement.declaration : statement;
-          if (declaration?.type === "TSTypeAliasDeclaration") {
-            aliases.set(declaration.id.name, declaration);
+        const collected = collectAliasDeclarationsIn(node, context.sourceCode.visitorKeys);
+        const conservative = createResolvesToUnknown(
+          firstWinsAliasDeclarations(collected.declarations),
+          collected.ambiguous,
+        );
+        const refined = refineAliasAmbiguity(
+          collected.declarations,
+          collected.ambiguous,
+          (type, name) => conservative(type, new Set(), new Set([name])),
+        );
+        resolvesToUnknown = createResolvesToUnknown(refined.aliases, refined.ambiguous);
+        for (const [name, list] of collected.declarations) {
+          for (const alias of list) {
+            const shadowedAliases = lexicalTypeParameterNames(
+              alias,
+              context.sourceCode.visitorKeys,
+            );
+            if (!resolvesToUnknown(alias.typeAnnotation, shadowedAliases, new Set([name])))
+              continue;
+            context.report({
+              node: alias.id,
+              messageId: "unknownAlias",
+              data: { alias: name },
+            });
           }
-        }
-        for (const alias of aliases.values()) {
-          if (!resolvesToUnknown(alias.typeAnnotation, new Set([alias.id.name]))) continue;
-          context.report({
-            node: alias.id,
-            messageId: "unknownAlias",
-            data: { alias: alias.id.name },
-          });
         }
       },
     };
