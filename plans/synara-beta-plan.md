@@ -131,6 +131,21 @@ Implemented in [PR #2](https://github.com/kartikkabadi/synara-beta/pull/2) (`fea
   - Downloads the NSIS `.exe` installer.
   - Verifies file integrity and launches the installer.
 
+### Quick Command Reference
+
+- **macOS (Apple Silicon & Intel):**
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/kartikkabadi/synara-beta/main/scripts/install.sh | bash
+  ```
+- **Linux (x86_64):**
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/kartikkabadi/synara-beta/main/scripts/install.sh | bash
+  ```
+- **Windows 10 / 11 (x64 PowerShell):**
+  ```powershell
+  $t = ((Invoke-RestMethod "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" -UseBasicParsing -ErrorAction Stop) | Where-Object { $_.tag_name -match '^v\d+\.\d+\.\d+-beta\.\d+$' } | Select-Object -First 1).tag_name; if ($t) { $f = Join-Path $env:TEMP $("synara-beta-install-$([Guid]::NewGuid()).ps1"); Invoke-WebRequest "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-windows.ps1" -UseBasicParsing -OutFile $f -ErrorAction Stop; Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; Unblock-File -Path $f; try { & $f -Tag $t } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue } } else { throw "Could not resolve the latest Synara Beta release." }
+  ```
+
 ### Cryptographic Verification (Proposed in PR #2)
 
 - **Introduced in Open PR #2:** Proposes automated generation of `SHA256SUMS` across all compiled distribution artifacts in `.github/workflows/release-beta.yml`.
@@ -141,7 +156,7 @@ Implemented in [PR #2](https://github.com/kartikkabadi/synara-beta/pull/2) (`fea
 ### In-Place Updates & Downgrade Protection
 
 - Re-running the installation command acts as an in-place updater.
-- The installer resolves the latest `vX.Y.Z-beta.N` tag on GitHub Releases.
+- The installer resolves the latest `vX.Y.Z-beta.N` tag on GitHub Releases (using `releases?per_page=100` because `/releases/latest` excludes prereleases).
 - If the current installed version matches the latest release, it outputs "Already up to date" (bypassable via `--force`).
 - Attempts to install an older tag are refused without `--force`.
 - User data in `~/.synara-beta` is never modified or erased during installs or upgrades.
@@ -165,7 +180,7 @@ Implemented and merged in [PR #3](https://github.com/kartikkabadi/synara-beta/pu
   - Resets `providers.opencode.serverPasswordConfigured` to `false`.
   - Preserves provider configurations, model selections, custom system prompts, and disabled skills list.
 - **Keybindings (`userdata/keybindings.json`):** Copied as-is.
-- **Skills (`skills/` and `userdata/skills/`):** Symlinks and custom skills copied safely.
+- **Skills (`skills/` and `userdata/skills/`):** Symlinks and custom skills copied safely (owner-execute preserved, realpath boundaries verified).
 - **MCP Servers (`mcp/`):** Agent MCP configurations transferred safely.
 - **Project Records (`projection_projects` in `state.sqlite`):**
   - When Stable is not active, the engine safely reads registered project rows from Stable's database and upserts them into Beta's `state.sqlite` (supporting project definitions without copying transcripts).
@@ -182,11 +197,32 @@ Stable Synara runs with SQLite exclusive locking mode (`PRAGMA locking_mode = EX
 - Skips SQLite database access while Stable is running.
 - Restricts synchronization to decoupled configuration files (`settings.json`, `keybindings.json`, `skills/`).
 
-### Backups, Rollback & Watch Mode
+### CLI Command Reference
 
-- **Atomic Pre-Sync Snapshots:** Every sync creates a timestamped backup in `~/.synara-beta/userdata/backups/pre-sync-<timestamp>`.
-- **Instant Rollback:** Running `bun run sync:stable --undo` restores the most recent snapshot.
-- **Continuous Watch Mode:** Running `bun run sync:stable --watch` monitors Stable configuration files and syncs updates automatically in the background.
+- **Inspect sync availability and process lock status:**
+  ```bash
+  bun run sync:stable --status
+  ```
+- **Preview changes without copying:**
+  ```bash
+  bun run sync:stable --dry-run
+  ```
+- **Execute standard synchronization:**
+  ```bash
+  bun run sync:stable
+  ```
+- **Revert to the pre-sync snapshot:**
+  ```bash
+  bun run sync:stable --undo
+  ```
+- **Continuous auto-sync daemon (10s poll):**
+  ```bash
+  bun run sync:stable --watch
+  ```
+- **Selective synchronization exclusions:**
+  ```bash
+  bun run sync:stable --no-projects --no-skills --no-mcp
+  ```
 
 ---
 
@@ -221,6 +257,19 @@ Run via `bun run release:beta -- <version> [betaNumber] [options]`.
 - **Unsigned Publication Flag:** Includes `ALLOW_UNSIGNED_BETA_PUBLICATION=true` to allow successful publishing before official Apple and Azure signing certificates are introduced.
 - **Feed Isolation:** Feed files (`synara-mac.yml`, `synara.yml`, `synara-linux.yml`) target `kartikkabadi/synara-beta`, keeping Stable update channels completely decoupled.
 
+### Release Execution Procedure (Phase 4 Cut)
+
+1. **Prerequisite (for signed checksums):** Generate SSH ed25519 signing key (`ssh-keygen -t ed25519 -C "synara-beta-release-signing"`), set repository secret `SYNARA_RELEASE_SIGNING_KEY`, and commit public key to `scripts/release-signing.pub` (included in PR #2).
+2. **Execute release preflight:**
+   ```bash
+   bun run release:beta -- 0.8.3 1 --dry-run
+   bun run release:beta -- 0.8.3 1
+   ```
+3. **Publish to GitHub Releases:**
+   ```bash
+   git push origin v0.8.3-beta.1
+   ```
+
 ---
 
 ## Code Signing & Platform Trust Architecture
@@ -251,14 +300,34 @@ Run via `bun run release:beta -- <version> [betaNumber] [options]`.
 - **Engine:** Self-hosted OpenAnalytics instance (`https://getopen.so/`) hosted on the user's VPS.
 - **Privacy Core:** Open-source, cookie-free, GDPR-compliant, no third-party tracking scripts.
 - **User Control:** Disabled by default. An explicit toggle in Beta Settings allows opt-in: _"Share anonymous crash and performance telemetry"_.
-- **Payload:** Strictly bounded 23-field schema. Zero user prompts, tokens, file contents, code diffs, or personal paths are ever transmitted.
+- **Target Endpoint:** `https://<vps-domain-or-ip>/api/event`
+- **Integration Points:**
+  - `apps/desktop/src/main.ts`: `presentBackendStartupGiveUp` (backend supervision failure) and `presentRendererCrashRecovery` (renderer process exhaustion).
 
 ### 23-Field Scrubbed Schema
 
-- Metadata: `reportVersion`, `channel: "synara"`, `flavor: "beta"`, `bundleId`, `app.version`, `os`, `arch`.
-- Failure Context: `failure.kind` (e.g. `backend-start-failure`, `renderer-crash`), `consecutiveFailures`, `uptimeMs`.
-- Error Signature: Sanitized error identifier mapped against a fixed known error table.
-- Scrubbed Diagnostics: Max 8 lines of summarized backend log; usernames and home directories replaced with `<HOME>` placeholders.
+- **Metadata:** `reportVersion: 1`, `channel: "synara"`, `flavor: "beta"`, `bundleId: "com.emanueledipietro.synara.beta"`, `app.version`, `os` (`darwin` | `linux` | `win32`), `arch` (`x64` | `arm64`).
+- **Failure Context:** `failure.kind` (`backend-start-failure` | `renderer-crash` | `provider-spawn-failure`), `attempt`, `consecutiveFailures`, `uptimeMs`.
+- **Error Signature:** Error code mapped strictly from a predefined known-error enum table.
+- **Sanitized Diagnostics:** Max 8 lines of summarized backend log (2,000 char cap); all user paths replaced with `<HOME>` placeholders; auth headers, tokens, and prompt excerpts stripped.
+
+---
+
+## Active Pull Request Inventory
+
+| PR #    | Branch                                    | Title                                                                        | Status               |
+| :------ | :---------------------------------------- | :--------------------------------------------------------------------------- | :------------------- |
+| **#1**  | `docs/modernize-readme`                   | Modernize README with rich layout, subheadings, and UI previews              | **Merged**           |
+| **#2**  | `feat/one-line-installer`                 | Cross-platform one-line installer for macOS, Linux, and Windows              | **Open (In Review)** |
+| **#3**  | `feat/stable-sync-engine`                 | Coexistence auto-sync engine between Synara Stable and Beta                  | **Merged**           |
+| **#11** | `docs/overhaul-agents-md`                 | Rewrite agent guidance for beta and add agent skills                         | **Merged**           |
+| **#12** | `docs/upstream-history-reset`             | Explain the upstream history reset and how to read upstream                  | **Merged**           |
+| **#22** | `sync/connect-upstream-history`           | Connect upstream history to beta main                                        | **Merged**           |
+| **#25** | `sync/upstream-2026-09-06`                | Sync upstream main @ 8599826d7 (`v0.8.3`)                                    | **Open**             |
+| **#29** | `devin/1788779215-linux-arm64`            | Add Linux arm64 beta desktop releases                                        | **Open**             |
+| **#30** | `feat/auto-reclaim-worktrees-after-merge` | Auto-reclaim managed worktrees after PR merge                                | **Open**             |
+| **#31** | `agent/provider-config-overlay`           | Mirror user config directory overlay for isolated provider sessions          | **Open**             |
+| **#32** | `docs/overhaul-beta-plan`                 | Overhaul Synara Beta plan with connected history, installer, and sync engine | **Open (Active PR)** |
 
 ---
 
@@ -279,6 +348,15 @@ Run via `bun run release:beta -- <version> [betaNumber] [options]`.
 
 ---
 
+## Related Documentation
+
+- **[Installation Guide](file:///Users/user/synara-beta/docs/install.md):** Complete one-line terminal installer and manual download instructions.
+- **[Coexistence Sync Guide](file:///Users/user/synara-beta/docs/sync.md):** Safe synchronization commands, safeguards, and watch daemon.
+- **[Release Guide](file:///Users/user/synara-beta/docs/release.md):** Release build checklists, manifest specifications, and update feed structure.
+- **[Agent Guidance](file:///Users/user/synara-beta/AGENTS.md):** PR-first workflows, stack rules, and model selection doctrine.
+
+---
+
 ## Change Log
 
 - **2026-09-05:** Initial plan created (status: plan only, empty repository).
@@ -294,4 +372,4 @@ Run via `bun run release:beta -- <version> [betaNumber] [options]`.
   - Added Linux arm64 desktop packaging support in PR #29.
   - Worktree auto-reclaim after merge developed in PR #30.
 - **2026-09-08:**
-  - Full plan overhaul reflecting completed mirror connection, merged sync engine, installer PR, and current milestone priorities.
+  - Full plan overhaul reflecting completed mirror connection, merged sync engine, installer PR, bot review resolutions, and active PR inventory.
