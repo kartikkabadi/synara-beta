@@ -353,6 +353,9 @@ function SettingsRouteView() {
     ...(settings.enableProviderUpdateChecks !== defaults.enableProviderUpdateChecks
       ? ["Provider update checks"]
       : []),
+    ...(settings.pruneWorktreesAfterMerge !== defaults.pruneWorktreesAfterMerge
+      ? ["Prune merged worktrees"]
+      : []),
     ...(settings.diffWordWrap !== defaults.diffWordWrap ? ["Diff line wrapping"] : []),
     ...(settings.showPullRequestDiffColors !== defaults.showPullRequestDiffColors
       ? ["Pull request diff colors"]
@@ -1307,7 +1310,12 @@ function SettingsRouteView() {
                   defaults={defaults}
                   updateSettings={updateSettings}
                 />
-                <WorktreesSettingsPanel active={activeSection === "worktrees"} />
+                <WorktreesSettingsPanel
+                  active={activeSection === "worktrees"}
+                  settings={settings}
+                  defaults={defaults}
+                  updateSettings={updateSettings}
+                />
                 <ArchivedSettingsPanel active={activeSection === "archived"} />
                 <ModelsSettingsPanel
                   active={activeSection === "models"}

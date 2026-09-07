@@ -10,11 +10,12 @@ import {
   type ThreadId,
 } from "@synara/contracts";
 import { automationContinuationThreadId } from "@synara/shared/automationMode";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { randomUUID } from "node:crypto";
 
 import { ServerConfig } from "./config";
 import { GitCore } from "./git/Services/GitCore";
+import { GitHubCli } from "./git/Services/GitHubCli";
 import { pruneProjectedArchivedManagedWorktrees } from "./managedWorktrees";
 import type { OrchestrationEngineShape } from "./orchestration/Services/OrchestrationEngine";
 import type { ProjectionSnapshotQueryShape } from "./orchestration/Services/ProjectionSnapshotQuery";
@@ -23,6 +24,7 @@ import {
   type AutomationRepositoryShape,
 } from "./persistence/Services/AutomationRepository";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
+import { ServerSettingsService } from "./serverSettings";
 
 // Stable prefix for retention commands. Older versions used it for reversible
 // soft-deletes; current versions archive threads so users can restore them.
@@ -310,11 +312,18 @@ export const startThreadRetentionJob = Effect.fn("startThreadRetentionJob")(func
   const automationRepository = yield* AutomationRepository;
   const config = yield* ServerConfig;
   const git = yield* GitCore;
-  const pruneArchivedManagedWorktrees = pruneProjectedArchivedManagedWorktrees({
-    homeDir: config.homeDir,
-    worktreesDir: config.worktreesDir,
-    snapshotQuery: projectionSnapshotQuery,
-    git,
+  const serverSettings = yield* ServerSettingsService;
+  const gitHubCli = Option.getOrUndefined(yield* Effect.serviceOption(GitHubCli));
+  const pruneArchivedManagedWorktrees = Effect.gen(function* () {
+    const settings = yield* serverSettings.getSettings;
+    return yield* pruneProjectedArchivedManagedWorktrees({
+      homeDir: config.homeDir,
+      worktreesDir: config.worktreesDir,
+      snapshotQuery: projectionSnapshotQuery,
+      git,
+      pruneAfterMerge: settings.worktrees.pruneAfterMerge,
+      gitHubCli,
+    });
   }).pipe(Effect.asVoid);
   // Give startup/projection bootstrap a short settling window, then run one
   // archive pass promptly so desktop installs do not need to stay open for 24 hours.

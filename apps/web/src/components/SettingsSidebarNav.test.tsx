@@ -45,6 +45,11 @@ describe("rankSettingsSearchEntries", () => {
     expect(results.some((entry) => entry.id === "notifications:activity-toasts")).toBe(true);
   });
 
+  it("indexes the prune merged worktrees retention setting", () => {
+    const results = rankSettingsSearchEntries("prune merged worktrees", 12);
+    expect(results.some((entry) => entry.id === "worktrees:prune-merged-worktrees")).toBe(true);
+  });
+
   it("indexes environment instructions and the system UI font row", () => {
     expect(SETTINGS_SEARCH_ENTRIES.map((entry) => entry.id)).toEqual(
       expect.arrayContaining(["general:environment-instructions", "appearance:system-ui-font"]),

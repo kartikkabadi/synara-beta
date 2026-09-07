@@ -2,14 +2,16 @@ import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 
-import type { OrchestrationThread } from "@synara/contracts";
+import type { OrchestrationThread, OrchestrationThreadPullRequest } from "@synara/contracts";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { GitCoreShape } from "./git/Services/GitCore.ts";
+import type { GitHubCliShape } from "./git/Services/GitHubCli.ts";
 import type { ProjectionSnapshotQueryShape } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import {
   classifyManagedWorktreeRemovalCandidates,
+  detectMergedManagedWorktreePaths,
   listManagedWorktrees,
   MANAGED_WORKTREE_RETENTION_COUNT,
   pruneArchivedManagedWorktrees,
@@ -63,14 +65,27 @@ function makeGit(input: {
   readonly removals: string[];
   readonly snapshots?: string[];
   readonly dirtyPaths?: ReadonlySet<string>;
+  readonly headShaByCwd?: Record<string, string>;
+  readonly isAncestor?: (headSha: string, baseRef: string) => boolean;
 }) {
   return {
-    execute: ({ cwd }: { cwd: string }) =>
-      Effect.succeed({
+    execute: ({ cwd, args }: { cwd: string; args?: readonly string[] }) => {
+      if (args && args[0] === "rev-parse" && args[1] === "HEAD") {
+        const sha = input.headShaByCwd?.[cwd] ?? "1111111111111111111111111111111111111111";
+        return Effect.succeed({ code: 0, stdout: `${sha}\n`, stderr: "" });
+      }
+      if (args && args[0] === "merge-base" && args[1] === "--is-ancestor") {
+        const headSha = args[2]!;
+        const baseRef = args[3]!;
+        const ancestor = input.isAncestor ? input.isAncestor(headSha, baseRef) : false;
+        return Effect.succeed({ code: ancestor ? 0 : 1, stdout: "", stderr: "" });
+      }
+      return Effect.succeed({
         code: 0,
         stdout: `worktree /repo/project\nHEAD abc\nbranch refs/heads/main\n\nworktree ${cwd}\nHEAD abc\ndetached\n`,
         stderr: "",
-      }),
+      });
+    },
     withMutation: (_cwd: string, effect: Effect.Effect<unknown, unknown, unknown>) => effect,
     snapshotWorktree: ({ outputPath }: { outputPath: string }) =>
       Effect.sync(() => {
@@ -81,6 +96,50 @@ function makeGit(input: {
     removeWorktree: ({ path: worktreePath }: { path: string }) =>
       Effect.sync(() => input.removals.push(worktreePath)),
   } as unknown as GitCoreShape;
+}
+
+function makeGitHubCli(
+  prMap?: Record<string, { state: "open" | "closed" | "merged" } | null | Error>,
+) {
+  return {
+    getPullRequest: ({ reference }: { cwd: string; reference: string }) => {
+      const entry = prMap?.[reference];
+      if (entry instanceof Error) {
+        return Effect.fail(entry);
+      }
+      if (entry === null || entry === undefined) {
+        return Effect.succeed(null);
+      }
+      return Effect.succeed({
+        number: 100,
+        title: "Test PR",
+        url: reference.startsWith("http")
+          ? reference
+          : `https://github.com/org/repo/pull/${reference}`,
+        baseRefName: "main",
+        headRefName: "feature",
+        state: entry.state,
+      });
+    },
+  } as unknown as GitHubCliShape;
+}
+
+function makeThreadPr(input: {
+  readonly number: number;
+  readonly state: "open" | "closed" | "merged";
+  readonly url?: string;
+  readonly baseBranch?: string;
+  readonly headBranch?: string;
+  readonly title?: string;
+}): OrchestrationThreadPullRequest {
+  return {
+    number: input.number as never,
+    title: (input.title ?? `PR #${input.number}`) as never,
+    url: input.url ?? `https://github.com/org/repo/pull/${input.number}`,
+    baseBranch: (input.baseBranch ?? "main") as never,
+    headBranch: (input.headBranch ?? `feat/branch-${input.number}`) as never,
+    state: input.state,
+  };
 }
 
 afterEach(async () => {
@@ -213,6 +272,52 @@ describe("managed worktrees", () => {
     // remaining archived set fits inside the keep window, so only the deleted
     // owner is removed here.
     expect(removals).toEqual([paths[0]]);
+  });
+
+  it("prunes projected archived merged worktrees when pruneAfterMerge is enabled", async () => {
+    const { root, paths } = await makeManagedRoot(2);
+    const removals: string[] = [];
+    const git = makeGit({ removals });
+    const gitHubCli = makeGitHubCli({
+      "https://github.com/org/repo/pull/1": { state: "merged" },
+    });
+
+    const snapshotQuery = {
+      listManagedWorktreeThreads: () =>
+        Effect.succeed([
+          {
+            id: "thread-merged",
+            archivedAt: "2026-01-01T00:00:00.000Z",
+            deletedAt: null,
+            worktreePath: paths[0],
+            associatedWorktreePath: paths[0],
+            lastKnownPr: makeThreadPr({ number: 1, state: "merged" }),
+          },
+          {
+            id: "thread-open",
+            archivedAt: "2026-01-02T00:00:00.000Z",
+            deletedAt: null,
+            worktreePath: paths[1],
+            associatedWorktreePath: paths[1],
+            lastKnownPr: makeThreadPr({ number: 2, state: "open" }),
+          },
+        ]),
+    } as unknown as ProjectionSnapshotQueryShape;
+
+    const remaining = await Effect.runPromise(
+      pruneProjectedArchivedManagedWorktrees({
+        homeDir: root,
+        worktreesDir: root,
+        snapshotQuery,
+        git,
+        pruneAfterMerge: true,
+        gitHubCli,
+      }),
+    );
+
+    expect(removals).toEqual([paths[0]]);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]?.path).toBe(paths[1]);
   });
 
   it("removes a clean soft-deleted worktree even when it was never archived", async () => {
@@ -382,5 +487,380 @@ describe("managed worktrees", () => {
     expect(candidates.map((candidate) => [candidate.entry.path, candidate.reason])).toEqual([
       ["/wt/deleted", "deleted"],
     ]);
+  });
+
+  it("classifies merged candidates for archived threads bypassing retention limit", () => {
+    const inventory = [
+      { path: "/wt/active", workspaceRoot: "/repo" },
+      { path: "/wt/deleted", workspaceRoot: "/repo" },
+      { path: "/wt/merged", workspaceRoot: "/repo" },
+      { path: "/wt/archived-old", workspaceRoot: "/repo" },
+      { path: "/wt/archived-new", workspaceRoot: "/repo" },
+    ];
+    const canonicalByRecordedPath = new Map(inventory.map((entry) => [entry.path, entry.path]));
+    const mergedWorktreePaths = new Set(["/wt/merged", "/wt/active"]);
+
+    const candidates = classifyManagedWorktreeRemovalCandidates({
+      inventory,
+      canonicalByRecordedPath,
+      mergedWorktreePaths,
+      threads: [
+        {
+          id: "active",
+          worktreePath: "/wt/active",
+          archivedAt: null,
+          deletedAt: null,
+        },
+        {
+          id: "deleted",
+          worktreePath: "/wt/deleted",
+          archivedAt: null,
+          deletedAt: "2026-08-01T00:00:00.000Z",
+        },
+        {
+          id: "merged",
+          worktreePath: "/wt/merged",
+          archivedAt: "2026-01-01T00:00:00.000Z",
+          deletedAt: null,
+        },
+        {
+          id: "archived-old",
+          worktreePath: "/wt/archived-old",
+          archivedAt: "2026-01-02T00:00:00.000Z",
+          deletedAt: null,
+        },
+        {
+          id: "archived-new",
+          worktreePath: "/wt/archived-new",
+          archivedAt: "2026-02-01T00:00:00.000Z",
+          deletedAt: null,
+        },
+      ],
+    });
+
+    expect(candidates.map((candidate) => [candidate.entry.path, candidate.reason])).toEqual([
+      ["/wt/deleted", "deleted"],
+      ["/wt/merged", "merged"],
+    ]);
+  });
+
+  it("deduplicates multiple archived threads referencing the same merged worktree", () => {
+    const inventory = [{ path: "/wt/merged", workspaceRoot: "/repo" }];
+    const canonicalByRecordedPath = new Map(inventory.map((entry) => [entry.path, entry.path]));
+    const mergedWorktreePaths = new Set(["/wt/merged"]);
+
+    const candidates = classifyManagedWorktreeRemovalCandidates({
+      inventory,
+      canonicalByRecordedPath,
+      mergedWorktreePaths,
+      threads: [
+        {
+          id: "archived-1",
+          worktreePath: "/wt/merged",
+          archivedAt: "2026-01-01T00:00:00.000Z",
+          deletedAt: null,
+        },
+        {
+          id: "archived-2",
+          worktreePath: "/wt/merged",
+          archivedAt: "2026-01-02T00:00:00.000Z",
+          deletedAt: null,
+        },
+      ],
+    });
+
+    expect(candidates.map((candidate) => [candidate.entry.path, candidate.reason])).toEqual([
+      ["/wt/merged", "merged"],
+    ]);
+  });
+
+  it("detects merged worktrees via GitHub CLI pull request summary", async () => {
+    const inventory = [{ path: "/wt/pr-merged", workspaceRoot: "/repo" }];
+    const canonicalByRecordedPath = new Map(inventory.map((entry) => [entry.path, entry.path]));
+    const git = makeGit({ removals: [] });
+    const gitHubCli = makeGitHubCli({
+      "https://github.com/org/repo/pull/42": { state: "merged" },
+    });
+
+    const merged = await Effect.runPromise(
+      detectMergedManagedWorktreePaths({
+        inventory,
+        canonicalByRecordedPath,
+        git,
+        gitHubCli,
+        threads: [
+          {
+            id: "thread-pr",
+            worktreePath: "/wt/pr-merged",
+            archivedAt: "2026-01-01T00:00:00.000Z",
+            deletedAt: null,
+            lastKnownPr: makeThreadPr({ number: 42, state: "open" }),
+          },
+        ],
+      }),
+    );
+
+    expect(Array.from(merged)).toEqual(["/wt/pr-merged"]);
+  });
+
+  it("does not mark merged if GitHub CLI PR is closed unmerged and ancestry fails", async () => {
+    const inventory = [{ path: "/wt/pr-closed", workspaceRoot: "/repo" }];
+    const canonicalByRecordedPath = new Map(inventory.map((entry) => [entry.path, entry.path]));
+    const git = makeGit({ removals: [], isAncestor: () => false });
+    const gitHubCli = makeGitHubCli({
+      "https://github.com/org/repo/pull/42": { state: "closed" },
+    });
+
+    const merged = await Effect.runPromise(
+      detectMergedManagedWorktreePaths({
+        inventory,
+        canonicalByRecordedPath,
+        git,
+        gitHubCli,
+        threads: [
+          {
+            id: "thread-closed",
+            worktreePath: "/wt/pr-closed",
+            archivedAt: "2026-01-01T00:00:00.000Z",
+            deletedAt: null,
+            lastKnownPr: makeThreadPr({ number: 42, state: "closed" }),
+          },
+        ],
+      }),
+    );
+
+    expect(Array.from(merged)).toEqual([]);
+  });
+
+  it("falls back to projection lastKnownPr.state when GitHub CLI fails", async () => {
+    const inventory = [{ path: "/wt/offline-merged", workspaceRoot: "/repo" }];
+    const canonicalByRecordedPath = new Map(inventory.map((entry) => [entry.path, entry.path]));
+    const git = makeGit({ removals: [], isAncestor: () => false });
+    const gitHubCli = makeGitHubCli({
+      "https://github.com/org/repo/pull/99": new Error("network down"),
+    });
+
+    const merged = await Effect.runPromise(
+      detectMergedManagedWorktreePaths({
+        inventory,
+        canonicalByRecordedPath,
+        git,
+        gitHubCli,
+        threads: [
+          {
+            id: "thread-offline",
+            worktreePath: "/wt/offline-merged",
+            archivedAt: "2026-01-01T00:00:00.000Z",
+            deletedAt: null,
+            lastKnownPr: makeThreadPr({ number: 99, state: "merged" }),
+          },
+        ],
+      }),
+    );
+
+    expect(Array.from(merged)).toEqual(["/wt/offline-merged"]);
+  });
+
+  it("falls back to local git merge-base when commit is merged to main without PR", async () => {
+    const inventory = [{ path: "/wt/local-merged", workspaceRoot: "/repo" }];
+    const canonicalByRecordedPath = new Map(inventory.map((entry) => [entry.path, entry.path]));
+    const git = makeGit({
+      removals: [],
+      headShaByCwd: { "/wt/local-merged": "2222222222222222222222222222222222222222" },
+      isAncestor: (sha, base) =>
+        sha === "2222222222222222222222222222222222222222" && base === "origin/main",
+    });
+
+    const merged = await Effect.runPromise(
+      detectMergedManagedWorktreePaths({
+        inventory,
+        canonicalByRecordedPath,
+        git,
+        threads: [
+          {
+            id: "thread-no-pr",
+            worktreePath: "/wt/local-merged",
+            archivedAt: "2026-01-01T00:00:00.000Z",
+            deletedAt: null,
+          },
+        ],
+      }),
+    );
+
+    expect(Array.from(merged)).toEqual(["/wt/local-merged"]);
+  });
+
+  it("protects shared worktree if an archived sibling thread is unmerged", async () => {
+    const inventory = [{ path: "/wt/shared", workspaceRoot: "/repo" }];
+    const canonicalByRecordedPath = new Map(inventory.map((entry) => [entry.path, entry.path]));
+    const git = makeGit({ removals: [], isAncestor: () => false });
+    const gitHubCli = makeGitHubCli({
+      "https://github.com/org/repo/pull/1": { state: "merged" },
+      "https://github.com/org/repo/pull/2": { state: "open" },
+    });
+
+    const merged = await Effect.runPromise(
+      detectMergedManagedWorktreePaths({
+        inventory,
+        canonicalByRecordedPath,
+        git,
+        gitHubCli,
+        threads: [
+          {
+            id: "thread-merged",
+            worktreePath: "/wt/shared",
+            archivedAt: "2026-01-01T00:00:00.000Z",
+            deletedAt: null,
+            lastKnownPr: makeThreadPr({ number: 1, state: "merged" }),
+          },
+          {
+            id: "thread-unmerged",
+            worktreePath: "/wt/shared",
+            archivedAt: "2026-01-02T00:00:00.000Z",
+            deletedAt: null,
+            lastKnownPr: makeThreadPr({ number: 2, state: "open" }),
+          },
+        ],
+      }),
+    );
+
+    expect(Array.from(merged)).toEqual([]);
+  });
+
+  it("protects shared worktree when any active thread points to it", async () => {
+    const inventory = [{ path: "/wt/shared-active", workspaceRoot: "/repo" }];
+    const canonicalByRecordedPath = new Map(inventory.map((entry) => [entry.path, entry.path]));
+    const git = makeGit({ removals: [] });
+    const gitHubCli = makeGitHubCli({
+      "https://github.com/org/repo/pull/1": { state: "merged" },
+    });
+
+    const merged = await Effect.runPromise(
+      detectMergedManagedWorktreePaths({
+        inventory,
+        canonicalByRecordedPath,
+        git,
+        gitHubCli,
+        threads: [
+          {
+            id: "thread-active",
+            worktreePath: "/wt/shared-active",
+            archivedAt: null,
+            deletedAt: null,
+          },
+          {
+            id: "thread-archived-merged",
+            worktreePath: "/wt/shared-active",
+            archivedAt: "2026-01-01T00:00:00.000Z",
+            deletedAt: null,
+            lastKnownPr: makeThreadPr({ number: 1, state: "merged" }),
+          },
+        ],
+      }),
+    );
+
+    expect(Array.from(merged)).toEqual([]);
+  });
+
+  it("prunes merged worktrees immediately when pruneAfterMerge is enabled, even within retention limit", async () => {
+    const { root, paths } = await makeManagedRoot(2);
+    const removals: string[] = [];
+    const git = makeGit({ removals });
+    const gitHubCli = makeGitHubCli({
+      "https://github.com/org/repo/pull/1": { state: "merged" },
+      "https://github.com/org/repo/pull/2": { state: "open" },
+    });
+
+    const threads = [
+      {
+        id: "thread-0",
+        worktreePath: paths[0],
+        associatedWorktreePath: paths[0],
+        archivedAt: "2026-01-01T00:00:00.000Z",
+        deletedAt: null,
+        lastKnownPr: makeThreadPr({ number: 1, state: "merged" }),
+      },
+      {
+        id: "thread-1",
+        worktreePath: paths[1],
+        associatedWorktreePath: paths[1],
+        archivedAt: "2026-01-02T00:00:00.000Z",
+        deletedAt: null,
+        lastKnownPr: makeThreadPr({ number: 2, state: "open" }),
+      },
+    ] as unknown as OrchestrationThread[];
+
+    // With pruneAfterMerge: true -> thread-0 is pruned immediately despite being within 15 limit
+    const remaining = await Effect.runPromise(
+      pruneArchivedManagedWorktrees({
+        worktreesDir: root,
+        snapshotsDir: path.join(root, "snapshots"),
+        threads,
+        git,
+        pruneAfterMerge: true,
+        gitHubCli,
+      }),
+    );
+
+    expect(removals).toEqual([paths[0]]);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]?.path).toBe(paths[1]);
+
+    // With pruneAfterMerge: false -> retains both within 15 limit
+    const removalsDisabled: string[] = [];
+    const gitDisabled = makeGit({ removals: removalsDisabled });
+    const remainingDisabled = await Effect.runPromise(
+      pruneArchivedManagedWorktrees({
+        worktreesDir: root,
+        snapshotsDir: path.join(root, "snapshots"),
+        threads,
+        git: gitDisabled,
+        pruneAfterMerge: false,
+        gitHubCli,
+      }),
+    );
+
+    expect(removalsDisabled).toEqual([]);
+    expect(remainingDisabled).toHaveLength(2);
+  });
+
+  it("skips removal and snapshots a dirty merged worktree when pruneAfterMerge is enabled", async () => {
+    const { root, paths } = await makeManagedRoot(1);
+    const removals: string[] = [];
+    const snapshots: string[] = [];
+    const git = makeGit({
+      removals,
+      snapshots,
+      dirtyPaths: new Set([paths[0]!]),
+    });
+    const gitHubCli = makeGitHubCli({
+      "https://github.com/org/repo/pull/1": { state: "merged" },
+    });
+
+    const threads = [
+      {
+        id: "thread-dirty-merged",
+        worktreePath: paths[0],
+        associatedWorktreePath: paths[0],
+        archivedAt: "2026-01-01T00:00:00.000Z",
+        deletedAt: null,
+        lastKnownPr: makeThreadPr({ number: 1, state: "merged" }),
+      },
+    ] as unknown as OrchestrationThread[];
+
+    const remaining = await Effect.runPromise(
+      pruneArchivedManagedWorktrees({
+        worktreesDir: root,
+        snapshotsDir: path.join(root, "snapshots"),
+        threads,
+        git,
+        pruneAfterMerge: true,
+        gitHubCli,
+      }),
+    );
+
+    expect(removals).toEqual([]);
+    expect(snapshots).toHaveLength(1);
+    expect(remaining).toHaveLength(1);
   });
 });

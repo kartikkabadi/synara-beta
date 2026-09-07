@@ -719,11 +719,16 @@ const makeWsRpcHandlersLayer = () =>
           Effect.asVoid,
         );
 
-      const pruneManagedWorktrees = pruneProjectedArchivedManagedWorktrees({
-        homeDir: config.homeDir,
-        worktreesDir: config.worktreesDir,
-        snapshotQuery: projectionReadModelQuery,
-        git,
+      const pruneManagedWorktrees = Effect.gen(function* () {
+        const settings = yield* serverSettings.getSettings;
+        return yield* pruneProjectedArchivedManagedWorktrees({
+          homeDir: config.homeDir,
+          worktreesDir: config.worktreesDir,
+          snapshotQuery: projectionReadModelQuery,
+          git,
+          pruneAfterMerge: settings.worktrees.pruneAfterMerge,
+          gitHubCli: github,
+        });
       }).pipe(
         // A retention failure must not present as an empty inventory: fall back
         // to a plain scan so listing callers still see the real worktrees.

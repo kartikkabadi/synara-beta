@@ -322,6 +322,7 @@ describe("wsNativeApi", () => {
           pi: { enabled: true, binaryPath: "pi", agentDir: "", customModels: [] },
         },
         skills: { disabled: [] },
+        worktrees: { pruneAfterMerge: false },
       },
     } as const;
     emitPush(WS_CHANNELS.serverSettingsUpdated, payload);
@@ -721,6 +722,55 @@ describe("wsNativeApi", () => {
       integrationId: "integration-1",
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("uses websocket RPC for listing worktrees and updating worktree retention settings", async () => {
+    const worktreesPayload = {
+      worktrees: [{ path: "/repo/task-1", workspaceRoot: "/repo" }],
+    };
+    const updatedSettingsPayload = {
+      enableAssistantStreaming: true,
+      enableProviderUpdateChecks: true,
+      defaultThreadEnvMode: "local" as const,
+      addProjectBaseDirectory: "",
+      textGenerationModelSelection: { provider: "codex" as const, model: "gpt-5.4-mini" },
+      providers: {
+        codex: { enabled: true, binaryPath: "codex", homePath: "", customModels: [] },
+        claudeAgent: { enabled: true, binaryPath: "claude", launchArgs: "", customModels: [] },
+        cursor: { enabled: false, binaryPath: "agent", apiEndpoint: "", customModels: [] },
+        devin: { enabled: true, binaryPath: "devin", customModels: [] },
+        antigravity: { enabled: true, binaryPath: "agy", customModels: [] },
+        grok: { enabled: true, binaryPath: "grok", customModels: [] },
+        droid: { enabled: true, binaryPath: "droid", customModels: [] },
+        opencode: {
+          enabled: true,
+          binaryPath: "opencode",
+          serverUrl: "",
+          serverPasswordConfigured: false,
+          experimentalWebSockets: false,
+          customModels: [],
+        },
+        pi: { enabled: true, binaryPath: "pi", agentDir: "", customModels: [] },
+      },
+      skills: { disabled: [] },
+      worktrees: { pruneAfterMerge: true },
+    };
+
+    requestMock
+      .mockResolvedValueOnce(worktreesPayload)
+      .mockResolvedValueOnce(updatedSettingsPayload);
+
+    const { createWsNativeApi } = await import("./wsNativeApi");
+    const api = createWsNativeApi();
+
+    const worktreesResult = await api.server.listWorktrees();
+    expect(worktreesResult).toEqual(worktreesPayload);
+    expect(requestMock).toHaveBeenNthCalledWith(1, WS_METHODS.serverListWorktrees);
+
+    const patch = { worktrees: { pruneAfterMerge: true } };
+    const updateResult = await api.server.updateSettings(patch);
+    expect(updateResult).toEqual(updatedSettingsPayload);
+    expect(requestMock).toHaveBeenNthCalledWith(2, WS_METHODS.serverUpdateSettings, patch);
   });
 
   it("fetches auth session state over HTTP", async () => {

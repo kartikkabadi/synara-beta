@@ -337,6 +337,14 @@ export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
     keywords: "Review and clean up the worktrees created by Synara. git branch remove",
     target: null,
   },
+  {
+    id: "worktrees:prune-merged-worktrees",
+    section: "worktrees",
+    title: "Prune merged worktrees",
+    keywords:
+      "Automatically reclaim managed worktrees when all linked conversations have merged pull requests. git clean prune retention",
+    target: null,
+  },
 
   // ── Archived ──────────────────────────────────────────────────────────────────
   {

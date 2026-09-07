@@ -5,9 +5,11 @@ import { Cause, Effect, Layer, Option, Stream } from "effect";
 import { ServerConfig } from "../../config";
 import { DeviceService } from "../../device/Services/DeviceService";
 import { GitCore } from "../../git/Services/GitCore";
+import { GitHubCli } from "../../git/Services/GitHubCli";
 import { pruneProjectedArchivedManagedWorktrees } from "../../managedWorktrees";
 import { ProfileStatsArchive } from "../../profileStatsArchive";
 import { ProviderService } from "../../provider/Services/ProviderService";
+import { ServerSettingsService } from "../../serverSettings";
 import { TerminalManager } from "../../terminal/Services/Manager";
 import { THREAD_RETENTION_COMMAND_ID_PREFIX } from "../../threadRetention";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine";
@@ -90,16 +92,23 @@ const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const serverConfig = yield* ServerConfig;
   const git = yield* GitCore;
+  const serverSettings = yield* ServerSettingsService;
+  const gitHubCli = Option.getOrUndefined(yield* Effect.serviceOption(GitHubCli));
 
   const pruneManagedWorktreesAfterLifecycle = (context: {
     readonly eventType: ThreadDeletedEvent["type"];
     readonly threadId?: string;
   }) =>
-    pruneProjectedArchivedManagedWorktrees({
-      homeDir: serverConfig.homeDir,
-      worktreesDir: serverConfig.worktreesDir,
-      snapshotQuery: projectionSnapshotQuery,
-      git,
+    Effect.gen(function* () {
+      const settings = yield* serverSettings.getSettings;
+      return yield* pruneProjectedArchivedManagedWorktrees({
+        homeDir: serverConfig.homeDir,
+        worktreesDir: serverConfig.worktreesDir,
+        snapshotQuery: projectionSnapshotQuery,
+        git,
+        pruneAfterMerge: settings.worktrees.pruneAfterMerge,
+        gitHubCli,
+      });
     }).pipe(
       Effect.asVoid,
       Effect.catch((error) =>

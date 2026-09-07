@@ -646,12 +646,14 @@ export const makeAgentGateway = Effect.gen(function* () {
           })
           .pipe(Effect.mapError((error) => new ToolInputError(errorText(error))));
         if (archived) {
+          const settings = yield* serverSettings.getSettings;
           yield* Effect.forkDetach(
             pruneProjectedArchivedManagedWorktrees({
               homeDir: serverConfig.homeDir,
               worktreesDir: serverConfig.worktreesDir,
               snapshotQuery,
               git,
+              pruneAfterMerge: settings.worktrees.pruneAfterMerge,
             }).pipe(
               Effect.catchCause((cause) =>
                 Effect.logWarning("agent gateway managed worktree retention failed", {
