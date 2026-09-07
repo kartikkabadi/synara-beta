@@ -70,7 +70,7 @@ describe("install-windows.ps1", () => {
   it("supports -Help", () => {
     NodeAssert.match(script, /\[switch\]\$Help/);
     NodeAssert.match(script, /if \(\$Help\)/);
-    NodeAssert.match(script, /usage: install-windows\.ps1 \[-Tag vX\.Y\.Z\]/);
+    NodeAssert.match(script, /usage: install-windows\.ps1 \[-Tag vX\.Y\.Z-beta\.N\] \[-Force\]/);
   });
 
   it("prints success sentence", () => {
