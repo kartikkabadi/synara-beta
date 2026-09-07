@@ -582,6 +582,9 @@ function removeManagedWorktreeSafely(input: {
   readonly snapshotsDir: string;
   readonly candidate: ManagedWorktreeRemovalCandidate;
   readonly git: GitCoreShape;
+  readonly recheckActiveOwners?:
+    | ((worktreePath: string) => Effect.Effect<boolean, unknown>)
+    | undefined;
 }): Effect.Effect<boolean, Error> {
   const { entry, thread, reason } = input.candidate;
   const snapshotPath = snapshotOutputPath({
@@ -594,6 +597,21 @@ function removeManagedWorktreeSafely(input: {
     .withMutation(
       entry.workspaceRoot,
       Effect.gen(function* () {
+        if (input.recheckActiveOwners) {
+          const hasActiveOwner = yield* input.recheckActiveOwners(entry.path);
+          if (hasActiveOwner) {
+            yield* Effect.logWarning(
+              "managed worktree cleanup skipped active worktree; thread was restored",
+              {
+                threadId: thread.id,
+                worktreePath: entry.path,
+                reason,
+              },
+            );
+            return false;
+          }
+        }
+
         const alreadySnapshotted = yield* snapshotExists(snapshotPath);
         if (!alreadySnapshotted) {
           yield* input.git.snapshotWorktree({ cwd: entry.path, outputPath: snapshotPath });
@@ -726,6 +744,10 @@ export function pruneArchivedManagedWorktrees(input: {
   readonly git: GitCoreShape;
   readonly pruneAfterMerge?: boolean | undefined;
   readonly gitHubCli?: GitHubCliShape | undefined;
+  readonly snapshotQuery?: ProjectionSnapshotQueryShape | undefined;
+  readonly recheckActiveOwners?:
+    | ((worktreePath: string) => Effect.Effect<boolean, unknown>)
+    | undefined;
 }): Effect.Effect<ReadonlyArray<ServerManagedWorktree>, Error> {
   return Effect.gen(function* () {
     const inventory = yield* listManagedWorktrees(input);
@@ -747,6 +769,27 @@ export function pruneArchivedManagedWorktrees(input: {
     });
     if (removalCandidates.length === 0) return inventory;
 
+    const recheckActiveOwners =
+      input.recheckActiveOwners ??
+      (input.snapshotQuery
+        ? (worktreePath: string) =>
+            Effect.gen(function* () {
+              const latestThreads = yield* input
+                .snapshotQuery!.listManagedWorktreeThreads()
+                .pipe(Effect.catch(() => Effect.succeed([])));
+              const latestCanonical = yield* canonicalizeThreadWorktreePaths(latestThreads).pipe(
+                Effect.catch(() => Effect.succeed(new Map())),
+              );
+              return latestThreads.some((thread) => {
+                if (!isActiveManagedWorktreeThread(thread)) return false;
+                const recorded = threadManagedWorktreePath(thread);
+                if (!recorded) return false;
+                const canonical = latestCanonical.get(recorded) ?? recorded;
+                return canonical === worktreePath || recorded === worktreePath;
+              });
+            })
+        : undefined);
+
     yield* ensureSnapshotsDir(input.snapshotsDir);
     const removedPaths = new Set<string>();
     yield* Effect.forEach(
@@ -756,6 +799,7 @@ export function pruneArchivedManagedWorktrees(input: {
           snapshotsDir: input.snapshotsDir,
           candidate,
           git: input.git,
+          recheckActiveOwners,
         }).pipe(
           Effect.tap((removed) =>
             removed ? Effect.sync(() => removedPaths.add(candidate.entry.path)) : Effect.void,
@@ -786,6 +830,7 @@ export function pruneProjectedArchivedManagedWorktrees(input: {
       git: input.git,
       pruneAfterMerge: input.pruneAfterMerge,
       gitHubCli: input.gitHubCli,
+      snapshotQuery: input.snapshotQuery,
     });
   });
 }

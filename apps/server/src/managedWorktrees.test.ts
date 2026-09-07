@@ -1208,4 +1208,54 @@ describe("managed worktrees", () => {
     expect(removals).toEqual([worktreePath]);
     expect(remaining).toHaveLength(0);
   });
+
+  it("skips pruning if a thread is unarchived between merge detection and removal", async () => {
+    const { root, paths } = await makeManagedRoot(1);
+    const worktreePath = paths[0]!;
+    const removals: string[] = [];
+    const git = makeGit({
+      removals,
+      headShaByCwd: { [worktreePath]: "1111111111111111111111111111111111111111" },
+    });
+    const gitHubCli = makeGitHubCli({
+      "https://github.com/org/repo/pull/1": {
+        state: "merged",
+        headRefOid: "1111111111111111111111111111111111111111",
+      },
+    });
+
+    const initialThread = {
+      id: "thread-concurrent-unarchive",
+      worktreePath,
+      associatedWorktreePath: worktreePath,
+      archivedAt: "2026-01-01T00:00:00.000Z",
+      deletedAt: null,
+      lastKnownPr: makeThreadPr({ number: 1, state: "merged" }),
+    };
+
+    const restoredThread = {
+      ...initialThread,
+      archivedAt: null,
+    };
+
+    const snapshotQuery = {
+      listManagedWorktreeThreads: () => Effect.succeed([restoredThread]),
+    } as unknown as ProjectionSnapshotQueryShape;
+
+    const remaining = await Effect.runPromise(
+      pruneArchivedManagedWorktrees({
+        worktreesDir: root,
+        snapshotsDir: path.join(root, "snapshots"),
+        threads: [initialThread as unknown as OrchestrationThread],
+        git,
+        pruneAfterMerge: true,
+        gitHubCli,
+        snapshotQuery,
+      }),
+    );
+
+    expect(removals).toEqual([]);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]?.path).toBe(worktreePath);
+  });
 });
