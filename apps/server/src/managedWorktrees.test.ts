@@ -1258,4 +1258,49 @@ describe("managed worktrees", () => {
     expect(remaining).toHaveLength(1);
     expect(remaining[0]?.path).toBe(worktreePath);
   });
+
+  it("fails closed and skips pruning if snapshotQuery owner recheck fails", async () => {
+    const { root, paths } = await makeManagedRoot(1);
+    const worktreePath = paths[0]!;
+    const removals: string[] = [];
+    const git = makeGit({
+      removals,
+      headShaByCwd: { [worktreePath]: "1111111111111111111111111111111111111111" },
+    });
+    const gitHubCli = makeGitHubCli({
+      "https://github.com/org/repo/pull/1": {
+        state: "merged",
+        headRefOid: "1111111111111111111111111111111111111111",
+      },
+    });
+
+    const thread = {
+      id: "thread-query-failure",
+      worktreePath,
+      associatedWorktreePath: worktreePath,
+      archivedAt: "2026-01-01T00:00:00.000Z",
+      deletedAt: null,
+      lastKnownPr: makeThreadPr({ number: 1, state: "merged" }),
+    };
+
+    const snapshotQuery = {
+      listManagedWorktreeThreads: () => Effect.fail(new Error("SQLite query failed")),
+    } as unknown as ProjectionSnapshotQueryShape;
+
+    const remaining = await Effect.runPromise(
+      pruneArchivedManagedWorktrees({
+        worktreesDir: root,
+        snapshotsDir: path.join(root, "snapshots"),
+        threads: [thread as unknown as OrchestrationThread],
+        git,
+        pruneAfterMerge: true,
+        gitHubCli,
+        snapshotQuery,
+      }),
+    );
+
+    expect(removals).toEqual([]);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]?.path).toBe(worktreePath);
+  });
 });

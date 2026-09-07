@@ -598,16 +598,32 @@ function removeManagedWorktreeSafely(input: {
       entry.workspaceRoot,
       Effect.gen(function* () {
         if (input.recheckActiveOwners) {
-          const hasActiveOwner = yield* input.recheckActiveOwners(entry.path);
-          if (hasActiveOwner) {
-            yield* Effect.logWarning(
-              "managed worktree cleanup skipped active worktree; thread was restored",
-              {
-                threadId: thread.id,
-                worktreePath: entry.path,
-                reason,
-              },
-            );
+          const recheckResult = yield* input.recheckActiveOwners(entry.path).pipe(
+            Effect.map((hasActiveOwner) => ({ ok: true as const, hasActiveOwner })),
+            Effect.catch((error) =>
+              Effect.logWarning(
+                "managed worktree cleanup skipped worktree because active owner recheck failed; refusing removal",
+                {
+                  threadId: thread.id,
+                  worktreePath: entry.path,
+                  reason,
+                  error: error instanceof Error ? error.message : String(error),
+                },
+              ).pipe(Effect.as({ ok: false as const, hasActiveOwner: true })),
+            ),
+          );
+
+          if (recheckResult.hasActiveOwner) {
+            if (recheckResult.ok) {
+              yield* Effect.logWarning(
+                "managed worktree cleanup skipped active worktree; thread was restored",
+                {
+                  threadId: thread.id,
+                  worktreePath: entry.path,
+                  reason,
+                },
+              );
+            }
             return false;
           }
         }
@@ -774,12 +790,8 @@ export function pruneArchivedManagedWorktrees(input: {
       (input.snapshotQuery
         ? (worktreePath: string) =>
             Effect.gen(function* () {
-              const latestThreads = yield* input
-                .snapshotQuery!.listManagedWorktreeThreads()
-                .pipe(Effect.catch(() => Effect.succeed([])));
-              const latestCanonical = yield* canonicalizeThreadWorktreePaths(latestThreads).pipe(
-                Effect.catch(() => Effect.succeed(new Map())),
-              );
+              const latestThreads = yield* input.snapshotQuery!.listManagedWorktreeThreads();
+              const latestCanonical = yield* canonicalizeThreadWorktreePaths(latestThreads);
               return latestThreads.some((thread) => {
                 if (!isActiveManagedWorktreeThread(thread)) return false;
                 const recorded = threadManagedWorktreePath(thread);
