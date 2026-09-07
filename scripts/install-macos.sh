@@ -2,7 +2,7 @@
 #
 # One-line macOS installer for Synara Beta (Apple Silicon and Intel).
 #
-#   t=$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep '"tag_name"' | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | grep -- '-beta' | head -1); if [ -z "$t" ]; then echo "Could not resolve the latest Synara Beta release." >&2; (exit 1); else f=$(mktemp /tmp/synara-beta-install.XXXXXX) && curl -fsSL -o "$f" "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-macos.sh" && bash "$f" --tag "$t"; rc=$?; rm -f "${f:-/tmp/synara-beta-install-none}"; (exit $rc); fi
+#   t=$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep '"tag_name"' | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$' | head -1); if [ -z "$t" ]; then echo "Could not resolve the latest Synara Beta release." >&2; (exit 1); else f=$(mktemp /tmp/synara-beta-install.XXXXXX) && curl -fsSL -o "$f" "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-macos.sh" && bash "$f" --tag "$t"; rc=$?; rm -f "${f:-/tmp/synara-beta-install-none}"; (exit $rc); fi
 #   bash install-macos.sh --tag v0.8.2-beta.1
 #
 # Downloads the GitHub DMG for the latest beta tag (or --tag), checks
@@ -10,6 +10,13 @@
 
 set -euo pipefail
 
+# Pinned release-signing public key (scripts/release-signing.pub at the tag the
+# installer ships from). SHA256SUMS is signed with the matching private key
+# during the release workflow; verification happens before any checksum is
+# trusted. Rotate by updating the workflow secret and this line together.
+ALLOWED_SIGNERS="synara-beta-releases ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFA61LZNkb3QTME3wdqznC/zghISZ9nsS2BnUMUQ1JRo"
+
+force=0
 tag=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -25,14 +32,19 @@ while [ "$#" -gt 0 ]; do
       tag="${1#--tag=}"
       shift
       ;;
+    --force)
+      force=1
+      shift
+      ;;
     -h|--help)
-      echo "usage: install-macos.sh [--tag vX.Y.Z]"
+      echo "usage: install-macos.sh [--tag vX.Y.Z] [--force]"
       echo "installs Synara Beta to /Applications/Synara Beta.app"
+      echo "re-running with a newer tag updates in place; ~/.synara-beta is never touched"
       exit 0
       ;;
     *)
       echo "install-macos.sh: unknown argument: $1" >&2
-      echo "usage: install-macos.sh [--tag vX.Y.Z]" >&2
+      echo "usage: install-macos.sh [--tag vX.Y.Z] [--force]" >&2
       exit 1
       ;;
   esac
@@ -59,12 +71,24 @@ esac
 
 tmp="$(mktemp -d)"
 mnt="$tmp/mnt"
-trap 'hdiutil detach "$mnt" >/dev/null 2>&1 || true; rm -rf "$tmp"' EXIT
+# If the script dies between moving the old app aside and moving the new one
+# into place, restore the old app so the installation never disappears.
+restore_on_exit() {
+  if [ -n "${swap_started:-}" ] && [ ! -d "$app" ] && [ -d "$old_app" ]; then
+    mv "$old_app" "$app" 2>/dev/null || true
+    echo "install-macos.sh: interrupted - previous installation restored." >&2
+  fi
+  hdiutil detach "$mnt" >/dev/null 2>&1 || true
+  rm -rf "$tmp"
+}
+trap restore_on_exit EXIT
 mkdir -p "$mnt"
 
 if [ -z "$tag" ]; then
-  # /releases/latest excludes prereleases, so list releases and pick the newest -beta tag.
-  tag="$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep '"tag_name"' | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | grep -- '-beta' | head -1 || true)"
+  # /releases/latest excludes prereleases, so list releases and pick the newest
+  # beta tag. The pattern matches exactly the tags the beta release workflow
+  # publishes (vX.Y.Z-beta.N) so unrelated prerelease names are never selected.
+  tag="$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep '"tag_name"' | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$' | head -1 || true)"
 fi
 
 if [ -z "$tag" ]; then
@@ -78,6 +102,26 @@ if ! [[ "$tag" =~ ^v[0-9]+.* ]]; then
 fi
 
 version="${tag#v}"
+app="/Applications/Synara Beta.app"
+
+# Update semantics: re-running this installer is the update path. Skip when the
+# installed version already matches; refuse downgrades without --force. The
+# ~/.synara-beta data directory is never read or written here, so user data
+# survives every install.
+if [ -d "$app" ]; then
+  installed_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist" 2>/dev/null || echo "")"
+  if [ -n "$installed_version" ]; then
+    if [ "$installed_version" = "$version" ] && [ "$force" -ne 1 ]; then
+      echo "Synara Beta $installed_version is already installed. Re-run with --force to reinstall."
+      exit 0
+    fi
+    if [ "$force" -ne 1 ] && [ "$(printf '%s\n%s\n' "$installed_version" "$version" | sort -V | head -1)" = "$version" ] && [ "$installed_version" != "$version" ]; then
+      echo "install-macos.sh: installed Synara Beta $installed_version is newer than $tag. Pass --force to downgrade." >&2
+      exit 1
+    fi
+  fi
+fi
+
 echo "Installing Synara Beta $tag for macOS ($arch_suffix)..."
 
 base="https://github.com/kartikkabadi/synara-beta/releases/download/${tag}"
@@ -85,6 +129,18 @@ curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS" || {
   echo "install-macos.sh: failed to fetch SHA256SUMS from $base/SHA256SUMS" >&2
   exit 1
 }
+
+curl -fsSL -o "$tmp/SHA256SUMS.sig" "$base/SHA256SUMS.sig" || {
+  echo "install-macos.sh: failed to fetch SHA256SUMS.sig from $base/SHA256SUMS.sig" >&2
+  exit 1
+}
+
+printf '%s\n' "$ALLOWED_SIGNERS" > "$tmp/allowed_signers"
+echo "Verifying release signature..."
+if ! ssh-keygen -Y verify -f "$tmp/allowed_signers" -I synara-beta-releases -s "$tmp/SHA256SUMS.sig" -n synara-beta < "$tmp/SHA256SUMS" >/dev/null 2>&1; then
+  echo "install-macos.sh: release signature verification failed for SHA256SUMS. Refusing to install." >&2
+  exit 1
+fi
 
 dmg="$(grep -E "[[:space:]]+\*?Synara.*${arch_suffix}\.dmg\$" "$tmp/SHA256SUMS" | head -1 | awk '{print $NF}' | sed 's/^\*//' || true)"
 if [ -z "$dmg" ]; then
@@ -138,14 +194,17 @@ if [ -w "/Applications" ]; then
   rm -rf "$new_app" "$old_app"
   ditto "$prepared_app" "$new_app"
   if [ -e "$app" ]; then
+    swap_started=1
     mv "$app" "$old_app"
   fi
   if mv "$new_app" "$app"; then
+    swap_started=""
     rm -rf "$old_app"
   else
     if [ -e "$old_app" ]; then
       mv "$old_app" "$app"
     fi
+    swap_started=""
     rm -rf "$new_app"
     echo "install-macos.sh: installation failed." >&2
     exit 1
@@ -162,6 +221,10 @@ end run
 APPLESCRIPT
 fi
 
+# The beta app is unsigned, so Gatekeeper would block first launch with a
+# damaged-file warning. Removing the quarantine flag from the installed app
+# only (never changing system security settings) lets it start; the checksum
+# and release-signature verification above are the integrity/authenticity gate.
 xattr -d com.apple.quarantine "$app" 2>/dev/null || true
 open "$app" 2>/dev/null || echo "install-macos.sh: installed $app but could not open it automatically." >&2
 echo "Installed Synara Beta $tag."
