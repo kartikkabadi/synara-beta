@@ -193,130 +193,135 @@ export function detectMergedManagedWorktreePaths(input: {
     }
   }
 
-  return Effect.gen(function* () {
-    const mergedPaths = new Set<string>();
+  const checkThreadMerged = (
+    entry: ServerManagedWorktree,
+    thread: ManagedWorktreeThreadRef,
+  ): Effect.Effect<boolean> =>
+    Effect.gen(function* () {
+      let isMerged = false;
+      let prStatusKnown = false;
 
-    for (const entry of input.inventory) {
-      const linked = threadsByCanonicalPath.get(entry.path) ?? [];
-      if (linked.length === 0 || linked.some(isActiveManagedWorktreeThread)) continue;
-      if (linked.every(isDeletedManagedWorktreeThread)) continue;
-
-      const archivedOnly = linked.filter(isArchivedOnlyManagedWorktreeThread);
-      if (archivedOnly.length === 0) continue;
-
-      let allArchivedMerged = true;
-
-      for (const thread of archivedOnly) {
-        let isMerged = false;
-
-        // Signal 1: PR check via GitHub CLI or recorded lastKnownPr
-        if (thread.lastKnownPr) {
-          if (input.gitHubCli) {
-            const prRef = thread.lastKnownPr.url || String(thread.lastKnownPr.number);
-            const prSummary = yield* input.gitHubCli
-              .getPullRequest({ cwd: entry.workspaceRoot, reference: prRef })
-              .pipe(
-                Effect.catch((error) =>
-                  Effect.logDebug("managed worktrees: failed to re-resolve PR via gh", {
-                    threadId: thread.id,
-                    reference: prRef,
-                    error: error instanceof Error ? error.message : String(error),
-                  }).pipe(Effect.as(null)),
-                ),
-              );
-
-            if (prSummary) {
-              if (
-                prSummary.state === "merged" ||
-                (prSummary.state === undefined && thread.lastKnownPr.state === "merged")
-              ) {
-                isMerged = true;
-              } else {
-                isMerged = false;
-              }
-            } else if (thread.lastKnownPr.state === "merged") {
-              isMerged = true;
-            }
-          } else if (thread.lastKnownPr.state === "merged") {
-            isMerged = true;
-          }
-        }
-
-        // Signal 2: Local git ancestry fallback
-        if (!isMerged) {
-          let headSha: string | null = null;
-          const revParseResult = yield* input.git
-            .execute({
-              operation: "ManagedWorktrees.revParseHead",
-              cwd: entry.path,
-              args: ["rev-parse", "HEAD"],
-              timeoutMs: 5_000,
-              allowNonZeroExit: true,
-            })
-            .pipe(Effect.catch(() => Effect.succeed(null)));
-
-          if (
-            revParseResult &&
-            revParseResult.code === 0 &&
-            revParseResult.stdout.trim().length > 0
-          ) {
-            headSha = revParseResult.stdout.trim();
-          } else if (
-            thread.associatedWorktreeRef &&
-            /^[0-9a-f]{40}$/iu.test(thread.associatedWorktreeRef)
-          ) {
-            headSha = thread.associatedWorktreeRef;
-          }
-
-          if (headSha) {
-            const baseCandidates: string[] = [];
-            if (thread.lastKnownPr?.baseBranch) {
-              baseCandidates.push(
-                thread.lastKnownPr.baseBranch,
-                `origin/${thread.lastKnownPr.baseBranch}`,
-                `upstream/${thread.lastKnownPr.baseBranch}`,
-              );
-            }
-            baseCandidates.push(
-              "origin/main",
-              "upstream/main",
-              "main",
-              "origin/master",
-              "upstream/master",
-              "master",
+      // Signal 1: PR check via GitHub CLI or recorded lastKnownPr
+      if (thread.lastKnownPr) {
+        if (input.gitHubCli) {
+          const prRef = thread.lastKnownPr.url || String(thread.lastKnownPr.number);
+          const prSummary = yield* input.gitHubCli
+            .getPullRequest({ cwd: entry.workspaceRoot, reference: prRef })
+            .pipe(
+              Effect.catch((error) =>
+                Effect.logDebug("managed worktrees: failed to re-resolve PR via gh", {
+                  threadId: thread.id,
+                  reference: prRef,
+                  error: error instanceof Error ? error.message : String(error),
+                }).pipe(Effect.as(null)),
+              ),
             );
 
-            for (const baseRef of baseCandidates) {
-              const mergeBaseResult = yield* input.git
-                .execute({
-                  operation: "ManagedWorktrees.mergeBaseIsAncestor",
-                  cwd: entry.workspaceRoot,
-                  args: ["merge-base", "--is-ancestor", headSha, baseRef],
-                  timeoutMs: 5_000,
-                  allowNonZeroExit: true,
-                })
-                .pipe(Effect.catch(() => Effect.succeed(null)));
+          if (prSummary && prSummary.state !== undefined) {
+            prStatusKnown = true;
+            isMerged = prSummary.state === "merged";
+          } else if (thread.lastKnownPr.state !== undefined) {
+            prStatusKnown = true;
+            isMerged = thread.lastKnownPr.state === "merged";
+          }
+        } else if (thread.lastKnownPr.state !== undefined) {
+          prStatusKnown = true;
+          isMerged = thread.lastKnownPr.state === "merged";
+        }
+      }
 
-              if (mergeBaseResult && mergeBaseResult.code === 0) {
-                isMerged = true;
-                break;
-              }
+      // Signal 2: Local git ancestry fallback.
+      // Crucial safeguard: ONLY run local ancestry fallback when no PR exists or the
+      // GitHub lookup failed. When GitHub confirms a PR is closed or open, that
+      // authoritative remote status must NOT be overridden by local branch ancestry.
+      if (!isMerged && !prStatusKnown) {
+        let headSha: string | null = null;
+        const revParseResult = yield* input.git
+          .execute({
+            operation: "ManagedWorktrees.revParseHead",
+            cwd: entry.path,
+            args: ["rev-parse", "HEAD"],
+            timeoutMs: 3_000,
+            allowNonZeroExit: true,
+          })
+          .pipe(Effect.catch(() => Effect.succeed(null)));
+
+        if (
+          revParseResult &&
+          revParseResult.code === 0 &&
+          revParseResult.stdout.trim().length > 0
+        ) {
+          headSha = revParseResult.stdout.trim();
+        } else if (
+          thread.associatedWorktreeRef &&
+          /^[0-9a-f]{40}$/iu.test(thread.associatedWorktreeRef)
+        ) {
+          headSha = thread.associatedWorktreeRef;
+        }
+
+        if (headSha) {
+          const baseCandidates: string[] = [];
+          if (thread.lastKnownPr?.baseBranch) {
+            baseCandidates.push(
+              thread.lastKnownPr.baseBranch,
+              `origin/${thread.lastKnownPr.baseBranch}`,
+              `upstream/${thread.lastKnownPr.baseBranch}`,
+            );
+          }
+          baseCandidates.push(
+            "origin/main",
+            "upstream/main",
+            "main",
+            "origin/master",
+            "upstream/master",
+            "master",
+          );
+
+          for (const baseRef of baseCandidates) {
+            const mergeBaseResult = yield* input.git
+              .execute({
+                operation: "ManagedWorktrees.mergeBaseIsAncestor",
+                cwd: entry.workspaceRoot,
+                args: ["merge-base", "--is-ancestor", headSha, baseRef],
+                timeoutMs: 3_000,
+                allowNonZeroExit: true,
+              })
+              .pipe(Effect.catch(() => Effect.succeed(null)));
+
+            if (mergeBaseResult && mergeBaseResult.code === 0) {
+              isMerged = true;
+              break;
             }
           }
         }
-
-        if (!isMerged) {
-          allArchivedMerged = false;
-          break;
-        }
       }
 
-      if (allArchivedMerged) {
-        mergedPaths.add(entry.path);
-      }
-    }
+      return isMerged;
+    });
 
-    return mergedPaths;
+  return Effect.gen(function* () {
+    const mergedResults = yield* Effect.forEach(
+      input.inventory,
+      (entry) =>
+        Effect.gen(function* () {
+          const linked = threadsByCanonicalPath.get(entry.path) ?? [];
+          if (linked.length === 0 || linked.some(isActiveManagedWorktreeThread)) return null;
+          if (linked.every(isDeletedManagedWorktreeThread)) return null;
+
+          const archivedOnly = linked.filter(isArchivedOnlyManagedWorktreeThread);
+          if (archivedOnly.length === 0) return null;
+
+          for (const thread of archivedOnly) {
+            const threadMerged = yield* checkThreadMerged(entry, thread);
+            if (!threadMerged) return null;
+          }
+
+          return entry.path;
+        }),
+      { concurrency: 4 },
+    );
+
+    return new Set(mergedResults.filter((path): path is string => path !== null));
   }).pipe(
     Effect.catchCause((cause) =>
       Effect.logWarning("managed worktree merge detection failed", {
@@ -489,6 +494,81 @@ function removeManagedWorktreeSafely(input: {
             },
           );
           return false;
+        }
+
+        if (reason === "merged") {
+          const headResult = yield* input.git
+            .execute({
+              operation: "ManagedWorktrees.revalidateHead",
+              cwd: entry.path,
+              args: ["rev-parse", "HEAD"],
+              timeoutMs: 3_000,
+              allowNonZeroExit: true,
+            })
+            .pipe(Effect.catch(() => Effect.succeed(null)));
+
+          const currentHeadSha =
+            headResult && headResult.code === 0 ? headResult.stdout.trim() : null;
+
+          if (!currentHeadSha) {
+            yield* Effect.logWarning(
+              "managed worktree cleanup could not read current HEAD; skipping merge reclaim",
+              {
+                threadId: thread.id,
+                worktreePath: entry.path,
+                reason,
+              },
+            );
+            return false;
+          }
+
+          const baseCandidates: string[] = [];
+          if (thread.lastKnownPr?.baseBranch) {
+            baseCandidates.push(
+              thread.lastKnownPr.baseBranch,
+              `origin/${thread.lastKnownPr.baseBranch}`,
+              `upstream/${thread.lastKnownPr.baseBranch}`,
+            );
+          }
+          baseCandidates.push(
+            "origin/main",
+            "upstream/main",
+            "main",
+            "origin/master",
+            "upstream/master",
+            "master",
+          );
+
+          let headIsContained = false;
+          for (const baseRef of baseCandidates) {
+            const isAncestorResult = yield* input.git
+              .execute({
+                operation: "ManagedWorktrees.revalidateHeadIsAncestor",
+                cwd: entry.workspaceRoot,
+                args: ["merge-base", "--is-ancestor", currentHeadSha, baseRef],
+                timeoutMs: 3_000,
+                allowNonZeroExit: true,
+              })
+              .pipe(Effect.catch(() => Effect.succeed(null)));
+
+            if (isAncestorResult && isAncestorResult.code === 0) {
+              headIsContained = true;
+              break;
+            }
+          }
+
+          if (!headIsContained) {
+            yield* Effect.logWarning(
+              "managed worktree cleanup skipped merged worktree with unmerged commits; refusing data loss",
+              {
+                threadId: thread.id,
+                worktreePath: entry.path,
+                reason,
+                headSha: currentHeadSha,
+              },
+            );
+            return false;
+          }
         }
 
         yield* input.git.removeWorktree({

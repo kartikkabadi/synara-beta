@@ -302,4 +302,34 @@ describe("thread retention", () => {
       },
     });
   });
+
+  it("runs merge-aware pruning on sweep even when no active threads are archived", async () => {
+    let pruneCount = 0;
+    const shellSnapshot = makeReadModel([]) as unknown as OrchestrationShellSnapshot;
+    const engine = {
+      dispatch: () => Effect.succeed({ sequence: 1 }),
+    } as unknown as OrchestrationEngineShape;
+    const snapshotQuery = {
+      getShellSnapshot: () => Effect.succeed(shellSnapshot),
+    } as unknown as ProjectionSnapshotQueryShape;
+    const automationRepository = {
+      list: () => Effect.succeed({ definitions: [], runs: [], memories: [] }),
+    } as unknown as AutomationRepositoryShape;
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* runThreadRetentionSweep(
+          engine,
+          snapshotQuery,
+          automationRepository,
+          Effect.sync(() => {
+            pruneCount += 1;
+          }),
+          { alwaysPrune: true },
+        );
+      }).pipe(Effect.provide(ServerLifecycleEventsLive)),
+    );
+
+    expect(pruneCount).toBe(1);
+  });
 });

@@ -2509,17 +2509,27 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       assert.deepEqual(threads, [
         {
           id: asThreadId("thread-worktree-active"),
+          projectId: asProjectId("project-worktrees"),
           archivedAt: null,
           deletedAt: null,
+          branch: null,
           worktreePath: "/tmp/wt/active",
           associatedWorktreePath: null,
+          associatedWorktreeBranch: null,
+          associatedWorktreeRef: null,
+          lastKnownPr: null,
         },
         {
           id: asThreadId("thread-worktree-deleted"),
+          projectId: asProjectId("project-worktrees"),
           archivedAt: "2026-07-24T00:00:08.000Z",
           deletedAt: "2026-07-24T00:00:09.000Z",
+          branch: null,
           worktreePath: "/tmp/wt/deleted",
           associatedWorktreePath: "/tmp/wt/deleted-assoc",
+          associatedWorktreeBranch: null,
+          associatedWorktreeRef: null,
+          lastKnownPr: null,
         },
       ]);
     }),

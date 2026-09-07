@@ -77,7 +77,7 @@ function makeGit(input: {
       if (args && args[0] === "merge-base" && args[1] === "--is-ancestor") {
         const headSha = args[2]!;
         const baseRef = args[3]!;
-        const ancestor = input.isAncestor ? input.isAncestor(headSha, baseRef) : false;
+        const ancestor = input.isAncestor ? input.isAncestor(headSha, baseRef) : true;
         return Effect.succeed({ code: ancestor ? 0 : 1, stdout: "", stderr: "" });
       }
       return Effect.succeed({
@@ -632,6 +632,35 @@ describe("managed worktrees", () => {
     expect(Array.from(merged)).toEqual([]);
   });
 
+  it("does not mark merged if GitHub CLI PR is closed even if local ancestry reports ancestor", async () => {
+    const inventory = [{ path: "/wt/pr-closed-ancestor", workspaceRoot: "/repo" }];
+    const canonicalByRecordedPath = new Map(inventory.map((entry) => [entry.path, entry.path]));
+    const git = makeGit({ removals: [], isAncestor: () => true });
+    const gitHubCli = makeGitHubCli({
+      "https://github.com/org/repo/pull/42": { state: "closed" },
+    });
+
+    const merged = await Effect.runPromise(
+      detectMergedManagedWorktreePaths({
+        inventory,
+        canonicalByRecordedPath,
+        git,
+        gitHubCli,
+        threads: [
+          {
+            id: "thread-closed-ancestor",
+            worktreePath: "/wt/pr-closed-ancestor",
+            archivedAt: "2026-01-01T00:00:00.000Z",
+            deletedAt: null,
+            lastKnownPr: makeThreadPr({ number: 42, state: "closed" }),
+          },
+        ],
+      }),
+    );
+
+    expect(Array.from(merged)).toEqual([]);
+  });
+
   it("falls back to projection lastKnownPr.state when GitHub CLI fails", async () => {
     const inventory = [{ path: "/wt/offline-merged", workspaceRoot: "/repo" }];
     const canonicalByRecordedPath = new Map(inventory.map((entry) => [entry.path, entry.path]));
@@ -862,5 +891,111 @@ describe("managed worktrees", () => {
     expect(removals).toEqual([]);
     expect(snapshots).toHaveLength(1);
     expect(remaining).toHaveLength(1);
+  });
+
+  it("skips pruning a merged PR worktree if it has newer unmerged commits", async () => {
+    const { root, paths } = await makeManagedRoot(1);
+    const removals: string[] = [];
+    // Worktree HEAD is '222222...', which is NOT contained in the base branch
+    const git = makeGit({
+      removals,
+      headShaByCwd: { [paths[0]!]: "2222222222222222222222222222222222222222" },
+      isAncestor: (headSha) => headSha !== "2222222222222222222222222222222222222222",
+    });
+    const gitHubCli = makeGitHubCli({
+      "https://github.com/org/repo/pull/1": { state: "merged" },
+    });
+
+    const threads = [
+      {
+        id: "thread-newer-commits",
+        worktreePath: paths[0],
+        associatedWorktreePath: paths[0],
+        archivedAt: "2026-01-01T00:00:00.000Z",
+        deletedAt: null,
+        lastKnownPr: makeThreadPr({ number: 1, state: "merged" }),
+      },
+    ] as unknown as OrchestrationThread[];
+
+    const remaining = await Effect.runPromise(
+      pruneArchivedManagedWorktrees({
+        worktreesDir: root,
+        snapshotsDir: path.join(root, "snapshots"),
+        threads,
+        git,
+        pruneAfterMerge: true,
+        gitHubCli,
+      }),
+    );
+
+    // Refused removal to prevent data loss
+    expect(removals).toEqual([]);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]?.path).toBe(paths[0]);
+  });
+
+  it("skips pruning if a new commit is created between detection and removal", async () => {
+    const { root, paths } = await makeManagedRoot(1);
+    const removals: string[] = [];
+    let removalAttempted = false;
+    // On detection, HEAD is merged (ancestor = true).
+    // Between detection and removal, a new commit is created (HEAD changes to unmerged '333333...').
+    const git = {
+      ...makeGit({ removals }),
+      execute: ({ cwd, args }: { cwd: string; args?: readonly string[] }) => {
+        if (args && args[0] === "rev-parse" && args[1] === "HEAD") {
+          const sha = removalAttempted
+            ? "3333333333333333333333333333333333333333"
+            : "1111111111111111111111111111111111111111";
+          return Effect.succeed({ code: 0, stdout: `${sha}\n`, stderr: "" });
+        }
+        if (args && args[0] === "merge-base" && args[1] === "--is-ancestor") {
+          const headSha = args[2]!;
+          // '333333...' is NOT an ancestor
+          const ancestor = headSha === "1111111111111111111111111111111111111111";
+          return Effect.succeed({ code: ancestor ? 0 : 1, stdout: "", stderr: "" });
+        }
+        return Effect.succeed({
+          code: 0,
+          stdout: `worktree /repo/project\nHEAD abc\nbranch refs/heads/main\n\nworktree ${cwd}\nHEAD abc\ndetached\n`,
+          stderr: "",
+        });
+      },
+      withMutation: (_cwd: string, effect: Effect.Effect<unknown, unknown, unknown>) => {
+        removalAttempted = true;
+        return effect;
+      },
+    } as unknown as GitCoreShape;
+
+    const gitHubCli = makeGitHubCli({
+      "https://github.com/org/repo/pull/1": { state: "merged" },
+    });
+
+    const threads = [
+      {
+        id: "thread-race-commit",
+        worktreePath: paths[0],
+        associatedWorktreePath: paths[0],
+        archivedAt: "2026-01-01T00:00:00.000Z",
+        deletedAt: null,
+        lastKnownPr: makeThreadPr({ number: 1, state: "merged" }),
+      },
+    ] as unknown as OrchestrationThread[];
+
+    const remaining = await Effect.runPromise(
+      pruneArchivedManagedWorktrees({
+        worktreesDir: root,
+        snapshotsDir: path.join(root, "snapshots"),
+        threads,
+        git,
+        pruneAfterMerge: true,
+        gitHubCli,
+      }),
+    );
+
+    // Revalidation under mutation lock caught the new commit and refused removal
+    expect(removals).toEqual([]);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]?.path).toBe(paths[0]);
   });
 });

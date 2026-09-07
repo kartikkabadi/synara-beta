@@ -228,6 +228,7 @@ export const runThreadRetentionSweep = Effect.fn("runThreadRetentionSweep")(func
   projectionSnapshotQuery: ProjectionSnapshotQueryShape,
   automationRepository: AutomationRepositoryShape,
   pruneArchivedManagedWorktrees: Effect.Effect<void, unknown>,
+  options?: { readonly alwaysPrune?: boolean },
 ) {
   const shellSnapshot = yield* projectionSnapshotQuery.getShellSnapshot();
   const protectedThreadIds = yield* listRetentionProtectedThreadIds(automationRepository);
@@ -287,7 +288,7 @@ export const runThreadRetentionSweep = Effect.fn("runThreadRetentionSweep")(func
     { concurrency: 1 },
   ).pipe(Effect.asVoid);
 
-  if (archivedCount > 0) {
+  if (archivedCount > 0 || options?.alwaysPrune) {
     yield* pruneArchivedManagedWorktrees.pipe(
       Effect.catch((error) =>
         Effect.logWarning("managed worktree retention failed after thread retention sweep", {
@@ -325,27 +326,25 @@ export const startThreadRetentionJob = Effect.fn("startThreadRetentionJob")(func
       gitHubCli,
     });
   }).pipe(Effect.asVoid);
-  // Give startup/projection bootstrap a short settling window, then run one
-  // archive pass promptly so desktop installs do not need to stay open for 24 hours.
-  yield* Effect.gen(function* () {
-    yield* Effect.sleep(THREAD_RETENTION_INITIAL_SWEEP_DELAY_MS);
+
+  const runSweep = Effect.gen(function* () {
+    const settings = yield* serverSettings.getSettings;
     yield* runThreadRetentionSweep(
       orchestrationEngine,
       projectionSnapshotQuery,
       automationRepository,
       pruneArchivedManagedWorktrees,
+      { alwaysPrune: settings.worktrees.pruneAfterMerge },
     );
+  });
+
+  // Give startup/projection bootstrap a short settling window, then run one
+  // archive pass promptly so desktop installs do not need to stay open for 24 hours.
+  yield* Effect.gen(function* () {
+    yield* Effect.sleep(THREAD_RETENTION_INITIAL_SWEEP_DELAY_MS);
+    yield* runSweep;
     yield* Effect.forever(
-      Effect.sleep(THREAD_RETENTION_SWEEP_INTERVAL_MS).pipe(
-        Effect.flatMap(() =>
-          runThreadRetentionSweep(
-            orchestrationEngine,
-            projectionSnapshotQuery,
-            automationRepository,
-            pruneArchivedManagedWorktrees,
-          ),
-        ),
-      ),
+      Effect.sleep(THREAD_RETENTION_SWEEP_INTERVAL_MS).pipe(Effect.flatMap(() => runSweep)),
       { disableYield: true },
     );
   }).pipe(Effect.forkScoped);

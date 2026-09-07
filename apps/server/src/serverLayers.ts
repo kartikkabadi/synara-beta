@@ -27,6 +27,7 @@ import { DeviceServiceLive } from "./device/Layers/DeviceService";
 import type { DeviceService } from "./device/Services/DeviceService";
 import { KeybindingsLive } from "./keybindings";
 import { GitCoreLive } from "./git/Layers/GitCore";
+import { GitHubCliLive } from "./git/Layers/GitHubCli";
 import { GitLayerLive, TextGenerationLayerLive } from "./git/runtimeLayer";
 import { TerminalLayerLive } from "./terminal/runtimeLayer";
 import { AuthControlPlaneLive } from "./auth/Layers/AuthControlPlane";
@@ -141,6 +142,7 @@ export function makeServerRuntimeServicesLayer(
       Layer.provideMerge(TerminalLayerLive),
       Layer.provideMerge(GitCoreLive),
       Layer.provideMerge(ServerSettingsLive),
+      Layer.provideMerge(GitHubCliLive),
     ),
     DeviceServiceLive,
   );
