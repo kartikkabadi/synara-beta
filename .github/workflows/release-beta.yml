@@ -327,17 +327,9 @@ jobs:
             fi
           fi
 
-          if [[ "${{ matrix.platform }}" == "linux" && "${{ matrix.arch }}" == "x64" ]]; then
-            if [[ -f release-publish/latest-linux.yml ]]; then
-              mv release-publish/latest-linux.yml release-publish/latest-linux-x64.yml
-            fi
-          fi
-
-          if [[ "${{ matrix.platform }}" == "linux" && "${{ matrix.arch }}" == "arm64" ]]; then
-            if [[ -f release-publish/latest-linux-arm64.yml ]]; then
-              rm -f release-publish/latest-linux.yml
-              mv release-publish/latest-linux-arm64.yml release-publish/latest-linux.yml
-            fi
+          if [[ "${{ matrix.platform }}" == "linux" ]]; then
+            node scripts/merge-linux-update-manifests.ts normalize \
+              release-publish "${{ matrix.arch }}"
           fi
 
       - name: Verify and record artifact provenance
@@ -473,11 +465,7 @@ jobs:
             release-assets/latest-mac.yml \
             release-assets/latest-mac-x64.yml
           rm -f release-assets/latest-mac-x64.yml
-          node scripts/merge-linux-update-manifests.ts \
-            release-assets/latest-linux.yml \
-            release-assets/latest-linux-x64.yml
-          rm -f release-assets/latest-linux-x64.yml
-          cp release-assets/latest-linux.yml release-assets/latest-linux-arm64.yml
+          node scripts/merge-linux-update-manifests.ts merge release-assets
 
       - name: Prepare updater feed metadata
         run: node scripts/prepare-release-update-feed.ts release-assets
