@@ -14,7 +14,7 @@ Synara Beta provides two ways to install:
 Run this one-liner in Terminal:
 
 ```bash
-t=$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep '"tag_name"' | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | grep -- '-beta' | head -1); if [ -z "$t" ]; then echo "Could not resolve the latest Synara Beta release." >&2; (exit 1); else f=$(mktemp /tmp/synara-beta-install.XXXXXX) && curl -fsSL -o "$f" "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-macos.sh" && bash "$f" --tag "$t"; rc=$?; rm -f "${f:-/tmp/synara-beta-install-none}"; (exit $rc); fi
+t=$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep '"tag_name"' | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$' | head -1); if [ -z "$t" ]; then echo "Could not resolve the latest Synara Beta release." >&2; (exit 1); else f=$(mktemp /tmp/synara-beta-install.XXXXXX) && curl -fsSL -o "$f" "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-macos.sh" && bash "$f" --tag "$t"; rc=$?; rm -f "${f:-/tmp/synara-beta-install-none}"; (exit $rc); fi
 ```
 
 Or using the universal installer:
@@ -40,7 +40,7 @@ curl -fsSL https://raw.githubusercontent.com/kartikkabadi/synara-beta/main/scrip
 Run this one-liner in Terminal:
 
 ```bash
-t=$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep '"tag_name"' | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | grep -- '-beta' | head -1); if [ -z "$t" ]; then echo "Could not resolve the latest Synara Beta release." >&2; (exit 1); else f=$(mktemp /tmp/synara-beta-install.XXXXXX) && curl -fsSL -o "$f" "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-linux.sh" && bash "$f" --tag "$t"; rc=$?; rm -f "${f:-/tmp/synara-beta-install-none}"; (exit $rc); fi
+t=$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep '"tag_name"' | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$' | head -1); if [ -z "$t" ]; then echo "Could not resolve the latest Synara Beta release." >&2; (exit 1); else f=$(mktemp /tmp/synara-beta-install.XXXXXX) && curl -fsSL -o "$f" "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-linux.sh" && bash "$f" --tag "$t"; rc=$?; rm -f "${f:-/tmp/synara-beta-install-none}"; (exit $rc); fi
 ```
 
 Or using the universal installer:
@@ -64,7 +64,7 @@ curl -fsSL https://raw.githubusercontent.com/kartikkabadi/synara-beta/main/scrip
 Run this one-liner in **PowerShell**:
 
 ```powershell
-$t = ((Invoke-RestMethod "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" -UseBasicParsing -ErrorAction Stop) | Where-Object { $_.tag_name -like '*-beta*' } | Select-Object -First 1).tag_name; if ($t) { $f = Join-Path $env:TEMP $("synara-beta-install-$([Guid]::NewGuid()).ps1"); Invoke-WebRequest "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-windows.ps1" -UseBasicParsing -OutFile $f -ErrorAction Stop; Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; Unblock-File -Path $f; try { & $f -Tag $t } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue } } else { throw "Could not resolve the latest Synara Beta release." }
+$t = ((Invoke-RestMethod "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" -UseBasicParsing -ErrorAction Stop) | Where-Object { $_.tag_name -match '^v\d+\.\d+\.\d+-beta\.\d+$' } | Select-Object -First 1).tag_name; if ($t) { $f = Join-Path $env:TEMP $("synara-beta-install-$([Guid]::NewGuid()).ps1"); Invoke-WebRequest "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-windows.ps1" -UseBasicParsing -OutFile $f -ErrorAction Stop; Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; Unblock-File -Path $f; try { & $f -Tag $t } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue } } else { throw "Could not resolve the latest Synara Beta release." }
 ```
 
 **What it does:**
@@ -77,9 +77,24 @@ $t = ((Invoke-RestMethod "https://api.github.com/repos/kartikkabadi/synara-beta/
 
 ---
 
-### What SHA-256 verification proves
+### What the signature and checksum verification prove
 
-The installers check the downloaded artifact against the `SHA256SUMS` file published in the same GitHub release, fetched over the same HTTPS connection. That check proves **integrity** (the download arrived complete and uncorrupted), not **authenticity**: `SHA256SUMS` is unsigned, so anyone able to replace a release binary can replace its checksum entry too. Before running a one-liner, confirm you expect the `-beta.*` tag it resolves.
+Every release publishes `SHA256SUMS` **and an SSH signature (`SHA256SUMS.sig`)** produced by the release-signing key whose public half is pinned in `scripts/release-signing.pub` and embedded in the installers. Before any checksum is trusted, the installers run `ssh-keygen -Y verify` against that pinned key. That closes the integrity-vs-authenticity gap: a tampered release cannot swap a binary and its checksum together, because the signature check fails unless the holder of the release signing key produced the checksum file.
+
+Keep the private signing key (`SYNARA_RELEASE_SIGNING_KEY` repository secret) private; rotate it by updating the secret and `scripts/release-signing.pub` in the same release.
+
+## Updating
+
+Re-running the same one-line command **updates Synara Beta in place**:
+
+- The installer resolves the newest `vX.Y.Z-beta.N` release, verifies its signature and checksums, and replaces the installed app atomically (macOS keeps a backup of the previous app until the swap succeeds, and restores it if anything interrupts the upgrade).
+- Your data lives in `~/.synara-beta`. The installers never read, write, or delete that directory - settings, threads, and sessions survive every install and update.
+- Re-running with the version you already have prints "already installed" (pass `--force` to reinstall); installing an older tag is refused without `--force`.
+- The in-app update button uses the electron-updater feed for platforms where unsigned self-update works; on macOS the beta app is unsigned, so the supported update path is re-running the install command above.
+
+## Data safety
+
+Installers only ever write to the install targets listed above (`/Applications/Synara Beta.app`, `~/.local/bin`, `~/.local/share/applications`, `%LOCALAPPDATA%`/`%TEMP%` on Windows, and the installer state stamp under `XDG_STATE_HOME`). Your Synara Beta data lives in `~/.synara-beta`, which the installers never read, write, or delete - upgrades, reinstalls, and `--force` runs all leave it untouched.
 
 ## 2. Standalone Script Usage
 
