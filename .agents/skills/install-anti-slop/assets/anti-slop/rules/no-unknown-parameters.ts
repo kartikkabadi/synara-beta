@@ -1,6 +1,14 @@
 import { defineRule } from "@oxlint/plugins";
 import type { ESTree } from "@oxlint/plugins";
 
+import {
+  collectAliasDeclarationsIn,
+  createResolvesToUnknown,
+  firstWinsAliasDeclarations,
+  refineAliasAmbiguity,
+} from "../shared/resolves-to-unknown.ts";
+import { lexicalTypeParameterNames } from "../shared/lexical-type-parameters.ts";
+
 type Parameter = ESTree.ParamPattern;
 type ParameterOwner =
   | ESTree.ArrowFunctionExpression
@@ -53,10 +61,19 @@ export const noUnknownParametersRule = defineRule({
     },
   },
   createOnce(context) {
+    let resolvesToUnknown = createResolvesToUnknown(new Map(), new Set());
+
     const checkParameters = (node: ParameterOwner) => {
+      const shadowedAliases = lexicalTypeParameterNames(node, context.sourceCode.visitorKeys);
       for (const parameter of node.params) {
         const annotation = parameterAnnotation(parameter);
-        if (annotation?.typeAnnotation.type !== "TSUnknownKeyword") continue;
+        if (
+          annotation === null ||
+          annotation === undefined ||
+          !resolvesToUnknown(annotation.typeAnnotation, shadowedAliases)
+        ) {
+          continue;
+        }
         const name = parameterName(parameter, context.sourceCode.getText(parameter));
         if (name === "cause") continue;
         context.report({
@@ -68,6 +85,19 @@ export const noUnknownParametersRule = defineRule({
     };
 
     return {
+      Program(node) {
+        const collected = collectAliasDeclarationsIn(node, context.sourceCode.visitorKeys);
+        const conservative = createResolvesToUnknown(
+          firstWinsAliasDeclarations(collected.declarations),
+          collected.ambiguous,
+        );
+        const refined = refineAliasAmbiguity(
+          collected.declarations,
+          collected.ambiguous,
+          (type, name) => conservative(type, new Set(), new Set([name])),
+        );
+        resolvesToUnknown = createResolvesToUnknown(refined.aliases, refined.ambiguous);
+      },
       ArrowFunctionExpression: checkParameters,
       FunctionDeclaration: checkParameters,
       FunctionExpression: checkParameters,
