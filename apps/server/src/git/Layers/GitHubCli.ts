@@ -164,6 +164,7 @@ const RawGitHubPullRequestSchema = Schema.Struct({
     ),
   ),
   updatedAt: Schema.optional(Schema.NullOr(Schema.String)),
+  headRefOid: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
 const RawGitHubRepositoryCloneUrlsSchema = Schema.Struct({
@@ -574,6 +575,7 @@ function normalizePullRequestSummary(
       : {}),
     ...(headRepositoryNameWithOwner ? { headRepositoryNameWithOwner } : {}),
     ...(headRepositoryOwnerLogin ? { headRepositoryOwnerLogin } : {}),
+    ...(raw.headRefOid?.trim() ? { headRefOid: raw.headRefOid.trim() } : {}),
   };
 }
 

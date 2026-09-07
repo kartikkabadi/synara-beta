@@ -10,11 +10,12 @@ import {
   type ThreadId,
 } from "@synara/contracts";
 import { automationContinuationThreadId } from "@synara/shared/automationMode";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { randomUUID } from "node:crypto";
 
 import { ServerConfig } from "./config";
 import { GitCore } from "./git/Services/GitCore";
+import { GitHubCli } from "./git/Services/GitHubCli";
 import { pruneProjectedArchivedManagedWorktrees } from "./managedWorktrees";
 import type { OrchestrationEngineShape } from "./orchestration/Services/OrchestrationEngine";
 import type { ProjectionSnapshotQueryShape } from "./orchestration/Services/ProjectionSnapshotQuery";
@@ -23,6 +24,7 @@ import {
   type AutomationRepositoryShape,
 } from "./persistence/Services/AutomationRepository";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
+import { ServerSettingsService } from "./serverSettings";
 
 // Stable prefix for retention commands. Older versions used it for reversible
 // soft-deletes; current versions archive threads so users can restore them.
@@ -226,6 +228,7 @@ export const runThreadRetentionSweep = Effect.fn("runThreadRetentionSweep")(func
   projectionSnapshotQuery: ProjectionSnapshotQueryShape,
   automationRepository: AutomationRepositoryShape,
   pruneArchivedManagedWorktrees: Effect.Effect<void, unknown>,
+  options?: { readonly alwaysPrune?: boolean },
 ) {
   const shellSnapshot = yield* projectionSnapshotQuery.getShellSnapshot();
   const protectedThreadIds = yield* listRetentionProtectedThreadIds(automationRepository);
@@ -285,7 +288,7 @@ export const runThreadRetentionSweep = Effect.fn("runThreadRetentionSweep")(func
     { concurrency: 1 },
   ).pipe(Effect.asVoid);
 
-  if (archivedCount > 0) {
+  if (archivedCount > 0 || options?.alwaysPrune) {
     yield* pruneArchivedManagedWorktrees.pipe(
       Effect.catch((error) =>
         Effect.logWarning("managed worktree retention failed after thread retention sweep", {
@@ -310,33 +313,38 @@ export const startThreadRetentionJob = Effect.fn("startThreadRetentionJob")(func
   const automationRepository = yield* AutomationRepository;
   const config = yield* ServerConfig;
   const git = yield* GitCore;
-  const pruneArchivedManagedWorktrees = pruneProjectedArchivedManagedWorktrees({
-    homeDir: config.homeDir,
-    worktreesDir: config.worktreesDir,
-    snapshotQuery: projectionSnapshotQuery,
-    git,
+  const serverSettings = yield* ServerSettingsService;
+  const gitHubCli = Option.getOrUndefined(yield* Effect.serviceOption(GitHubCli));
+  const pruneArchivedManagedWorktrees = Effect.gen(function* () {
+    const settings = yield* serverSettings.getSettings;
+    return yield* pruneProjectedArchivedManagedWorktrees({
+      homeDir: config.homeDir,
+      worktreesDir: config.worktreesDir,
+      snapshotQuery: projectionSnapshotQuery,
+      git,
+      pruneAfterMerge: settings.worktrees.pruneAfterMerge,
+      gitHubCli,
+    });
   }).pipe(Effect.asVoid);
-  // Give startup/projection bootstrap a short settling window, then run one
-  // archive pass promptly so desktop installs do not need to stay open for 24 hours.
-  yield* Effect.gen(function* () {
-    yield* Effect.sleep(THREAD_RETENTION_INITIAL_SWEEP_DELAY_MS);
+
+  const runSweep = Effect.gen(function* () {
+    const settings = yield* serverSettings.getSettings;
     yield* runThreadRetentionSweep(
       orchestrationEngine,
       projectionSnapshotQuery,
       automationRepository,
       pruneArchivedManagedWorktrees,
+      { alwaysPrune: settings.worktrees.pruneAfterMerge },
     );
+  });
+
+  // Give startup/projection bootstrap a short settling window, then run one
+  // archive pass promptly so desktop installs do not need to stay open for 24 hours.
+  yield* Effect.gen(function* () {
+    yield* Effect.sleep(THREAD_RETENTION_INITIAL_SWEEP_DELAY_MS);
+    yield* runSweep;
     yield* Effect.forever(
-      Effect.sleep(THREAD_RETENTION_SWEEP_INTERVAL_MS).pipe(
-        Effect.flatMap(() =>
-          runThreadRetentionSweep(
-            orchestrationEngine,
-            projectionSnapshotQuery,
-            automationRepository,
-            pruneArchivedManagedWorktrees,
-          ),
-        ),
-      ),
+      Effect.sleep(THREAD_RETENTION_SWEEP_INTERVAL_MS).pipe(Effect.flatMap(() => runSweep)),
       { disableYield: true },
     );
   }).pipe(Effect.forkScoped);

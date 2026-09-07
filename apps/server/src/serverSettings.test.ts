@@ -273,4 +273,38 @@ describe("ServerSettingsService", () => {
         : DEFAULT_MODEL_BY_PROVIDER[expectedProvider],
     );
   });
+
+  it("defaults and persists worktrees.pruneAfterMerge setting", async () => {
+    const result = await runWithSettings(
+      Effect.gen(function* () {
+        const service = yield* ServerSettingsService;
+        const { settingsPath } = yield* ServerConfig;
+        const fs = yield* FileSystem.FileSystem;
+        yield* service.start;
+
+        const initial = yield* service.getSettings;
+        expect(initial.worktrees.pruneAfterMerge).toBe(false);
+
+        const updated = yield* service.updateSettings({
+          worktrees: {
+            pruneAfterMerge: true,
+          },
+        });
+        const view = yield* service.getSettingsView;
+        const raw = yield* fs.readFileString(settingsPath);
+
+        return { initial, updated, view, parsed: JSON.parse(raw) as Record<string, unknown> };
+      }),
+    );
+
+    expect(result.updated.worktrees.pruneAfterMerge).toBe(true);
+    expect(result.view.worktrees.pruneAfterMerge).toBe(true);
+    expect(result.parsed).toMatchObject({
+      settings: {
+        worktrees: {
+          pruneAfterMerge: true,
+        },
+      },
+    });
+  });
 });

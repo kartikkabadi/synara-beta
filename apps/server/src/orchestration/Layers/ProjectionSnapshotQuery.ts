@@ -139,10 +139,15 @@ const ProjectionThreadShellDbRowSchema = Schema.Struct(ProjectionThreadShellFiel
  */
 const ProjectionManagedWorktreeThreadRowSchema = Schema.Struct({
   threadId: ProjectionThread.fields.threadId,
+  projectId: Schema.NullOr(ProjectionThread.fields.projectId),
   archivedAt: ProjectionThread.fields.archivedAt,
   deletedAt: ProjectionThread.fields.deletedAt,
+  branch: ProjectionThread.fields.branch,
   worktreePath: ProjectionThread.fields.worktreePath,
   associatedWorktreePath: ProjectionThread.fields.associatedWorktreePath,
+  associatedWorktreeBranch: ProjectionThread.fields.associatedWorktreeBranch,
+  associatedWorktreeRef: ProjectionThread.fields.associatedWorktreeRef,
+  lastKnownPr: Schema.NullOr(Schema.fromJsonString(OrchestrationThreadPullRequest)),
 });
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
   Struct.assign({
@@ -991,10 +996,15 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       sql`
         SELECT
           thread_id AS "threadId",
+          project_id AS "projectId",
           archived_at AS "archivedAt",
           deleted_at AS "deletedAt",
+          branch AS "branch",
           worktree_path AS "worktreePath",
-          associated_worktree_path AS "associatedWorktreePath"
+          associated_worktree_path AS "associatedWorktreePath",
+          associated_worktree_branch AS "associatedWorktreeBranch",
+          associated_worktree_ref AS "associatedWorktreeRef",
+          last_known_pr_json AS "lastKnownPr"
         FROM projection_threads
         WHERE worktree_path IS NOT NULL
            OR associated_worktree_path IS NOT NULL
@@ -2522,10 +2532,15 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             // strict (`string | null`) rather than leaking `undefined` outward.
             (row): ProjectionManagedWorktreeThread => ({
               id: row.threadId,
+              projectId: row.projectId ?? null,
               archivedAt: row.archivedAt ?? null,
               deletedAt: row.deletedAt ?? null,
+              branch: row.branch ?? null,
               worktreePath: row.worktreePath ?? null,
               associatedWorktreePath: row.associatedWorktreePath ?? null,
+              associatedWorktreeBranch: row.associatedWorktreeBranch ?? null,
+              associatedWorktreeRef: row.associatedWorktreeRef ?? null,
+              lastKnownPr: row.lastKnownPr ?? null,
             }),
           ),
         ),

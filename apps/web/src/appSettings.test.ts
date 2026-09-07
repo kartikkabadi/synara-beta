@@ -40,6 +40,7 @@ import {
   resolveAppModelSelection,
   resolveFollowUpDispatchMode,
   resolveTerminalFontFamilyStack,
+  serverSettingsToAppSettings,
 } from "./appSettings";
 
 describe("server-backed provider enablement", () => {
@@ -1136,5 +1137,38 @@ describe("AppSettingsSchema", () => {
     expect(
       normalizeStoredAppSettings(decode(JSON.stringify({ enableAppshots: true }))),
     ).not.toHaveProperty("enableAppshots");
+  });
+
+  describe("worktrees retention settings", () => {
+    it("defaults pruneWorktreesAfterMerge to false in AppSettingsSchema", () => {
+      const decode = Schema.decodeSync(Schema.fromJsonString(AppSettingsSchema));
+      expect(decode("{}").pruneWorktreesAfterMerge).toBe(false);
+      expect(
+        decode(JSON.stringify({ pruneWorktreesAfterMerge: true })).pruneWorktreesAfterMerge,
+      ).toBe(true);
+    });
+
+    it("maps server settings view worktrees.pruneAfterMerge to appSettings.pruneWorktreesAfterMerge", () => {
+      const serverView = {
+        ...DEFAULT_SERVER_SETTINGS_VIEW,
+        worktrees: {
+          pruneAfterMerge: true,
+        },
+      };
+      const mapped = serverSettingsToAppSettings(serverView);
+      expect(mapped.pruneWorktreesAfterMerge).toBe(true);
+    });
+
+    it("maps app settings patch pruneWorktreesAfterMerge to server settings patch worktrees.pruneAfterMerge", () => {
+      const patch = appSettingsPatchToServerSettingsPatch({
+        pruneWorktreesAfterMerge: true,
+      });
+      expect(patch.worktrees?.pruneAfterMerge).toBe(true);
+
+      const disabledPatch = appSettingsPatchToServerSettingsPatch({
+        pruneWorktreesAfterMerge: false,
+      });
+      expect(disabledPatch.worktrees?.pruneAfterMerge).toBe(false);
+    });
   });
 });

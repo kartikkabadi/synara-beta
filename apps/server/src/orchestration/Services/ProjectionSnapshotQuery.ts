@@ -15,6 +15,7 @@ import type {
   OrchestrationShellSnapshot,
   OrchestrationThreadDetailSnapshot,
   OrchestrationThread,
+  OrchestrationThreadPullRequest,
   OrchestrationThreadShell,
   CheckpointRef,
   ProjectId,
@@ -83,10 +84,15 @@ export interface ProjectionFullThreadDiffContext {
  */
 export interface ProjectionManagedWorktreeThread {
   readonly id: ThreadId;
+  readonly projectId?: ProjectId | null;
   readonly archivedAt: string | null;
   readonly deletedAt: string | null;
+  readonly branch?: string | null;
   readonly worktreePath: string | null;
   readonly associatedWorktreePath: string | null;
+  readonly associatedWorktreeBranch?: string | null;
+  readonly associatedWorktreeRef?: string | null;
+  readonly lastKnownPr?: OrchestrationThreadPullRequest | null;
 }
 
 /**

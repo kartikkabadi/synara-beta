@@ -7,6 +7,7 @@ import {
   detachThreadDevice,
   isThreadCurrentlyArchived,
   isThreadLifecycleCleanupEvent,
+  waitForTerminalExit,
 } from "./ThreadDeletionReactor";
 import { DeviceService } from "../../device/Services/DeviceService";
 import { DeviceManager } from "../../device/DeviceManager";
@@ -103,5 +104,80 @@ describe("detachThreadDevice", () => {
 
     expect((await manager.getThreadState(threadId)).attachedDeviceUdid).toBeNull();
     expect(backend.hasStream("FAKE-0001")).toBe(false);
+  });
+});
+
+describe("waitForTerminalExit", () => {
+  const threadId = "thread-exit-test";
+
+  it("returns true immediately when no process is running", async () => {
+    const result = await Effect.runPromise(
+      waitForTerminalExit({
+        terminalManager: {
+          hasRunningProcess: () => Effect.succeed(false),
+        },
+        threadId,
+        attempts: 3,
+        delayMs: 1,
+      }),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("polls and returns true once terminal process exits", async () => {
+    let callCount = 0;
+    const result = await Effect.runPromise(
+      waitForTerminalExit({
+        terminalManager: {
+          hasRunningProcess: () => {
+            callCount += 1;
+            return Effect.succeed(callCount < 3);
+          },
+        },
+        threadId,
+        attempts: 5,
+        delayMs: 1,
+      }),
+    );
+    expect(result).toBe(true);
+    expect(callCount).toBe(3);
+  });
+
+  it("returns false if terminal process outlives all attempts", async () => {
+    let callCount = 0;
+    const result = await Effect.runPromise(
+      waitForTerminalExit({
+        terminalManager: {
+          hasRunningProcess: () => {
+            callCount += 1;
+            return Effect.succeed(true);
+          },
+        },
+        threadId,
+        attempts: 3,
+        delayMs: 1,
+      }),
+    );
+    expect(result).toBe(false);
+    expect(callCount).toBe(3);
+  });
+
+  it("fails closed and treats errors as still running", async () => {
+    let callCount = 0;
+    const result = await Effect.runPromise(
+      waitForTerminalExit({
+        terminalManager: {
+          hasRunningProcess: () => {
+            callCount += 1;
+            return Effect.fail(new Error("PTY check failed") as any);
+          },
+        },
+        threadId,
+        attempts: 2,
+        delayMs: 1,
+      }),
+    );
+    expect(result).toBe(false);
+    expect(callCount).toBe(2);
   });
 });

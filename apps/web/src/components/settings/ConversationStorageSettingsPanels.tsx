@@ -10,6 +10,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 
 import { Button } from "~/components/ui/button";
+import { Switch } from "~/components/ui/switch";
+import type { AppSettings } from "~/appSettings";
 import { gitRemoveWorktreeMutationOptions } from "~/lib/gitReactQuery";
 import { ArchiveIcon } from "~/lib/icons";
 import { deleteArchivedThreadsFromClient } from "~/lib/archivedThreadDelete";
@@ -23,7 +25,13 @@ import { useStore } from "~/store";
 import { createThreadShellsSelector } from "~/storeSelectors";
 import { formatWorktreePathForDisplay } from "~/worktreeCleanup";
 import { toastManager } from "../ui/toast";
-import { SettingsEmptyState, SettingsListRow, SettingsSection } from "./SettingsPanelPrimitives";
+import { SettingResetButton } from "./SettingControls";
+import {
+  SettingsEmptyState,
+  SettingsListRow,
+  SettingsRow,
+  SettingsSection,
+} from "./SettingsPanelPrimitives";
 
 type WorktreeAssociation = {
   worktreePath?: string | null | undefined;
@@ -61,7 +69,17 @@ function WorktreesStatus(props: { children: string; error?: boolean }) {
   );
 }
 
-export function WorktreesSettingsPanel({ active }: { readonly active: boolean }) {
+export function WorktreesSettingsPanel({
+  active,
+  settings,
+  defaults,
+  updateSettings,
+}: {
+  readonly active: boolean;
+  readonly settings?: AppSettings | undefined;
+  readonly defaults?: AppSettings | undefined;
+  readonly updateSettings?: ((patch: Partial<AppSettings>) => void) | undefined;
+}) {
   const queryClient = useQueryClient();
   const worktreesQuery = useQuery(serverWorktreesQueryOptions());
   const removeWorktreeMutation = useMutation(gitRemoveWorktreeMutationOptions({ queryClient }));
@@ -176,95 +194,135 @@ export function WorktreesSettingsPanel({ active }: { readonly active: boolean })
 
   if (!active) return null;
 
-  if (worktreesQuery.isLoading) {
-    return <WorktreesStatus>Loading managed worktrees...</WorktreesStatus>;
-  }
-  if (worktreesQuery.isError) {
+  const retentionSection =
+    settings && defaults && updateSettings ? (
+      <SettingsSection title="Worktree retention">
+        <SettingsRow
+          title="Prune merged worktrees"
+          description="Automatically reclaim managed worktrees when all linked conversations have merged pull requests."
+          resetAction={
+            settings.pruneWorktreesAfterMerge !== defaults.pruneWorktreesAfterMerge ? (
+              <SettingResetButton
+                label="prune merged worktrees"
+                onClick={() =>
+                  updateSettings({
+                    pruneWorktreesAfterMerge: defaults.pruneWorktreesAfterMerge,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.pruneWorktreesAfterMerge}
+              onCheckedChange={(checked) =>
+                updateSettings({ pruneWorktreesAfterMerge: Boolean(checked) })
+              }
+              aria-label="Prune merged worktrees"
+            />
+          }
+        />
+      </SettingsSection>
+    ) : null;
+
+  const renderWorktrees = () => {
+    if (worktreesQuery.isLoading) {
+      return <WorktreesStatus>Loading managed worktrees...</WorktreesStatus>;
+    }
+    if (worktreesQuery.isError) {
+      return (
+        <WorktreesStatus error>
+          {worktreesQuery.error instanceof Error
+            ? worktreesQuery.error.message
+            : "Unable to load worktrees."}
+        </WorktreesStatus>
+      );
+    }
+    if (worktreesByWorkspaceRoot.length === 0) {
+      return <WorktreesStatus>No app-managed worktrees found yet.</WorktreesStatus>;
+    }
+
     return (
-      <WorktreesStatus error>
-        {worktreesQuery.error instanceof Error
-          ? worktreesQuery.error.message
-          : "Unable to load worktrees."}
-      </WorktreesStatus>
+      <div className="space-y-6">
+        {worktreesByWorkspaceRoot.map((group) => (
+          <SettingsSection key={group.workspaceRoot} title={group.workspaceRoot}>
+            {group.worktrees.map((worktree) => (
+              <SettingsListRow
+                key={worktree.path}
+                align="start"
+                title="Worktree"
+                description={
+                  <div className="space-y-2">
+                    <div
+                      className={cn(SETTINGS_CARD_ROW_DESCRIPTION_CLASS_NAME, "truncate font-mono")}
+                    >
+                      {worktree.path}
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-[11px] font-medium text-muted-foreground">
+                        Conversations
+                      </div>
+                      {worktree.linkedThreads.length > 0 ? (
+                        <div className="space-y-1">
+                          {worktree.linkedThreads.map((thread) => (
+                            <div
+                              key={thread.id}
+                              className={cn(
+                                SETTINGS_CARD_ROW_DESCRIPTION_CLASS_NAME,
+                                "text-foreground",
+                              )}
+                            >
+                              {thread.title}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className={SETTINGS_CARD_ROW_DESCRIPTION_CLASS_NAME}>
+                          No conversations linked to this worktree.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                }
+                actions={
+                  <div className="flex flex-col items-end gap-2">
+                    <Button
+                      size="xs"
+                      variant="destructive"
+                      disabled={removeWorktreeMutation.isPending}
+                      onClick={() =>
+                        void deleteManagedWorktree({
+                          workspaceRoot: group.workspaceRoot,
+                          worktreePath: worktree.path,
+                        })
+                      }
+                    >
+                      Delete
+                    </Button>
+                    {worktree.linkedThreads.length > 0 ? (
+                      <p
+                        className={cn(
+                          SETTINGS_CARD_ROW_DESCRIPTION_CLASS_NAME,
+                          "max-w-40 text-right",
+                        )}
+                      >
+                        Linked conversations exist. Deleting will ask for confirmation.
+                      </p>
+                    ) : null}
+                  </div>
+                }
+              />
+            ))}
+          </SettingsSection>
+        ))}
+      </div>
     );
-  }
-  if (worktreesByWorkspaceRoot.length === 0) {
-    return <WorktreesStatus>No app-managed worktrees found yet.</WorktreesStatus>;
-  }
+  };
 
   return (
     <div className="space-y-6">
-      {worktreesByWorkspaceRoot.map((group) => (
-        <SettingsSection key={group.workspaceRoot} title={group.workspaceRoot}>
-          {group.worktrees.map((worktree) => (
-            <SettingsListRow
-              key={worktree.path}
-              align="start"
-              title="Worktree"
-              description={
-                <div className="space-y-2">
-                  <div
-                    className={cn(SETTINGS_CARD_ROW_DESCRIPTION_CLASS_NAME, "truncate font-mono")}
-                  >
-                    {worktree.path}
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-[11px] font-medium text-muted-foreground">
-                      Conversations
-                    </div>
-                    {worktree.linkedThreads.length > 0 ? (
-                      <div className="space-y-1">
-                        {worktree.linkedThreads.map((thread) => (
-                          <div
-                            key={thread.id}
-                            className={cn(
-                              SETTINGS_CARD_ROW_DESCRIPTION_CLASS_NAME,
-                              "text-foreground",
-                            )}
-                          >
-                            {thread.title}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className={SETTINGS_CARD_ROW_DESCRIPTION_CLASS_NAME}>
-                        No conversations linked to this worktree.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              }
-              actions={
-                <div className="flex flex-col items-end gap-2">
-                  <Button
-                    size="xs"
-                    variant="destructive"
-                    disabled={removeWorktreeMutation.isPending}
-                    onClick={() =>
-                      void deleteManagedWorktree({
-                        workspaceRoot: group.workspaceRoot,
-                        worktreePath: worktree.path,
-                      })
-                    }
-                  >
-                    Delete
-                  </Button>
-                  {worktree.linkedThreads.length > 0 ? (
-                    <p
-                      className={cn(
-                        SETTINGS_CARD_ROW_DESCRIPTION_CLASS_NAME,
-                        "max-w-40 text-right",
-                      )}
-                    >
-                      Linked conversations exist. Deleting will ask for confirmation.
-                    </p>
-                  ) : null}
-                </div>
-              }
-            />
-          ))}
-        </SettingsSection>
-      ))}
+      {retentionSection}
+      {renderWorktrees()}
     </div>
   );
 }

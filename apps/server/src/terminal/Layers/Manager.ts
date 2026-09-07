@@ -755,6 +755,8 @@ interface TerminalManagerOptions {
 }
 
 interface KillEscalationHandle {
+  threadId: string;
+  terminalId: string;
   timer: ReturnType<typeof setTimeout>;
   unsubscribeExit: (() => void) | null;
   retainAfterRootExit: boolean;
@@ -1168,6 +1170,20 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
         (session) => Date.parse(session.lastOpenedAt) <= cutoff,
       ),
     );
+  }
+
+  hasRunningProcess(threadId: string): boolean {
+    for (const session of this.sessions.values()) {
+      if (session.threadId === threadId && session.process !== null) {
+        return true;
+      }
+    }
+    for (const handle of this.killEscalationTimers.values()) {
+      if (handle.threadId === threadId) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private async closeThreadSessions(
@@ -1789,6 +1805,8 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     }, this.processKillGraceMs);
     timer.unref?.();
     this.killEscalationTimers.set(ptyProcess, {
+      threadId,
+      terminalId,
       timer,
       unsubscribeExit,
       retainAfterRootExit,
@@ -2419,6 +2437,7 @@ export const TerminalManagerLive = Layer.effect(
           catch: (cause) =>
             terminalErrorFromCause("Failed to close archived thread terminals", cause),
         }),
+      hasRunningProcess: (threadId) => Effect.sync(() => runtime.hasRunningProcess(threadId)),
       subscribe: (listener) =>
         Effect.sync(() => {
           runtime.on("event", listener);

@@ -171,6 +171,12 @@ export interface TerminalManagerShape {
   ) => Effect.Effect<void, TerminalError>;
 
   /**
+   * Check whether any active PTY process or kill-escalation handle is still running
+   * for the given thread.
+   */
+  readonly hasRunningProcess: (threadId: string) => Effect.Effect<boolean, TerminalError>;
+
+  /**
    * Subscribe to terminal runtime events.
    */
   readonly subscribe: (listener: (event: TerminalEvent) => void) => Effect.Effect<() => void>;

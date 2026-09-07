@@ -83,6 +83,56 @@ layer("GitHubCliLive", (it) => {
     }),
   );
 
+  it.effect("parses pull request view output with headRefOid", () =>
+    Effect.gen(function* () {
+      mockedRunProcess.mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          number: 43,
+          title: "PR with head commit OID",
+          url: "https://github.com/example-org/sample-repo/pull/43",
+          baseRefName: "main",
+          headRefName: "feature/head-oid",
+          state: "MERGED",
+          mergedAt: "2026-07-06T10:00:00Z",
+          isDraft: false,
+          mergeable: "MERGEABLE",
+          additions: 10,
+          deletions: 2,
+          changedFiles: 1,
+          updatedAt: "2026-07-06T10:00:00Z",
+          headRefOid: "abcdef1234567890abcdef1234567890abcdef12",
+        }),
+        stderr: "",
+        code: 0,
+        signal: null,
+        timedOut: false,
+      });
+      const result = yield* Effect.gen(function* () {
+        const gh = yield* GitHubCli;
+        return yield* gh.getPullRequest({
+          cwd: "/repo",
+          reference: "#43",
+        });
+      });
+
+      assert.deepStrictEqual(result, {
+        number: 43,
+        title: "PR with head commit OID",
+        url: "https://github.com/example-org/sample-repo/pull/43",
+        baseRefName: "main",
+        headRefName: "feature/head-oid",
+        state: "merged",
+        isDraft: false,
+        mergeability: "mergeable",
+        additions: 10,
+        deletions: 2,
+        changedFiles: 1,
+        updatedAt: "2026-07-06T10:00:00Z",
+        headRefOid: "abcdef1234567890abcdef1234567890abcdef12",
+      });
+    }),
+  );
+
   it.effect("lists any-state pull requests with the shared field list", () =>
     Effect.gen(function* () {
       mockedRunProcess.mockResolvedValueOnce({
