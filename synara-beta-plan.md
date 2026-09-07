@@ -367,16 +367,16 @@ Run via `bun run release:beta -- <version> [betaNumber] [options]`.
 
 ### Current Progress Matrix (2026-09-08)
 
-| Phase        | Description                       | Key Deliverables                                                                                                                  | Status                          |
-| :----------- | :-------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------- | :------------------------------ |
-| **Phase 1**  | Mirror & Connected Git History    | PR #22 (connected upstream ancestry), PR #11 (agent guidance), PR #12 (upstream sync docs).                                       | **Completed & Merged**          |
-| **Phase 2**  | Beta Identity & Packaging         | `desktopIdentity.ts`, `desktop-platform-build-config.ts`, `main.ts`, embedded `synaraFlavor`. PR #29 (Linux arm64).               | **Completed & Merged**          |
-| **Phase 3**  | Release Automation                | `release-beta.yml` baseline, `scripts/release-beta.ts` preflight & tag bump.                                                      | **Completed & Merged**          |
-| **Phase 4**  | Initial Beta Release Cut          | Push initial tag (`v0.8.3-beta.1`) to `origin`, trigger CI release run, publish GitHub Release.                                   | **Ready for Execution**         |
-| **Phase 5A** | Coexistence Auto-Sync Engine      | PR #3 (`@synara/shared/stableSync`, `bun run sync:stable`, `--undo`, `--watch`, `docs/sync.md`).                                  | **Completed & Merged**          |
-| **Phase 5B** | One-Line Cross-Platform Installer | PR #2 (`install.sh`, `install-macos.sh`, `install-linux.sh`, `install-windows.ps1`, SHA256SUMS + SSH signing, `docs/install.md`). | **Open (PR #2)**                |
-| **Phase 5C** | Telemetry & Crash Reporting       | Deploy OpenAnalytics on VPS; add settings toggle and 23-field crash reporter in `apps/desktop`.                                   | **Pending Design / Deployment** |
-| **Phase 6**  | Clean Upstream PRs                | Non-blocking backports to upstream `Emanuele-web04/synara`.                                                                       | **Deferred / Non-blocking**     |
+| Phase        | Description                       | Key Deliverables                                                                                                                               | Status                          |
+| :----------- | :-------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------ |
+| **Phase 1**  | Mirror & Connected Git History    | PR #22 (connected upstream ancestry), PR #11 (agent guidance), PR #12 (upstream sync docs).                                                    | **Completed & Merged**          |
+| **Phase 2**  | Beta Identity & Packaging         | `desktopIdentity.ts`, `desktop-platform-build-config.ts`, `main.ts`, embedded `synaraFlavor` merged; Linux arm64 packaging in review (PR #29). | **Core Merged (PR #29 Open)**   |
+| **Phase 3**  | Release Automation                | `release-beta.yml` baseline, `scripts/release-beta.ts` preflight & tag bump.                                                                   | **Completed & Merged**          |
+| **Phase 4**  | Initial Beta Release Cut          | Push initial tag (`v0.8.3-beta.1`) to `origin`, trigger CI release run, publish GitHub Release.                                                | **Ready for Execution**         |
+| **Phase 5A** | Coexistence Auto-Sync Engine      | PR #3 (`@synara/shared/stableSync`, `bun run sync:stable`, `--undo`, `--watch`, `docs/sync.md`).                                               | **Completed & Merged**          |
+| **Phase 5B** | One-Line Cross-Platform Installer | PR #2 (`install.sh`, `install-macos.sh`, `install-linux.sh`, `install-windows.ps1`, SHA256SUMS + SSH signing, `docs/install.md`).              | **Open (PR #2)**                |
+| **Phase 5C** | Telemetry & Crash Reporting       | Deploy OpenAnalytics on VPS; add settings toggle and 23-field crash reporter in `apps/desktop`.                                                | **Pending Design / Deployment** |
+| **Phase 6**  | Clean Upstream PRs                | Non-blocking backports to upstream `Emanuele-web04/synara`.                                                                                    | **Deferred / Non-blocking**     |
 
 ---
 
@@ -401,7 +401,7 @@ Run via `bun run release:beta -- <version> [betaNumber] [options]`.
   - README modernized with light/dark adaptive UI previews (PR #1, PR #13).
 - **2026-09-07:**
   - PR-based upstream sync doctrine reinforced; PR #25 opened tracking upstream `v0.8.3`.
-  - Added Linux arm64 desktop packaging support in PR #29.
+  - Submitted Linux arm64 desktop packaging support in PR #29.
   - Worktree auto-reclaim after merge developed in PR #30.
 - **2026-09-08:**
   - Full plan overhaul reflecting completed mirror connection, merged sync engine, installer PR, bot review resolutions, and active PR inventory.
