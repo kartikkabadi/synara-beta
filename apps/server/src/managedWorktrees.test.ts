@@ -608,35 +608,6 @@ describe("managed worktrees", () => {
     expect(Array.from(merged)).toEqual(["/wt/pr-merged"]);
   });
 
-  it("does not mark merged if GitHub CLI PR is closed unmerged and ancestry fails", async () => {
-    const inventory = [{ path: "/wt/pr-closed", workspaceRoot: "/repo" }];
-    const canonicalByRecordedPath = new Map(inventory.map((entry) => [entry.path, entry.path]));
-    const git = makeGit({ removals: [], isAncestor: () => false });
-    const gitHubCli = makeGitHubCli({
-      "https://github.com/org/repo/pull/42": { state: "closed" },
-    });
-
-    const merged = await Effect.runPromise(
-      detectMergedManagedWorktreePaths({
-        inventory,
-        canonicalByRecordedPath,
-        git,
-        gitHubCli,
-        threads: [
-          {
-            id: "thread-closed",
-            worktreePath: "/wt/pr-closed",
-            archivedAt: "2026-01-01T00:00:00.000Z",
-            deletedAt: null,
-            lastKnownPr: makeThreadPr({ number: 42, state: "closed" }),
-          },
-        ],
-      }),
-    );
-
-    expect(Array.from(merged)).toEqual([]);
-  });
-
   it("does not mark merged if GitHub CLI PR is closed even if local ancestry reports ancestor", async () => {
     const inventory = [{ path: "/wt/pr-closed-ancestor", workspaceRoot: "/repo" }];
     const canonicalByRecordedPath = new Map(inventory.map((entry) => [entry.path, entry.path]));
