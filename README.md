@@ -151,6 +151,30 @@ Supported native platforms:
 - **Windows:** x64
 - **Linux:** x64 and arm64 (`.AppImage`)
 
+#### Linux AppImage troubleshooting
+
+Choose the asset that matches `uname -m`: `x86_64` uses the x64 AppImage and
+`aarch64` uses the arm64 AppImage. The normal AppImage launch path requires
+FUSE support; on Arch-based systems, install the `fuse2` package if it is
+missing.
+
+If FUSE is unavailable, run the AppImage in extraction mode:
+
+```bash
+chmod +x Synara-*-x86_64.AppImage
+./Synara-*-x86_64.AppImage --appimage-extract-and-run
+```
+
+For nested VMs using Wayland, add Electron compatibility flags when needed:
+
+```bash
+./Synara-*-x86_64.AppImage \
+  --appimage-extract-and-run \
+  --no-sandbox \
+  --disable-gpu \
+  --ozone-platform=x11
+```
+
 ### Running from Source
 
 You can build and run Synara Beta locally using [Bun](https://bun.sh/) and [Node.js](https://nodejs.org/).
