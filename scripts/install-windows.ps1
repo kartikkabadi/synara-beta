@@ -47,65 +47,67 @@ Write-Output "Installing Synara Beta $Tag for Windows ($env:PROCESSOR_ARCHITECTU
 
 $base = "https://github.com/kartikkabadi/synara-beta/releases/download/$Tag"
 $checksumPath = Join-Path $env:TEMP ("SHA256SUMS-" + [Guid]::NewGuid().ToString("N"))
-Invoke-WebRequest -Uri "$base/SHA256SUMS" -OutFile $checksumPath -UseBasicParsing
-
-# The release signature authenticates SHA256SUMS before any checksum is trusted.
-# The private key lives in the SYNARA_RELEASE_SIGNING_KEY repository secret; the
-# matching public key is pinned in scripts/release-signing.pub and inlined below.
-$allowedSigners = 'synara-beta-releases ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFA61LZNkb3QTME3wdqznC/zghISZ9nsS2BnUMUQ1JRo'
 $signaturePath = Join-Path $env:TEMP ("SHA256SUMS.sig-" + [Guid]::NewGuid().ToString("N"))
-Invoke-WebRequest -Uri "$base/SHA256SUMS.sig" -OutFile $signaturePath -UseBasicParsing
 $signersPath = Join-Path $env:TEMP ("allowed-signers-" + [Guid]::NewGuid().ToString("N"))
-Set-Content -Path $signersPath -Value $allowedSigners
-Write-Output 'Verifying release signature...'
-# ssh-keygen -Y verify reads the signed content from stdin; PowerShell has no <
-# redirection, so route through cmd with the redirect attached to the command.
-$verifyOutput = cmd /c "ssh-keygen -Y verify -f `"$signersPath`" -I synara-beta-releases -s `"$signaturePath`" -n synara-beta < `"$checksumPath`"" 2>&1
-if ($LASTEXITCODE -ne 0) {
-  Write-Output $verifyOutput
-  throw 'install-windows.ps1: release signature verification failed for SHA256SUMS. Refusing to install.'
-}
+$installerPath = ''
 
-$asset = "Synara-$version-x64.exe"
-$entries = @(Select-String -Path $checksumPath -Pattern ('^[a-fA-F0-9]{64}\s+\*?' + [regex]::Escape($asset) + '$'))
-if ($entries.Count -eq 0) {
-  # Match any Synara x64 exe in this release.
-  $entries = @(Select-String -Path $checksumPath -Pattern '^[a-fA-F0-9]{64}\s+\*?(Synara.*x64\.exe)$')
-  if ($entries.Count -gt 0) {
-    $asset = ($entries[0].Line -split '\s+')[-1].TrimStart('*')
-  }
-}
-
-if ($entries.Count -eq 0) {
-  throw "install-windows.ps1: SHA256SUMS contains no matching entry for a Synara x64 installer."
-}
-$entries = @($entries[0])
-
+# Every downloaded file is cleaned in the outer finally, whatever fails.
 try {
+  Invoke-WebRequest -Uri "$base/SHA256SUMS" -OutFile $checksumPath -UseBasicParsing
+
+  # The release signature authenticates SHA256SUMS before any checksum is
+  # trusted. The private key lives in the SYNARA_RELEASE_SIGNING_KEY repository
+  # secret; the matching public key is pinned in scripts/release-signing.pub.
+  $allowedSigners = 'synara-beta-releases ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFA61LZNkb3QTME3wdqznC/zghISZ9nsS2BnUMUQ1JRo'
+  Invoke-WebRequest -Uri "$base/SHA256SUMS.sig" -OutFile $signaturePath -UseBasicParsing
+  Set-Content -Path $signersPath -Value $allowedSigners
+  Write-Output 'Verifying release signature...'
+  # ssh-keygen -Y verify reads the signed content from stdin; PowerShell has no
+  # < redirection, so route through cmd with the redirect attached.
+  $verifyOutput = cmd /c "ssh-keygen -Y verify -f `"$signersPath`" -I synara-beta-releases -s `"$signaturePath`" -n synara-beta < `"$checksumPath`"" 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    Write-Output $verifyOutput
+    throw 'install-windows.ps1: release signature verification failed for SHA256SUMS. Refusing to install.'
+  }
+
+  $asset = "Synara-$version-x64.exe"
+  $entries = @(Select-String -Path $checksumPath -Pattern ('^[a-fA-F0-9]{64}\s+\*?' + [regex]::Escape($asset) + '$'))
+  if ($entries.Count -eq 0) {
+    # Match any Synara x64 exe in this release.
+    $entries = @(Select-String -Path $checksumPath -Pattern '^[a-fA-F0-9]{64}\s+\*?(Synara.*x64\.exe)$')
+    if ($entries.Count -gt 0) {
+      $asset = ($entries[0].Line -split '\s+')[-1].TrimStart('*')
+    }
+  }
+
+  if ($entries.Count -eq 0) {
+    throw "install-windows.ps1: SHA256SUMS contains no matching entry for a Synara x64 installer."
+  }
+  $entries = @($entries[0])
+
   # GUID-qualified path: two concurrent installs of the same release must never
   # race on one temporary file.
   $installerPath = Join-Path $env:TEMP ("synara-beta-" + [Guid]::NewGuid().ToString("N") + "-" + $asset)
-  try {
-    Invoke-WebRequest -Uri "$base/$asset" -OutFile $installerPath -UseBasicParsing
+  Invoke-WebRequest -Uri "$base/$asset" -OutFile $installerPath -UseBasicParsing
 
-    Write-Output 'Verifying checksum...'
-    $expected = ($entries[0].Line -split '\s+')[0]
-    $actual = (Get-FileHash -Path $installerPath -Algorithm SHA256).Hash
-    if ($actual.ToLowerInvariant() -ne $expected.ToLowerInvariant()) {
-      throw "install-windows.ps1: checksum mismatch for '$asset'."
-    }
+  Write-Output 'Verifying checksum...'
+  $expected = ($entries[0].Line -split '\s+')[0]
+  $actual = (Get-FileHash -Path $installerPath -Algorithm SHA256).Hash
+  if ($actual.ToLowerInvariant() -ne $expected.ToLowerInvariant()) {
+    throw "install-windows.ps1: checksum mismatch for '$asset'."
+  }
 
-    Unblock-File -Path $installerPath
+  Unblock-File -Path $installerPath
 
-    Write-Output 'Installing...'
-    $proc = Start-Process -FilePath $installerPath -Wait -PassThru
-    if ($proc.ExitCode -ne 0) {
-      throw "install-windows.ps1: installer exited with code $($proc.ExitCode)."
-    }
-  } finally {
-    Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+  Write-Output 'Installing...'
+  $proc = Start-Process -FilePath $installerPath -Wait -PassThru
+  if ($proc.ExitCode -ne 0) {
+    throw "install-windows.ps1: installer exited with code $($proc.ExitCode)."
   }
 } finally {
+  if ($installerPath -ne '') {
+    Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+  }
   Remove-Item $checksumPath -Force -ErrorAction SilentlyContinue
   Remove-Item $signaturePath -Force -ErrorAction SilentlyContinue
   Remove-Item $signersPath -Force -ErrorAction SilentlyContinue
