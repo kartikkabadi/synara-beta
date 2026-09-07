@@ -21,7 +21,8 @@ Goal: leave clear, line-specific pull request review comments that read like a h
 
 ## What it is
 
-This is a **pull request review comment** (also called an **inline review comment**). It appears on the *Files changed* tab and is attached to a specific diff hunk. It is different from:
+This is a **pull request review comment** (also called an **inline review comment**). It appears on the _Files changed_ tab and is attached to a specific diff hunk. It is different from:
+
 - a top-level **PR issue comment** (conversation tab), or
 - a **review summary** (the `pullrequestreview-...` object that can hold many line comments).
 
@@ -41,9 +42,17 @@ The body is GitHub-flavored Markdown. Use single backticks for short identifiers
 ## Workflow
 
 1. **Identify the target.**
-   - Get the PR diff for the file: `gh api /repos/{owner}/{repo}/pulls/{number}/files` and read the `patch`.
-   - Map the code location to the RIGHT-side line numbers of the new diff hunk.
-   - Check for an existing review comment on the same lines: `gh api /repos/{owner}/{repo}/pulls/{number}/comments`. The comment `id` is the number after `#discussion_r`.
+   - Get the PR diff for the file. Paginate both list calls so large PRs are fully covered — `gh api --paginate` merges the JSON array pages into one array:
+
+     ```bash
+     gh api --paginate /repos/{owner}/{repo}/pulls/{number}/files | \
+       jq '.[] | select(.filename == "apps/web/src/providerModelOptions.ts")'
+     ```
+
+     Read the selected file's `patch`.
+
+   - Map the code location to diff line numbers. Added and context lines use side `RIGHT` with new-file line numbers; deleted lines use side `LEFT` with old-file line numbers.
+   - Check for an existing review comment on the same lines, paginated the same way: `gh api --paginate /repos/{owner}/{repo}/pulls/{number}/comments`. The comment `id` is the number after `#discussion_r`.
 
 2. **Write the body like a reviewer, not a status report.**
    - Open with thanks and what is right about the PR.
@@ -52,8 +61,18 @@ The body is GitHub-flavored Markdown. Use single backticks for short identifiers
    - State the user-visible effect, not only the code behavior.
    - Close with a question or a concrete suggestion.
 
-3. **Post or update.**
-   - New line comment:
+3. **Post, reply, or update.**
+   - New single-line comment (no range: omit `start_line` and `start_side`):
+
+     ```bash
+     gh api -X POST /repos/{owner}/{repo}/pulls/{number}/comments \
+       -f path="apps/web/src/providerModelOptions.ts" \
+       -f line=175 \
+       -f side=RIGHT \
+       -f body="Thank you for the PR..."
+     ```
+
+   - New multi-line comment (`start_side` must match `side`):
 
      ```bash
      gh api -X POST /repos/{owner}/{repo}/pulls/{number}/comments \
@@ -65,7 +84,26 @@ The body is GitHub-flavored Markdown. Use single backticks for short identifiers
        -f body="Thank you for the PR..."
      ```
 
-   - Update an existing line comment (JSON body avoids quoting issues):
+   - New comment on a deleted line (`side=LEFT`, old-file line number):
+
+     ```bash
+     gh api -X POST /repos/{owner}/{repo}/pulls/{number}/comments \
+       -f path="apps/web/src/providerModelOptions.ts" \
+       -f line=120 \
+       -f side=LEFT \
+       -f body="This block was removed..."
+     ```
+
+   - Reply to an existing thread (adds a threaded response; never PATCH for this):
+
+     ```bash
+     gh api -X POST /repos/{owner}/{repo}/pulls/{number}/comments/{id}/replies \
+       -f body="Good catch, fixed in the follow-up commit."
+     ```
+
+     The GitHub MCP server can also add replies (`add_reply_to_pull_request_comment`).
+
+   - Update an existing line comment's body (JSON body avoids quoting issues; PATCH edits the body only and never adds a reply):
 
      ```bash
      jq -n --arg body "$body" '{body: $body}' | \
@@ -102,4 +140,5 @@ Could we keep the provider's exact casing when the raw name is only a casing/sep
 - `gh auth status` must be green before any `gh api` or `gh pr` call.
 - Do not read or expose tokens. Use the keyring re-register flow above.
 - The GitHub MCP server can add a reply to an existing review comment but cannot `PATCH` an existing one; use `gh` for edits.
-- A comment that needs a line range must pass both `line` and `start_line` with matching `side` and `start_side`.
+- A comment that needs a line range must pass both `line` and `start_line` with matching `side` and `start_side`. A single-line comment passes only `line` and `side`.
+- Always list files and comments with `--paginate`; first-page-only lookups miss files and threads on large PRs and cause duplicate replies.
