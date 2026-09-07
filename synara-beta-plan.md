@@ -260,7 +260,7 @@ Run via `bun run release:beta -- <version> [betaNumber] [options]`.
 - Unless `--skip-bump` is passed, bumps package versions across workspace manifests (`package.json`, `apps/desktop/package.json`, `apps/server/package.json`, `apps/web/package.json`, `packages/contracts/package.json`) and refreshes `bun.lock`.
 - Creates a version-bump git commit: `chore(release): prepare <tag>`.
 - Creates an annotated tag locally: `vX.Y.Z-beta.N`.
-- Prompts the operator to push the tag (`git push origin <tag>`), leaving tag publication under deliberate human control.
+- Prompts the operator to push the tag (`git push beta <tag>`), leaving tag publication under deliberate human control.
 
 ### Release Workflow (`.github/workflows/release-beta.yml`)
 
@@ -276,7 +276,12 @@ Run via `bun run release:beta -- <version> [betaNumber] [options]`.
 
 ### Release Execution Procedure (Phase 4 Cut)
 
-1. **Prerequisite (for signed checksums):** Generate SSH ed25519 signing key (`ssh-keygen -t ed25519 -C "synara-beta-release-signing"`), set repository secret `SYNARA_RELEASE_SIGNING_KEY`, and commit public key to `scripts/release-signing.pub` (included in PR #2).
+1. **Prerequisites:**
+   - Configure git remote `beta` (required by `scripts/release-beta.ts` preflight):
+     ```bash
+     git remote add beta https://github.com/kartikkabadi/synara-beta.git
+     ```
+   - For signed checksums: Generate SSH ed25519 signing key (`ssh-keygen -t ed25519 -C "synara-beta-release-signing"`), set repository secret `SYNARA_RELEASE_SIGNING_KEY`, and commit public key to `scripts/release-signing.pub` (included in PR #2).
 2. **Execute release preflight:**
    ```bash
    bun run release:beta -- 0.8.3 1 --dry-run
@@ -284,7 +289,7 @@ Run via `bun run release:beta -- <version> [betaNumber] [options]`.
    ```
 3. **Publish to GitHub Releases:**
    ```bash
-   git push origin v0.8.3-beta.1
+   git push beta v0.8.3-beta.1
    ```
 
 ---
