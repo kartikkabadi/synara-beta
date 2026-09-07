@@ -278,10 +278,11 @@ const make = Effect.gen(function* () {
         event.payload.archivedAt,
       );
       if (terminalCleanupSucceeded) {
-        const terminalRunning = yield* terminalManager
-          .hasRunningProcess(threadId)
-          .pipe(Effect.catch(() => Effect.succeed(true)));
-        if (!terminalRunning) {
+        const terminalExited = yield* waitForTerminalExit({
+          terminalManager,
+          threadId,
+        });
+        if (terminalExited) {
           yield* pruneManagedWorktreesAfterLifecycle({
             eventType: event.type,
             threadId,
@@ -315,10 +316,11 @@ const make = Effect.gen(function* () {
       );
       return;
     }
-    const terminalRunning = yield* terminalManager
-      .hasRunningProcess(threadId)
-      .pipe(Effect.catch(() => Effect.succeed(true)));
-    if (terminalRunning) {
+    const terminalExited = yield* waitForTerminalExit({
+      terminalManager,
+      threadId,
+    });
+    if (!terminalExited) {
       yield* Effect.logWarning(
         "thread deletion cleanup deferred stats archive purge and worktree prune; terminal still active",
         {
