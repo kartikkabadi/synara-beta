@@ -38,6 +38,7 @@ export interface MergedWorktreeInfo {
   readonly path: string;
   readonly detectedHeadSha: string | null;
   readonly mergeSource: "pr" | "ancestry";
+  readonly prHeadSha?: string | null | undefined;
 }
 
 export class MergedWorktreeSet extends Set<string> {
@@ -60,6 +61,7 @@ export interface ManagedWorktreeRemovalCandidate {
   readonly reason: ManagedWorktreeRemovalReason;
   readonly detectedHeadSha?: string | null | undefined;
   readonly mergeSource?: "pr" | "ancestry" | undefined;
+  readonly prHeadSha?: string | null | undefined;
 }
 
 async function findLinkedWorktreeRoots(root: string, current = root, depth = 0): Promise<string[]> {
@@ -222,43 +224,16 @@ export function detectMergedManagedWorktreePaths(input: {
     readonly isMerged: boolean;
     readonly detectedHeadSha: string | null;
     readonly mergeSource: "pr" | "ancestry";
+    readonly prHeadSha?: string | null | undefined;
   }> =>
     Effect.gen(function* () {
       let isMerged = false;
       let prStatusKnown = false;
       let mergeSource: "pr" | "ancestry" = "pr";
       let headSha: string | null = null;
+      let prHeadSha: string | null = null;
 
-      // Signal 1: PR check via GitHub CLI or recorded lastKnownPr
-      if (thread.lastKnownPr) {
-        if (input.gitHubCli) {
-          const prRef = thread.lastKnownPr.url || String(thread.lastKnownPr.number);
-          const prSummary = yield* input.gitHubCli
-            .getPullRequest({ cwd: entry.workspaceRoot, reference: prRef })
-            .pipe(
-              Effect.catch((error) =>
-                Effect.logDebug("managed worktrees: failed to re-resolve PR via gh", {
-                  threadId: thread.id,
-                  reference: prRef,
-                  error: error instanceof Error ? error.message : String(error),
-                }).pipe(Effect.as(null)),
-              ),
-            );
-
-          if (prSummary && prSummary.state !== undefined) {
-            prStatusKnown = true;
-            isMerged = prSummary.state === "merged";
-          } else if (thread.lastKnownPr.state === "merged") {
-            prStatusKnown = true;
-            isMerged = true;
-          }
-        } else if (thread.lastKnownPr.state === "merged") {
-          prStatusKnown = true;
-          isMerged = true;
-        }
-      }
-
-      // Read current worktree HEAD SHA to record detectedHeadSha, or for ancestry fallback
+      // Read current worktree HEAD SHA first to compare against PR head commit or use for ancestry
       const revParseResult = yield* input.git
         .execute({
           operation: "ManagedWorktrees.revParseHead",
@@ -278,10 +253,54 @@ export function detectMergedManagedWorktreePaths(input: {
         headSha = thread.associatedWorktreeRef;
       }
 
+      // Signal 1: PR check via GitHub CLI or recorded lastKnownPr
+      if (thread.lastKnownPr) {
+        if (input.gitHubCli) {
+          const prRef = thread.lastKnownPr.url || String(thread.lastKnownPr.number);
+          const prSummary = yield* input.gitHubCli
+            .getPullRequest({ cwd: entry.workspaceRoot, reference: prRef })
+            .pipe(
+              Effect.catch((error) =>
+                Effect.logDebug("managed worktrees: failed to re-resolve PR via gh", {
+                  threadId: thread.id,
+                  reference: prRef,
+                  error: error instanceof Error ? error.message : String(error),
+                }).pipe(Effect.as(null)),
+              ),
+            );
+
+          if (prSummary && prSummary.state !== undefined) {
+            if (prSummary.state === "merged") {
+              prHeadSha = prSummary.headRefOid ?? null;
+              if (prHeadSha && headSha && headSha !== prHeadSha) {
+                // Post-merge commits exist in the worktree that differ from the merged PR head.
+                // Do not mark merged via PR; let Signal 2 (local git ancestry) verify if those
+                // extra commits were integrated into base.
+                isMerged = false;
+                prStatusKnown = false;
+              } else {
+                prStatusKnown = true;
+                isMerged = true;
+              }
+            } else {
+              prStatusKnown = true;
+              isMerged = false;
+            }
+          } else if (thread.lastKnownPr.state === "merged") {
+            prStatusKnown = true;
+            isMerged = true;
+          }
+        } else if (thread.lastKnownPr.state === "merged") {
+          prStatusKnown = true;
+          isMerged = true;
+        }
+      }
+
       // Signal 2: Local git ancestry fallback.
       // Crucial safeguard: ONLY run local ancestry fallback when no PR exists or the
-      // GitHub lookup failed. When GitHub confirms a PR is closed or open, that
-      // authoritative remote status must NOT be overridden by local branch ancestry.
+      // GitHub lookup failed, or when post-merge commits made the PR check inconclusive.
+      // When GitHub confirms a PR is closed or open, that authoritative remote
+      // status must NOT be overridden by local branch ancestry.
       if (!isMerged && !prStatusKnown) {
         if (headSha) {
           const baseCandidates: string[] = [];
@@ -321,7 +340,12 @@ export function detectMergedManagedWorktreePaths(input: {
         }
       }
 
-      return { isMerged, detectedHeadSha: headSha, mergeSource };
+      return {
+        isMerged,
+        detectedHeadSha: headSha,
+        mergeSource,
+        ...(prHeadSha ? { prHeadSha } : {}),
+      };
     });
 
   return Effect.gen(function* () {
@@ -339,6 +363,7 @@ export function detectMergedManagedWorktreePaths(input: {
           let allArchivedMerged = true;
           let detectedHeadSha: string | null = null;
           let mergeSource: "pr" | "ancestry" = "pr";
+          let prHeadSha: string | null = null;
 
           for (const thread of archivedOnly) {
             const check = yield* checkThreadMerged(entry, thread);
@@ -352,10 +377,18 @@ export function detectMergedManagedWorktreePaths(input: {
             if (check.mergeSource === "ancestry") {
               mergeSource = "ancestry";
             }
+            if (check.prHeadSha) {
+              prHeadSha = check.prHeadSha;
+            }
           }
 
           if (!allArchivedMerged) return null;
-          return { path: entry.path, detectedHeadSha, mergeSource };
+          return {
+            path: entry.path,
+            detectedHeadSha,
+            mergeSource,
+            ...(prHeadSha ? { prHeadSha } : {}),
+          };
         }),
       { concurrency: 4 },
     );
@@ -448,6 +481,7 @@ export function classifyManagedWorktreeRemovalCandidates(input: {
         reason: "merged",
         detectedHeadSha: mergedInfo?.detectedHeadSha,
         mergeSource: mergedInfo?.mergeSource ?? "pr",
+        ...(mergedInfo?.prHeadSha ? { prHeadSha: mergedInfo.prHeadSha } : {}),
       });
     }
   }
@@ -594,7 +628,10 @@ function removeManagedWorktreeSafely(input: {
             return false;
           }
 
-          if (input.candidate.mergeSource === "ancestry") {
+          if (
+            input.candidate.mergeSource === "ancestry" ||
+            (input.candidate.prHeadSha && currentHeadSha !== input.candidate.prHeadSha)
+          ) {
             const baseCandidates: string[] = [];
             if (thread.lastKnownPr?.baseBranch) {
               baseCandidates.push(

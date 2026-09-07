@@ -99,7 +99,10 @@ function makeGit(input: {
 }
 
 function makeGitHubCli(
-  prMap?: Record<string, { state: "open" | "closed" | "merged" } | null | Error>,
+  prMap?: Record<
+    string,
+    { state: "open" | "closed" | "merged"; headRefOid?: string | null | undefined } | null | Error
+  >,
 ) {
   return {
     getPullRequest: ({ reference }: { cwd: string; reference: string }) => {
@@ -119,6 +122,7 @@ function makeGitHubCli(
         baseRefName: "main",
         headRefName: "feature",
         state: entry.state,
+        headRefOid: entry.headRefOid ?? "1111111111111111111111111111111111111111",
       });
     },
   } as unknown as GitHubCliShape;
@@ -1085,5 +1089,95 @@ describe("managed worktrees", () => {
     expect(removals).toEqual([]);
     expect(remaining).toHaveLength(1);
     expect(remaining[0]?.path).toBe(paths[0]);
+  });
+
+  it("skips pruning a merged PR worktree if clean commits were added after PR merge and are not in base", async () => {
+    const { root, paths } = await makeManagedRoot(1);
+    const worktreePath = paths[0]!;
+    const removals: string[] = [];
+    // Worktree HEAD is '222222...', but the PR was merged at '111111...'
+    const git = makeGit({
+      removals,
+      headShaByCwd: { [worktreePath]: "2222222222222222222222222222222222222222" },
+      isAncestor: () => false,
+    });
+
+    const gitHubCli = makeGitHubCli({
+      "https://github.com/org/repo/pull/1": {
+        state: "merged",
+        headRefOid: "1111111111111111111111111111111111111111",
+      },
+    });
+
+    const threads = [
+      {
+        id: "thread-post-merge-commits",
+        worktreePath,
+        associatedWorktreePath: worktreePath,
+        archivedAt: "2026-01-01T00:00:00.000Z",
+        deletedAt: null,
+        lastKnownPr: makeThreadPr({ number: 1, state: "merged" }),
+      },
+    ] as unknown as OrchestrationThread[];
+
+    const remaining = await Effect.runPromise(
+      pruneArchivedManagedWorktrees({
+        worktreesDir: root,
+        snapshotsDir: path.join(root, "snapshots"),
+        threads,
+        git,
+        pruneAfterMerge: true,
+        gitHubCli,
+      }),
+    );
+
+    // Post-merge clean commits were not integrated into base, so removal was refused
+    expect(removals).toEqual([]);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]?.path).toBe(worktreePath);
+  });
+
+  it("prunes a merged PR worktree with post-merge commits if those commits are contained in base", async () => {
+    const { root, paths } = await makeManagedRoot(1);
+    const worktreePath = paths[0]!;
+    const removals: string[] = [];
+    const git = makeGit({
+      removals,
+      headShaByCwd: { [worktreePath]: "2222222222222222222222222222222222222222" },
+      isAncestor: (headSha, baseRef) =>
+        headSha === "2222222222222222222222222222222222222222" && baseRef.includes("main"),
+    });
+
+    const gitHubCli = makeGitHubCli({
+      "https://github.com/org/repo/pull/1": {
+        state: "merged",
+        headRefOid: "1111111111111111111111111111111111111111",
+      },
+    });
+
+    const threads = [
+      {
+        id: "thread-post-merge-integrated",
+        worktreePath,
+        associatedWorktreePath: worktreePath,
+        archivedAt: "2026-01-01T00:00:00.000Z",
+        deletedAt: null,
+        lastKnownPr: makeThreadPr({ number: 1, state: "merged" }),
+      },
+    ] as unknown as OrchestrationThread[];
+
+    const remaining = await Effect.runPromise(
+      pruneArchivedManagedWorktrees({
+        worktreesDir: root,
+        snapshotsDir: path.join(root, "snapshots"),
+        threads,
+        git,
+        pruneAfterMerge: true,
+        gitHubCli,
+      }),
+    );
+
+    expect(removals).toEqual([worktreePath]);
+    expect(remaining).toHaveLength(0);
   });
 });
