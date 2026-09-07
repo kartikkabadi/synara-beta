@@ -195,6 +195,61 @@ function snapshotOutputPath(input: {
   return path.join(input.snapshotsDir, `${threadPathSegment || "thread"}-${digest}`);
 }
 
+const DEFAULT_BASE_BRANCH_CANDIDATES = [
+  "origin/main",
+  "upstream/main",
+  "main",
+  "origin/master",
+  "upstream/master",
+  "master",
+] as const;
+
+function resolveBaseBranchCandidates(
+  threadPr?: OrchestrationThreadPullRequest | null | undefined,
+  extraBaseRefs?: ReadonlyArray<string> | undefined,
+): string[] {
+  const candidates: string[] = [];
+  if (extraBaseRefs) {
+    candidates.push(...extraBaseRefs);
+  }
+  if (threadPr?.baseBranch) {
+    candidates.push(
+      threadPr.baseBranch,
+      `origin/${threadPr.baseBranch}`,
+      `upstream/${threadPr.baseBranch}`,
+    );
+  }
+  candidates.push(...DEFAULT_BASE_BRANCH_CANDIDATES);
+  return candidates;
+}
+
+function isHeadContainedInAnyBase(input: {
+  readonly git: GitCoreShape;
+  readonly cwd: string;
+  readonly headSha: string;
+  readonly baseCandidates: ReadonlyArray<string>;
+  readonly operation: string;
+}): Effect.Effect<string | null> {
+  return Effect.gen(function* () {
+    for (const baseRef of input.baseCandidates) {
+      const result = yield* input.git
+        .execute({
+          operation: input.operation,
+          cwd: input.cwd,
+          args: ["merge-base", "--is-ancestor", input.headSha, baseRef],
+          timeoutMs: 3_000,
+          allowNonZeroExit: true,
+        })
+        .pipe(Effect.catch(() => Effect.succeed(null)));
+
+      if (result && result.code === 0) {
+        return baseRef;
+      }
+    }
+    return null;
+  });
+}
+
 export function detectMergedManagedWorktreePaths(input: {
   readonly inventory: ReadonlyArray<ServerManagedWorktree>;
   readonly threads: ReadonlyArray<ManagedWorktreeThreadRef>;
@@ -307,40 +362,19 @@ export function detectMergedManagedWorktreePaths(input: {
       // status must NOT be overridden by local branch ancestry.
       if (!isMerged && !prStatusKnown) {
         if (headSha) {
-          const baseCandidates: string[] = [];
-          if (thread.lastKnownPr?.baseBranch) {
-            baseCandidates.push(
-              thread.lastKnownPr.baseBranch,
-              `origin/${thread.lastKnownPr.baseBranch}`,
-              `upstream/${thread.lastKnownPr.baseBranch}`,
-            );
-          }
-          baseCandidates.push(
-            "origin/main",
-            "upstream/main",
-            "main",
-            "origin/master",
-            "upstream/master",
-            "master",
-          );
+          const baseCandidates = resolveBaseBranchCandidates(thread.lastKnownPr);
+          const matchedBase = yield* isHeadContainedInAnyBase({
+            git: input.git,
+            cwd: entry.workspaceRoot,
+            headSha,
+            baseCandidates,
+            operation: "ManagedWorktrees.mergeBaseIsAncestor",
+          });
 
-          for (const baseRef of baseCandidates) {
-            const mergeBaseResult = yield* input.git
-              .execute({
-                operation: "ManagedWorktrees.mergeBaseIsAncestor",
-                cwd: entry.workspaceRoot,
-                args: ["merge-base", "--is-ancestor", headSha, baseRef],
-                timeoutMs: 3_000,
-                allowNonZeroExit: true,
-              })
-              .pipe(Effect.catch(() => Effect.succeed(null)));
-
-            if (mergeBaseResult && mergeBaseResult.code === 0) {
-              isMerged = true;
-              mergeSource = "ancestry";
-              successfulBaseRef = baseRef;
-              break;
-            }
+          if (matchedBase) {
+            isMerged = true;
+            mergeSource = "ancestry";
+            successfulBaseRef = matchedBase;
           }
         }
       }
@@ -646,45 +680,20 @@ function removeManagedWorktreeSafely(input: {
             input.candidate.mergeSource === "ancestry" ||
             (input.candidate.prHeadSha && currentHeadSha !== input.candidate.prHeadSha)
           ) {
-            const baseCandidates: string[] = [];
-            if (input.candidate.successfulBaseRefs) {
-              baseCandidates.push(...input.candidate.successfulBaseRefs);
-            }
-            if (thread.lastKnownPr?.baseBranch) {
-              baseCandidates.push(
-                thread.lastKnownPr.baseBranch,
-                `origin/${thread.lastKnownPr.baseBranch}`,
-                `upstream/${thread.lastKnownPr.baseBranch}`,
-              );
-            }
-            baseCandidates.push(
-              "origin/main",
-              "upstream/main",
-              "main",
-              "origin/master",
-              "upstream/master",
-              "master",
+            const baseCandidates = resolveBaseBranchCandidates(
+              thread.lastKnownPr,
+              input.candidate.successfulBaseRefs,
             );
 
-            let headIsContained = false;
-            for (const baseRef of baseCandidates) {
-              const isAncestorResult = yield* input.git
-                .execute({
-                  operation: "ManagedWorktrees.revalidateHeadIsAncestor",
-                  cwd: entry.workspaceRoot,
-                  args: ["merge-base", "--is-ancestor", currentHeadSha, baseRef],
-                  timeoutMs: 3_000,
-                  allowNonZeroExit: true,
-                })
-                .pipe(Effect.catch(() => Effect.succeed(null)));
+            const matchedBase = yield* isHeadContainedInAnyBase({
+              git: input.git,
+              cwd: entry.workspaceRoot,
+              headSha: currentHeadSha,
+              baseCandidates,
+              operation: "ManagedWorktrees.revalidateHeadIsAncestor",
+            });
 
-              if (isAncestorResult && isAncestorResult.code === 0) {
-                headIsContained = true;
-                break;
-              }
-            }
-
-            if (!headIsContained) {
+            if (!matchedBase) {
               yield* Effect.logWarning(
                 "managed worktree cleanup skipped ancestry-merged worktree whose HEAD is not contained in base; refusing data loss",
                 {
