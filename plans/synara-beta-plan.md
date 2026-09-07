@@ -15,7 +15,7 @@
 - **Autonomous Shipping:** Beta ships autonomously from `kartikkabadi/synara-beta`. Releases do not block on upstream approvals or upstream release cadences.
 - **Progressive Code Signing Lifecycle:** Beta ships unsigned initially (`ALLOW_UNSIGNED_BETA_PUBLICATION=true`). Signing credentials (Apple Developer Org team invite and Azure Trusted Signing RBAC) can be populated in GitHub Secrets later with zero code refactoring and zero user data loss.
 - **Cross-Platform One-Line Installers:** Added in PR #2 (`feat: cross-platform one-line installer for macOS, Linux, and Windows`) providing `curl -fsSL ... | sh` and PowerShell installation, in-place atomic updates, Gatekeeper quarantine stripping, and SSH-signed checksum verification (`SHA256SUMS.sig`).
-- **Coexistence Auto-Sync Engine:** Merged in PR #3 (`feat: coexistence auto-sync engine between Synara Stable and Beta`) via `@synara/shared/stableSync` and `bun run sync:stable`. Safely synchronizes configurations from `~/.synara` to `~/.synara-beta` with SQLite lifecycle lock detection and instant rollback snapshots.
+- **Coexistence Auto-Sync Engine:** Merged in PR #3 (`feat: coexistence auto-sync engine between Synara Stable and Beta`) via `@synara/shared/stableSync` and `bun run sync:stable`. Safely synchronizes configurations and registered project records from `~/.synara` to `~/.synara-beta` with SQLite lifecycle lock detection and instant rollback snapshots.
 - **Self-Hosted Privacy Telemetry:** Privacy-first, cookie-free crash and usage analytics powered by self-hosted OpenAnalytics (`getopen.so`) on the user's VPS using an explicit opt-in toggle and a 23-field scrubbed payload.
 
 ---
@@ -24,14 +24,14 @@
 
 ### Stable vs. Canary vs. Beta
 
-| Dimension | Stable (`Synara`) | Canary (`bun run canary:*`) | Beta (`Synara Beta`) |
-| :--- | :--- | :--- | :--- |
-| **Distribution** | Signed desktop binaries (`.dmg`, `.AppImage`, `.exe`) | Local source checkout; user compiles locally | Standalone signed/unsigned binary releases + one-line installers |
-| **Identity & Data** | `com.emanueledipietro.synara` (`~/.synara`) | Local checkout (`~/.synara-canary`) | `com.emanueledipietro.synara.beta` (`~/.synara-beta`) |
-| **Release Cadence** | Manual releases by upstream maintainer | Commit-based manual rebuilds | Automated GitHub releases on `vX.Y.Z-beta.N` tags |
-| **Update Mechanism** | Native `electron-updater` | Terminal command (`bun run canary:update`) | Dual: in-place one-line installer update or in-app updater |
-| **Installation Friction** | Zero (standard app installer) | High (requires Git, Bun, Node, native toolchains) | Low (one-line curl/PowerShell command or downloaded binary) |
-| **Coexistence** | Primary application | Runs locally, blank slate by default | Runs side-by-side with Stable; auto-syncs config safely |
+| Dimension                 | Stable (`Synara`)                                     | Canary (`bun run canary:*`)                       | Beta (`Synara Beta`)                                             |
+| :------------------------ | :---------------------------------------------------- | :------------------------------------------------ | :--------------------------------------------------------------- |
+| **Distribution**          | Signed desktop binaries (`.dmg`, `.AppImage`, `.exe`) | Local source checkout; user compiles locally      | Standalone signed/unsigned binary releases + one-line installers |
+| **Identity & Data**       | `com.emanueledipietro.synara` (`~/.synara`)           | Local checkout (`~/.synara-canary`)               | `com.emanueledipietro.synara.beta` (`~/.synara-beta`)            |
+| **Release Cadence**       | Manual releases by upstream maintainer                | Commit-based manual rebuilds                      | Automated GitHub releases on `vX.Y.Z-beta.N` tags                |
+| **Update Mechanism**      | Native `electron-updater`                             | Terminal command (`bun run canary:update`)        | Dual: in-place one-line installer update or in-app updater       |
+| **Installation Friction** | Zero (standard app installer)                         | High (requires Git, Bun, Node, native toolchains) | Low (one-line curl/PowerShell command or downloaded binary)      |
+| **Coexistence**           | Primary application                                   | Runs locally, blank slate by default              | Runs side-by-side with Stable; auto-syncs config safely          |
 
 ---
 
@@ -77,21 +77,28 @@ Stable and Beta can run simultaneously on the same machine without collisions:
 
 ### Pulling Upstream Changes (Step-by-Step)
 
-```bash
-# 1. Fetch upstream without tags (tags remain repo-scoped)
-git fetch upstream --no-tags
+Matching the sync discipline in `AGENTS.md`:
 
-# 2. Create a dedicated sync branch from latest beta main
+```console
+# 1. Fetch upstream work including tags and prune deleted branches
+git fetch upstream --prune --tags
+
+# 2. Inspect new upstream commits
+git log --oneline main..upstream/main
+
+# 3. Create a dedicated sync branch from latest beta main
 git checkout -b sync/upstream-$(date +%Y-%m-%d) origin/main
 
-# 3. Merge upstream main into the sync branch
+# 4. Merge upstream main into the sync branch (conflicts stop for human review)
 git merge upstream/main
 
-# 4. Resolve any conflicts (beta overlay files take precedence)
-# 5. Run local validation
+# 5. Confirm that ONLY overlay files differ from upstream
+git diff upstream/main main
+
+# 6. Run local validation
 bun run test
 
-# 6. Push sync branch and open a PR
+# 7. Push sync branch and open a reviewed Pull Request
 git push -u origin sync/upstream-$(date +%Y-%m-%d)
 gh pr create --title "sync: upstream main @ $(git rev-parse --short upstream/main)"
 ```
@@ -123,10 +130,10 @@ Implemented in [PR #2](https://github.com/kartikkabadi/synara-beta/pull/2) (`fea
 
 ### Cryptographic Verification (`SHA256SUMS.sig`)
 
-- Every release workflow generates `SHA256SUMS` for all compiled distribution artifacts.
-- The release workflow signs `SHA256SUMS` using `ssh-keygen -Y sign` with a private SSH key stored in GitHub Repository Secrets (`SYNARA_RELEASE_SIGNING_KEY`).
-- Installers download `SHA256SUMS` and `SHA256SUMS.sig`, verifying authenticity via `ssh-keygen -Y verify` against the public key pinned in `scripts/release-signing.pub`.
-- Downloaded binaries are checked against the verified checksums before execution.
+- **Introduced in PR #2:** Adds automated generation of `SHA256SUMS` across all compiled distribution artifacts in `.github/workflows/release-beta.yml`.
+- **Signing Pipeline:** Signs `SHA256SUMS` using `ssh-keygen -Y sign` with a private SSH key stored in GitHub Repository Secrets (`SYNARA_RELEASE_SIGNING_KEY`).
+- **Client-Side Verification:** Installers download `SHA256SUMS` and `SHA256SUMS.sig`, verifying authenticity via `ssh-keygen -Y verify` against the public key pinned in `scripts/release-signing.pub`.
+- Downloaded binaries are checked against the verified checksums before execution. Note: baseline `release-beta.yml` on `main` currently publishes unsigned assets until PR #2 is merged and the secret is set.
 
 ### In-Place Updates & Downgrade Protection
 
@@ -157,15 +164,19 @@ Implemented and merged in [PR #3](https://github.com/kartikkabadi/synara-beta/pu
 - **Keybindings (`userdata/keybindings.json`):** Copied as-is.
 - **Skills (`skills/` and `userdata/skills/`):** Symlinks and custom skills copied safely.
 - **MCP Servers (`mcp/`):** Agent MCP configurations transferred safely.
+- **Project Records (`projection_projects` in `state.sqlite`):**
+  - When Stable is not active, the engine safely reads registered project rows from Stable's database and upserts them into Beta's `state.sqlite` (supporting project definitions without copying transcripts).
+  - When Stable or Beta is running (detected via lifecycle locks), project sync is automatically skipped to protect against torn WAL reads.
 - **Strict Exclusions (Never Copied):**
+  - Thread histories, chat transcripts, and turn events (`state.sqlite` thread/session rows).
   - `userdata/secrets/*.bin`: Beta creates its own credentials.
-  - `state.sqlite*`: No chat sessions, thread histories, or database files are copied, eliminating schema clash risks.
   - Process metadata (`server-runtime.json`, `quit-resume.json`, `environment-id`).
 
 ### Concurrency Protection (SQLite Lifecycle Lock)
 
 Stable Synara runs with SQLite exclusive locking mode (`PRAGMA locking_mode = EXCLUSIVE;`). Reading raw SQLite files while Stable is active can result in torn WAL pages. The sync engine checks `~/.synara/state.sqlite.lifecycle-lock` and verifies if the Stable process PID is currently alive:
-- Skips SQLite file reads while Stable is running.
+
+- Skips SQLite database access while Stable is running.
 - Restricts synchronization to decoupled configuration files (`settings.json`, `keybindings.json`, `skills/`).
 
 ### Backups, Rollback & Watch Mode
@@ -187,10 +198,13 @@ Stable Synara runs with SQLite exclusive locking mode (`PRAGMA locking_mode = EX
 
 ### Tag & Release Tool (`scripts/release-beta.ts`)
 
-Run via `bun run release:beta -- X.Y.Z [N] [--dry-run]`.
-- Enforces clean working tree and synchronization with `origin/main`.
-- Resolves the next available `N` using `git ls-remote`.
-- Generates an annotated tag and pushes tag only (never commits version bumps to `main`).
+Run via `bun run release:beta -- <version> [betaNumber] [options]`.
+
+- Asserts that local and remote tags do not already exist.
+- Unless `--skip-bump` is passed, bumps package versions across workspace manifests (`package.json`, `apps/desktop/package.json`, `apps/server/package.json`, `apps/web/package.json`, `packages/contracts/package.json`) and refreshes `bun.lock`.
+- Creates a version-bump git commit: `chore(release): prepare <tag>`.
+- Creates an annotated tag locally: `vX.Y.Z-beta.N`.
+- Prompts the operator to push the tag (`git push origin <tag>`), leaving tag publication under deliberate human control.
 
 ### Release Workflow (`.github/workflows/release-beta.yml`)
 
@@ -202,7 +216,6 @@ Run via `bun run release:beta -- X.Y.Z [N] [--dry-run]`.
   - Windows x64 (`windows-2022`, NSIS `.exe`)
   - Linux ARM64 (under review in PR #29)
 - **Unsigned Publication Flag:** Includes `ALLOW_UNSIGNED_BETA_PUBLICATION=true` to allow successful publishing before official Apple and Azure signing certificates are introduced.
-- **Checksums & Signatures:** Compiles `SHA256SUMS`, signs them with `SYNARA_RELEASE_SIGNING_KEY`, and uploads `SHA256SUMS.sig` alongside release artifacts.
 - **Feed Isolation:** Feed files (`synara-mac.yml`, `synara.yml`, `synara-linux.yml`) target `kartikkabadi/synara-beta`, keeping Stable update channels completely decoupled.
 
 ---
@@ -211,7 +224,7 @@ Run via `bun run release:beta -- X.Y.Z [N] [--dry-run]`.
 
 ### Initial Phase: Unsigned Builds
 
-- macOS: Users clear Gatekeeper quarantine via the one-line installer or `xattr -cr /Applications/Synara\ Beta.app`.
+- macOS: Users clear Gatekeeper quarantine via the one-line installer or `xattr -cr "/Applications/Synara Beta.app"`.
 - Windows: Users bypass SmartScreen via "More info" -> "Run anyway" (handled smoothly via the PowerShell installer).
 - Linux: AppImage runs without code signing restrictions.
 
@@ -234,7 +247,7 @@ Run via `bun run release:beta -- X.Y.Z [N] [--dry-run]`.
 
 - **Engine:** Self-hosted OpenAnalytics instance (`https://getopen.so/`) hosted on the user's VPS.
 - **Privacy Core:** Open-source, cookie-free, GDPR-compliant, no third-party tracking scripts.
-- **User Control:** Disabled by default. An explicit toggle in Beta Settings allows opt-in: *"Share anonymous crash and performance telemetry"*.
+- **User Control:** Disabled by default. An explicit toggle in Beta Settings allows opt-in: _"Share anonymous crash and performance telemetry"_.
 - **Payload:** Strictly bounded 23-field schema. Zero user prompts, tokens, file contents, code diffs, or personal paths are ever transmitted.
 
 ### 23-Field Scrubbed Schema
@@ -250,16 +263,16 @@ Run via `bun run release:beta -- X.Y.Z [N] [--dry-run]`.
 
 ### Current Progress Matrix (2026-09-08)
 
-| Phase | Description | Key Deliverables | Status |
-| :--- | :--- | :--- | :--- |
-| **Phase 1** | Mirror & Connected Git History | PR #22 (connected upstream ancestry), PR #11 (agent guidance), PR #12 (upstream sync docs). | **Completed & Merged** |
-| **Phase 2** | Beta Identity & Packaging | `desktopIdentity.ts`, `desktop-platform-build-config.ts`, `main.ts`, embedded `synaraFlavor`. PR #29 (Linux arm64). | **Completed & Merged** |
-| **Phase 3** | Release Automation & Checksums | `release-beta.yml`, `scripts/release-beta.ts`, `SHA256SUMS` + SSH signature generation. | **Completed & Merged** |
-| **Phase 4** | Initial Beta Release Cut | Push initial tag (`v0.8.3-beta.1`) to `origin`, trigger CI release run, publish GitHub Release. | **Ready for Execution** |
-| **Phase 5A** | Coexistence Auto-Sync Engine | PR #3 (`@synara/shared/stableSync`, `bun run sync:stable`, `--undo`, `--watch`, `docs/sync.md`). | **Completed & Merged** |
-| **Phase 5B** | One-Line Cross-Platform Installer | PR #2 (`install.sh`, `install-macos.sh`, `install-linux.sh`, `install-windows.ps1`, `docs/install.md`). | **Open (PR #2)** |
-| **Phase 5C** | Telemetry & Crash Reporting | Deploy OpenAnalytics on VPS; add settings toggle and 23-field crash reporter in `apps/desktop`. | **Pending Design / Deployment** |
-| **Phase 6** | Clean Upstream PRs | Non-blocking backports to upstream `Emanuele-web04/synara`. | **Deferred / Non-blocking** |
+| Phase        | Description                       | Key Deliverables                                                                                                    | Status                          |
+| :----------- | :-------------------------------- | :------------------------------------------------------------------------------------------------------------------ | :------------------------------ |
+| **Phase 1**  | Mirror & Connected Git History    | PR #22 (connected upstream ancestry), PR #11 (agent guidance), PR #12 (upstream sync docs).                         | **Completed & Merged**          |
+| **Phase 2**  | Beta Identity & Packaging         | `desktopIdentity.ts`, `desktop-platform-build-config.ts`, `main.ts`, embedded `synaraFlavor`. PR #29 (Linux arm64). | **Completed & Merged**          |
+| **Phase 3**  | Release Automation                | `release-beta.yml`, `scripts/release-beta.ts` preflight & tag bump. PR #2 (`SHA256SUMS` + SSH signing).             | **Completed & Merged**          |
+| **Phase 4**  | Initial Beta Release Cut          | Push initial tag (`v0.8.3-beta.1`) to `origin`, trigger CI release run, publish GitHub Release.                     | **Ready for Execution**         |
+| **Phase 5A** | Coexistence Auto-Sync Engine      | PR #3 (`@synara/shared/stableSync`, `bun run sync:stable`, `--undo`, `--watch`, `docs/sync.md`).                    | **Completed & Merged**          |
+| **Phase 5B** | One-Line Cross-Platform Installer | PR #2 (`install.sh`, `install-macos.sh`, `install-linux.sh`, `install-windows.ps1`, `docs/install.md`).             | **Open (PR #2)**                |
+| **Phase 5C** | Telemetry & Crash Reporting       | Deploy OpenAnalytics on VPS; add settings toggle and 23-field crash reporter in `apps/desktop`.                     | **Pending Design / Deployment** |
+| **Phase 6**  | Clean Upstream PRs                | Non-blocking backports to upstream `Emanuele-web04/synara`.                                                         | **Deferred / Non-blocking**     |
 
 ---
 
