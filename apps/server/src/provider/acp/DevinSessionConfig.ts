@@ -11,6 +11,7 @@ import {
   SYNARA_AGENT_GATEWAY_URL_ENV,
   SYNARA_MCP_SERVER_NAME,
 } from "../../agentGateway/mcpInjection.ts";
+import { mirrorConfigDirectoryOverlay } from "../providerConfigOverlay.ts";
 
 interface DevinMcpConfig {
   readonly mcpServers?: Record<string, unknown>;
@@ -90,6 +91,14 @@ export async function createDevinSessionConfig(
       platform === "win32"
         ? env.APPDATA?.trim()
         : env.XDG_CONFIG_HOME?.trim() || (home ? path.join(home, ".config") : undefined);
+    if (sourceConfigHome) {
+      await mirrorConfigDirectoryOverlay({
+        sourceConfigDir: sourceConfigHome,
+        targetRootDir: root,
+        excludedNamespaces: ["devin", "cognition"],
+        platform,
+      });
+    }
     for (const namespace of ["devin", "cognition"] as const) {
       if (!sourceConfigHome) break;
       const sourceSkills = path.join(sourceConfigHome, namespace, "skills");
@@ -105,6 +114,14 @@ export async function createDevinSessionConfig(
     }
     const configDir = path.join(root, "devin");
     await mkdir(configDir, { recursive: true, mode: 0o700 });
+    if (sourceConfigHome) {
+      await mirrorConfigDirectoryOverlay({
+        sourceConfigDir: path.join(sourceConfigHome, "devin"),
+        targetRootDir: configDir,
+        excludedNamespaces: ["mcp_config.json", "skills"],
+        platform,
+      });
+    }
     await chmod(configDir, 0o700);
     const configPath = path.join(configDir, "mcp_config.json");
     const config: DevinMcpConfig = {
