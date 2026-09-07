@@ -22,11 +22,11 @@ describe("merge-linux-update-manifests", () => {
     const x64Path = join(root, "latest-linux-x64.yml");
     writeFileSync(
       arm64Path,
-      "version: 1.2.3\nfiles:\n  - url: Synara-1.2.3-arm64.AppImage\n    sha512: arm\n    size: 10\npath: Synara-1.2.3-arm64.AppImage\nsha512: arm\nreleaseDate: '2026-09-07T00:00:00.000Z'\n",
+      "version: 1.2.3\nfiles:\n  - url: Synara-1.2.3-arm64.AppImage\n    sha512: arm\n    size: 10\n    blockMapSize: 11\npath: Synara-1.2.3-arm64.AppImage\nsha512: arm\nreleaseDate: '2026-09-07T00:00:00.000Z'\n",
     );
     writeFileSync(
       x64Path,
-      "version: 1.2.3\nfiles:\n  - url: Synara-1.2.3-x64.AppImage\n    sha512: x64\n    size: 20\npath: Synara-1.2.3-x64.AppImage\nsha512: x64\nreleaseDate: '2026-09-07T00:00:01.000Z'\n",
+      "version: 1.2.3\nfiles:\n  - url: Synara-1.2.3-x64.AppImage\n    sha512: x64\n    size: 20\n    blockMapSize: 21\npath: Synara-1.2.3-x64.AppImage\nsha512: x64\nreleaseDate: '2026-09-07T00:00:01.000Z'\n",
     );
 
     mergeLinuxUpdateManifests(arm64Path, x64Path);
@@ -34,6 +34,8 @@ describe("merge-linux-update-manifests", () => {
     const merged = readFileSync(arm64Path, "utf8");
     expect(merged).toContain("Synara-1.2.3-arm64.AppImage");
     expect(merged).toContain("Synara-1.2.3-x64.AppImage");
+    expect(merged).toContain("    blockMapSize: 11");
+    expect(merged).toContain("    blockMapSize: 21");
     expect(merged).toContain("releaseDate: '2026-09-07T00:00:01.000Z'");
   });
 });
