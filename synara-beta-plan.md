@@ -147,6 +147,9 @@ Implemented in [PR #2](https://github.com/kartikkabadi/synara-beta/pull/2) (`fea
 
 ### Quick Command Reference
 
+> [!NOTE]
+> The one-line installer scripts are introduced in open [PR #2](https://github.com/kartikkabadi/synara-beta/pull/2). The `main` branch URLs below become active once PR #2 is merged into `main`. For pre-merge verification on branch `feat/one-line-installer`, substitute `main` with `feat/one-line-installer`.
+
 - **macOS (Apple Silicon & Intel):**
   ```bash
   curl -fsSL https://raw.githubusercontent.com/kartikkabadi/synara-beta/main/scripts/install.sh | bash
@@ -382,7 +385,7 @@ Run via `bun run release:beta -- <version> [betaNumber] [options]`.
 
 ## Related Documentation
 
-- **[Installation Guide](docs/install.md):** Complete one-line terminal installer and manual download instructions (introduced in PR #2).
+- **Installation Guide (`docs/install.md`):** Complete one-line terminal installer and manual download instructions (introduced in open [PR #2](https://github.com/kartikkabadi/synara-beta/pull/2); viewable on branch [`feat/one-line-installer`](https://github.com/kartikkabadi/synara-beta/blob/feat/one-line-installer/docs/install.md)).
 - **[Coexistence Sync Guide](docs/sync.md):** Safe synchronization commands, safeguards, and watch daemon.
 - **[Release Guide](docs/release.md):** Release build checklists, manifest specifications, and update feed structure.
 - **[Agent Guidance](AGENTS.md):** PR-first workflows, stack rules, and model selection doctrine.
