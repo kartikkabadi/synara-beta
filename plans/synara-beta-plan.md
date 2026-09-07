@@ -106,6 +106,20 @@ git push -u origin sync/upstream-$(date +%Y-%m-%d)
 gh pr create --title "sync: upstream main @ $(git rev-parse --short upstream/main)"
 ```
 
+### Review-Fix Loop & Machine Review Protocol
+
+All pull requests are reviewed by automated reviewers (`devin-ai-integration[bot]`, `cubic-dev-ai[bot]`, and `coderabbitai[bot]` where enabled):
+
+- **Convergence Standard:** A PR is only ready to merge when:
+  1. All CI checks pass (`Static Checks (fast)`, `oxfmt --check`, test suites).
+  2. All machine review comments have been addressed at their root cause.
+  3. Explanations and evidence have been posted to review threads, and threads are formally resolved.
+- **Review Triggering:**
+  - `cubic`: Triggers automatically on push; re-trigger with comment `@cubic review` if needed.
+  - `Devin`: Initialized via `https://app.devin.ai/review` using the PR URL.
+  - `CodeRabbit`: Reviews automatically on qualifying repositories.
+- **Root-Cause Resolution:** Fixes must address architectural root causes rather than applying surface patches or suppressing linter warnings without explanation.
+
 ---
 
 ## One-Line Cross-Platform Installer Architecture (PR #2)
@@ -311,23 +325,41 @@ Run via `bun run release:beta -- <version> [betaNumber] [options]`.
 - **Error Signature:** Error code mapped strictly from a predefined known-error enum table.
 - **Sanitized Diagnostics:** Max 8 lines of summarized backend log (2,000 char cap); all user paths replaced with `<HOME>` placeholders; auth headers, tokens, and prompt excerpts stripped.
 
+### Strict Data Privacy Boundaries (Never Sent)
+
+- **Prompt & Response Payloads:** Transcripts, user prompts, assistant completions, tool inputs/outputs, and code diffs are never captured or sent.
+- **Secrets & Credentials:** API keys, tokens, session IDs, cookies, keychain secrets, and passwords are unconditionally stripped.
+- **Filesystem Content:** File paths, usernames, hostnames, repo names, and local workspace trees are replaced with anonymous placeholders (`<HOME>`, `<WORKSPACE>`).
+
 ---
 
 ## Active Pull Request Inventory
 
+### Open Pull Requests
+
 | PR #    | Branch                                    | Title                                                                        | Status               |
 | :------ | :---------------------------------------- | :--------------------------------------------------------------------------- | :------------------- |
-| **#1**  | `docs/modernize-readme`                   | Modernize README with rich layout, subheadings, and UI previews              | **Merged**           |
 | **#2**  | `feat/one-line-installer`                 | Cross-platform one-line installer for macOS, Linux, and Windows              | **Open (In Review)** |
-| **#3**  | `feat/stable-sync-engine`                 | Coexistence auto-sync engine between Synara Stable and Beta                  | **Merged**           |
-| **#11** | `docs/overhaul-agents-md`                 | Rewrite agent guidance for beta and add agent skills                         | **Merged**           |
-| **#12** | `docs/upstream-history-reset`             | Explain the upstream history reset and how to read upstream                  | **Merged**           |
-| **#22** | `sync/connect-upstream-history`           | Connect upstream history to beta main                                        | **Merged**           |
+| **#23** | `feat/anti-slop-ratchet`                  | Enforce anti-slop rules on every PR via ratchet                              | **Open**             |
 | **#25** | `sync/upstream-2026-09-06`                | Sync upstream main @ 8599826d7 (`v0.8.3`)                                    | **Open**             |
+| **#26** | `docs/agents-review-loop`                 | External review bots and the review-fix loop                                 | **Open**             |
+| **#27** | `agent/automations-count-badge`           | Count automations, not unresolved runs, in sidebar badge                     | **Open**             |
+| **#28** | `agent/review-comment-skill`              | Add review-comment skill                                                     | **Open**             |
 | **#29** | `devin/1788779215-linux-arm64`            | Add Linux arm64 beta desktop releases                                        | **Open**             |
 | **#30** | `feat/auto-reclaim-worktrees-after-merge` | Auto-reclaim managed worktrees after PR merge                                | **Open**             |
 | **#31** | `agent/provider-config-overlay`           | Mirror user config directory overlay for isolated provider sessions          | **Open**             |
 | **#32** | `docs/overhaul-beta-plan`                 | Overhaul Synara Beta plan with connected history, installer, and sync engine | **Open (Active PR)** |
+
+### Foundational Merged Pull Requests
+
+| PR #    | Branch                          | Title                                                           | Status     |
+| :------ | :------------------------------ | :-------------------------------------------------------------- | :--------- |
+| **#1**  | `docs/modernize-readme`         | Modernize README with rich layout, subheadings, and UI previews | **Merged** |
+| **#3**  | `feat/stable-sync-engine`       | Coexistence auto-sync engine between Synara Stable and Beta     | **Merged** |
+| **#11** | `docs/overhaul-agents-md`       | Rewrite agent guidance for beta and add agent skills            | **Merged** |
+| **#12** | `docs/upstream-history-reset`   | Explain the upstream history reset and how to read upstream     | **Merged** |
+| **#13** | `docs/readme-light-images`      | Always show light README screenshots                            | **Merged** |
+| **#22** | `sync/connect-upstream-history` | Connect upstream history to beta main                           | **Merged** |
 
 ---
 
@@ -350,10 +382,10 @@ Run via `bun run release:beta -- <version> [betaNumber] [options]`.
 
 ## Related Documentation
 
-- **[Installation Guide](file:///Users/user/synara-beta/docs/install.md):** Complete one-line terminal installer and manual download instructions.
-- **[Coexistence Sync Guide](file:///Users/user/synara-beta/docs/sync.md):** Safe synchronization commands, safeguards, and watch daemon.
-- **[Release Guide](file:///Users/user/synara-beta/docs/release.md):** Release build checklists, manifest specifications, and update feed structure.
-- **[Agent Guidance](file:///Users/user/synara-beta/AGENTS.md):** PR-first workflows, stack rules, and model selection doctrine.
+- **[Installation Guide](docs/install.md):** Complete one-line terminal installer and manual download instructions (introduced in PR #2).
+- **[Coexistence Sync Guide](docs/sync.md):** Safe synchronization commands, safeguards, and watch daemon.
+- **[Release Guide](docs/release.md):** Release build checklists, manifest specifications, and update feed structure.
+- **[Agent Guidance](AGENTS.md):** PR-first workflows, stack rules, and model selection doctrine.
 
 ---
 
