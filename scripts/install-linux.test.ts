@@ -181,12 +181,21 @@ describe("install-linux.sh", () => {
       NodeAssert.match(desktop, /StartupWMClass=synara-beta/);
       NodeAssert.ok(desktop.includes(`Exec="${home}/.local/bin/synara-beta" %U`));
 
-      const stateStamp = NodePath.join(home, ".local", "state", "synara-beta-installer", "installed-version");
+      const stateStamp = NodePath.join(
+        home,
+        ".local",
+        "state",
+        "synara-beta-installer",
+        "installed-version",
+      );
       NodeAssert.equal(NodeFS.readFileSync(stateStamp, "utf8").trim(), "9.9.9-beta.9");
 
       // The installer must never touch the app data directory.
       NodeAssert.equal(NodeFS.existsSync(NodePath.join(dataDir, "state.sqlite")), true);
-      NodeAssert.equal(NodeFS.readFileSync(NodePath.join(dataDir, "state.sqlite"), "utf8"), "user-data");
+      NodeAssert.equal(
+        NodeFS.readFileSync(NodePath.join(dataDir, "state.sqlite"), "utf8"),
+        "user-data",
+      );
     } finally {
       NodeFS.rmSync(sandbox, { recursive: true, force: true });
     }
