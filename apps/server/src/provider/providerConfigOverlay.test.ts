@@ -1,4 +1,4 @@
-import { access, lstat, mkdir, readFile, readlink, rm, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -98,5 +98,51 @@ describe("providerConfigOverlay", () => {
     expect(stat.isSymbolicLink()).toBe(false);
     expect(stat.isFile()).toBe(true);
     expect(await readFile(targetFile, "utf8")).toBe('{"theme":"dark"}');
+  });
+
+  it("does not overwrite an existing target file when symlink fails with EEXIST", async () => {
+    await writeFile(path.join(sourceDir, "config.json"), '{"theme":"dark"}');
+    await writeFile(path.join(targetDir, "config.json"), '{"theme":"light"}');
+
+    const eexistSymlink = async () => {
+      const error = new Error("file already exists");
+      Object.assign(error, { code: "EEXIST" });
+      throw error;
+    };
+
+    await mirrorConfigDirectoryOverlay({
+      sourceConfigDir: sourceDir,
+      targetRootDir: targetDir,
+      linker: {
+        symlink: eexistSymlink as unknown as typeof import("node:fs/promises").symlink,
+      },
+    });
+
+    expect(await readFile(path.join(targetDir, "config.json"), "utf8")).toBe('{"theme":"light"}');
+  });
+
+  it("leaves an existing target symlink untouched when symlink creation fails", async () => {
+    await writeFile(path.join(sourceDir, "config.json"), '{"theme":"dark"}');
+    const outsideFile = path.join(tmpRoot, "outside.json");
+    await writeFile(outsideFile, "keep");
+
+    const failingSymlink = async () => {
+      const error = new Error("A required privilege is not held by the client.");
+      Object.assign(error, { code: "EPERM" });
+      throw error;
+    };
+
+    await symlink(outsideFile, path.join(targetDir, "config.json"));
+    await mirrorConfigDirectoryOverlay({
+      sourceConfigDir: sourceDir,
+      targetRootDir: targetDir,
+      linker: {
+        symlink: failingSymlink as unknown as typeof import("node:fs/promises").symlink,
+      },
+    });
+
+    const stat = await lstat(path.join(targetDir, "config.json"));
+    expect(stat.isSymbolicLink()).toBe(true);
+    expect(await readFile(outsideFile, "utf8")).toBe("keep");
   });
 });

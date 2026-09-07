@@ -33,6 +33,8 @@ export interface MirrorConfigDirectoryOverlayOptions {
  *
  * Regular files that fail to symlink (such as on Windows without Developer Mode or elevated privileges)
  * fall back to being copied into the target overlay so user configurations remain accessible.
+ * The copy fallback runs only when the target path is absent: an existing overlay entry (including
+ * a symlink pointing outside the overlay) is never overwritten through a failed symlink call.
  *
  * All operations are best-effort: unreadable entries, broken source links, or permission issues
  * will not abort the mirroring pass or fail provider session startup.
@@ -70,10 +72,13 @@ export async function mirrorConfigDirectoryOverlay(
       try {
         await doSymlink(sourcePath, targetPath, symlinkType);
       } catch (symlinkError) {
-        if (!isDirectory) {
-          await doCopyFile(sourcePath, targetPath);
-        } else {
+        if (isDirectory) {
           throw symlinkError;
+        }
+        try {
+          await lstat(targetPath);
+        } catch {
+          await doCopyFile(sourcePath, targetPath);
         }
       }
     } catch {
