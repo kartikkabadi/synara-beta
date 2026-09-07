@@ -10,7 +10,7 @@ import { pruneProjectedArchivedManagedWorktrees } from "../../managedWorktrees";
 import { ProfileStatsArchive } from "../../profileStatsArchive";
 import { ProviderService } from "../../provider/Services/ProviderService";
 import { ServerSettingsService } from "../../serverSettings";
-import { TerminalManager } from "../../terminal/Services/Manager";
+import { TerminalManager, type TerminalManagerShape } from "../../terminal/Services/Manager";
 import { THREAD_RETENTION_COMMAND_ID_PREFIX } from "../../threadRetention";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery";
@@ -29,7 +29,7 @@ const PURGE_STARTUP_SWEEP_DELAY_MS = 60 * 1000;
 const THREAD_LIFECYCLE_REACTOR_CAPACITY = 64;
 const PURGE_FENCE_RETRY_ATTEMPTS = 20;
 const PURGE_FENCE_RETRY_DELAY_MS = 100;
-const ARCHIVE_CLEANUP_RETRY_ATTEMPTS = 5;
+const ARCHIVE_CLEANUP_RETRY_ATTEMPTS = 15;
 const ARCHIVE_CLEANUP_RETRY_DELAY_MS = 100;
 
 const MISSING_PROVIDER_BINDING_DETAIL = "no persisted provider binding exists";
@@ -83,6 +83,30 @@ export const detachThreadDevice = (threadId: ThreadId) =>
       ),
     ),
   );
+
+export const waitForTerminalExit = ({
+  terminalManager,
+  threadId,
+  attempts = ARCHIVE_CLEANUP_RETRY_ATTEMPTS,
+  delayMs = ARCHIVE_CLEANUP_RETRY_DELAY_MS,
+}: {
+  readonly terminalManager: Pick<TerminalManagerShape, "hasRunningProcess">;
+  readonly threadId: string;
+  readonly attempts?: number;
+  readonly delayMs?: number;
+}): Effect.Effect<boolean> =>
+  Effect.gen(function* () {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const running = yield* terminalManager
+        .hasRunningProcess(threadId)
+        .pipe(Effect.catch(() => Effect.succeed(true)));
+      if (!running) return true;
+      if (attempt < attempts - 1) {
+        yield* Effect.sleep(delayMs);
+      }
+    }
+    return false;
+  });
 
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
@@ -254,42 +278,61 @@ const make = Effect.gen(function* () {
         event.payload.archivedAt,
       );
       if (terminalCleanupSucceeded) {
-        yield* pruneManagedWorktreesAfterLifecycle({
-          eventType: event.type,
-          threadId,
-        });
-        return;
+        const terminalRunning = yield* terminalManager
+          .hasRunningProcess(threadId)
+          .pipe(Effect.catch(() => Effect.succeed(true)));
+        if (!terminalRunning) {
+          yield* pruneManagedWorktreesAfterLifecycle({
+            eventType: event.type,
+            threadId,
+          });
+          return;
+        }
       }
       if (attempt < ARCHIVE_CLEANUP_RETRY_ATTEMPTS) {
         yield* Effect.sleep(ARCHIVE_CLEANUP_RETRY_DELAY_MS);
       }
     }
-    yield* Effect.logWarning("thread archive cleanup exhausted retries", {
-      threadId,
-      attempts: ARCHIVE_CLEANUP_RETRY_ATTEMPTS,
-    });
-    yield* pruneManagedWorktreesAfterLifecycle({
-      eventType: event.type,
-      threadId,
-    });
+    yield* Effect.logWarning(
+      "thread archive cleanup exhausted retries; deferring worktree prune until terminal exits",
+      {
+        threadId,
+        attempts: ARCHIVE_CLEANUP_RETRY_ATTEMPTS,
+      },
+    );
   });
 
   const processThreadDeleted = Effect.fn(function* (event: ThreadDeletedEvent) {
     const { threadId } = event.payload;
     yield* detachThreadDevice(threadId);
     const cleanupSucceeded = yield* cleanupThreadBeforePurge(threadId);
+    if (!cleanupSucceeded) {
+      yield* Effect.logWarning(
+        "thread deletion cleanup deferred stats archive purge and worktree prune",
+        {
+          threadId,
+        },
+      );
+      return;
+    }
+    const terminalRunning = yield* terminalManager
+      .hasRunningProcess(threadId)
+      .pipe(Effect.catch(() => Effect.succeed(true)));
+    if (terminalRunning) {
+      yield* Effect.logWarning(
+        "thread deletion cleanup deferred stats archive purge and worktree prune; terminal still active",
+        {
+          threadId,
+        },
+      );
+      return;
+    }
     // Reclaim while the soft-deleted projection row still names the worktree.
     // Dirty managed worktrees are snapped and left with a warning (no force).
     yield* pruneManagedWorktreesAfterLifecycle({
       eventType: event.type,
       threadId,
     });
-    if (!cleanupSucceeded) {
-      yield* Effect.logWarning("thread deletion cleanup deferred stats archive purge", {
-        threadId,
-      });
-      return;
-    }
     yield* purgeThreadData(event);
   });
 
