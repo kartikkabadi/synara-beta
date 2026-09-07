@@ -24,6 +24,8 @@ export function tryBash(
     });
     return { status: 0, stdout, stderr: "" };
   } catch (error) {
+    // SAFETY: execFileSync throws a bare Error carrying status/stdout/stderr
+    // fields; the optional reads immediately below tolerate their absence.
     const failure = error as {
       status?: number;
       stdout?: unknown;
