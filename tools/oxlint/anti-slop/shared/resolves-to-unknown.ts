@@ -131,7 +131,10 @@ export function createResolvesToUnknown(
     const name = type.typeName.name;
     const substitution = substitutions.get(name);
     if (substitution !== undefined) {
-      return resolvesToUnknown(substitution, shadowedAliases, visited, substitutions);
+      if (visited.has(name)) return false;
+      const nextVisited = new Set(visited);
+      nextVisited.add(name);
+      return resolvesToUnknown(substitution, shadowedAliases, nextVisited, substitutions);
     }
     if (shadowedAliases.has(name) || ambiguous.has(name) || visited.has(name)) return false;
     const alias = aliases.get(name);

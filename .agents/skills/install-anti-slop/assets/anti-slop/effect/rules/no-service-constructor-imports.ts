@@ -18,8 +18,11 @@ function importedModuleStem(source: string): string {
   const segments = source.split(/[\\/]/u).filter(Boolean);
   let base = segments[segments.length - 1] ?? "";
   base = base.replace(/\.[cm]?[jt]sx?$/u, "");
-  if (base.toLowerCase() === "index" && segments.length > 1) {
-    base = segments[segments.length - 2] ?? base;
+  if (base.toLowerCase() === "index") {
+    // ./index.ts re-exports the owning module; fall back to the parent segment
+    // only when it is a real name (never "." or "..").
+    const parent = segments[segments.length - 2] ?? "";
+    if (parent.length > 0 && parent !== "." && parent !== "..") base = parent;
   }
   return base;
 }
