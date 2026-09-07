@@ -2,7 +2,8 @@
 
 **Date:** 2026-09-08  
 **Status:** Active Implementation — Core Phases 1–3 merged, Phase 5 Auto-Sync engine merged, Cross-Platform Installer open in PR #2, Release cut & OpenAnalytics pending.  
-**Beta Repository:** https://github.com/kartikkabadi/synara-beta (tracks and mirrors upstream [`Emanuele-web04/synara`](https://github.com/Emanuele-web04/synara) with connected commit history).
+**Beta Repository:** https://github.com/kartikkabadi/synara-beta (tracks and mirrors upstream [`Emanuele-web04/synara`](https://github.com/Emanuele-web04/synara) with connected commit history).  
+**Canonical Document:** Root `synara-beta-plan.md` is the canonical plan; `plans/synara-beta-plan.md` is maintained as an exact synchronized copy.
 
 ---
 
@@ -16,7 +17,7 @@
 - **Progressive Code Signing Lifecycle:** Beta ships unsigned initially (`ALLOW_UNSIGNED_BETA_PUBLICATION=true`). Signing credentials (Apple Developer Org team invite and Azure Trusted Signing RBAC) can be populated in GitHub Secrets later with zero code refactoring and zero user data loss.
 - **Cross-Platform One-Line Installers:** Added in PR #2 (`feat: cross-platform one-line installer for macOS, Linux, and Windows`) providing `curl -fsSL ... | sh` and PowerShell installation, in-place atomic updates, Gatekeeper quarantine stripping, and SSH-signed checksum verification (`SHA256SUMS.sig`).
 - **Coexistence Auto-Sync Engine:** Merged in PR #3 (`feat: coexistence auto-sync engine between Synara Stable and Beta`) via `@synara/shared/stableSync` and `bun run sync:stable`. Safely synchronizes configurations and registered project records from `~/.synara` to `~/.synara-beta` with SQLite lifecycle lock detection and instant rollback snapshots.
-- **Self-Hosted Privacy Telemetry:** Privacy-first, cookie-free crash and usage analytics powered by self-hosted OpenAnalytics (`getopen.so`) on the user's VPS using an explicit opt-in toggle and a 23-field scrubbed payload.
+- **Self-Hosted Privacy Telemetry (Planned):** Privacy-first, cookie-free crash and usage analytics will be powered by self-hosted OpenAnalytics (`getopen.so`) on the user's VPS using an explicit opt-in toggle and a 23-field scrubbed payload (VPS infrastructure and client dispatch hooks are currently planned under Phase 5C).
 
 ---
 
@@ -74,6 +75,8 @@ Stable and Beta can run simultaneously on the same machine without collisions:
    - `packages/shared/src/sync/stableSync.ts`
    - `scripts/sync-with-stable.ts`
    - `AGENTS.md` and `CLAUDE.md`
+   - `synara-beta-plan.md` and `plans/synara-beta-plan.md`
+   - `.agents/`
 
 ### Pulling Upstream Changes (Step-by-Step)
 
