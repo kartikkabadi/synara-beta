@@ -1,4 +1,4 @@
-import { access, lstat, mkdir, readlink, rm, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, readFile, readlink, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -12,7 +12,10 @@ describe("providerConfigOverlay", () => {
   let targetDir: string;
 
   beforeEach(async () => {
-    tmpRoot = path.join(os.tmpdir(), `test-overlay-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    tmpRoot = path.join(
+      os.tmpdir(),
+      `test-overlay-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
     sourceDir = path.join(tmpRoot, "source-config");
     targetDir = path.join(tmpRoot, "target-overlay");
     await mkdir(sourceDir, { recursive: true });
@@ -71,5 +74,29 @@ describe("providerConfigOverlay", () => {
         targetRootDir: targetDir,
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it("falls back to copying regular files when file symlink fails", async () => {
+    await writeFile(path.join(sourceDir, "config.json"), '{"theme":"dark"}');
+
+    const failingSymlink = async () => {
+      const error = new Error("A required privilege is not held by the client.");
+      Object.assign(error, { code: "EPERM" });
+      throw error;
+    };
+
+    await mirrorConfigDirectoryOverlay({
+      sourceConfigDir: sourceDir,
+      targetRootDir: targetDir,
+      linker: {
+        symlink: failingSymlink as unknown as typeof import("node:fs/promises").symlink,
+      },
+    });
+
+    const targetFile = path.join(targetDir, "config.json");
+    const stat = await lstat(targetFile);
+    expect(stat.isSymbolicLink()).toBe(false);
+    expect(stat.isFile()).toBe(true);
+    expect(await readFile(targetFile, "utf8")).toBe('{"theme":"dark"}');
   });
 });
