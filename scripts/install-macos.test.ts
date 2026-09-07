@@ -63,7 +63,7 @@ describe("install-macos.sh", () => {
   it("parses --help and rejects unknown args", () => {
     const help = tryBash(scriptPath, ["--help"]);
     NodeAssert.equal(help.status, 0);
-    NodeAssert.match(help.stdout, /usage: install-macos\.sh \[--tag vX\.Y\.Z\]/);
+    NodeAssert.match(help.stdout, /usage: install-macos\.sh \[--tag vX\.Y\.Z-beta\.N\] \[--force\]/);
 
     const unknown = tryBash(scriptPath, ["--bogus"]);
     NodeAssert.equal(unknown.status, 1);
