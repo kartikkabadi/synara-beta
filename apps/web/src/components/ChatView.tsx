@@ -1511,7 +1511,9 @@ export default function ChatView({
     Record<ThreadId, string | null>
   >({});
   const localDraftErrorsByThreadIdRef = useRef(localDraftErrorsByThreadId);
-  localDraftErrorsByThreadIdRef.current = localDraftErrorsByThreadId;
+  useEffect(() => {
+    localDraftErrorsByThreadIdRef.current = localDraftErrorsByThreadId;
+  }, [localDraftErrorsByThreadId]);
   const [localDispatch, setLocalDispatch] = useState<LocalDispatchSnapshot | null>(null);
   const failedWorktreeSetupDispatchStartedAtRef = useRef<string | null>(null);
   // Live handle to the in-flight send's worktree preparation, resolved by the
