@@ -149,11 +149,7 @@ export function sanitizeDiagnosticsEvent(
       ...optionalField("errorCode", parsedInput.errorCode),
       ...optionalField("errorSurface", parsedInput.errorSurface),
     };
-    const event = Schema.decodeUnknownSync(SanitizedEventSchema)(candidate, {
-      // A field only makes sense on the kinds that require it; anything else
-      // (e.g. an errorCode on app_start) is out of contract, not extra data.
-      onExcessProperty: "error",
-    });
+    const event = Schema.decodeUnknownSync(SanitizedEventSchema)(candidate);
     return { event };
   } catch {
     return null;
