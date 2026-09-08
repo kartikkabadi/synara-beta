@@ -241,6 +241,8 @@ export interface Thread extends ThreadWorkspaceState {
   messages: ChatMessage[];
   proposedPlans: ProposedPlan[];
   error: string | null;
+  /** Monotonic client-side generation for this error. Bumps whenever `error` changes. */
+  errorVersion?: number;
   createdAt: string;
   archivedAt?: string | null;
   settledAt?: string | null;
@@ -286,6 +288,8 @@ export interface ThreadShell extends ThreadWorkspaceState {
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
   error: string | null;
+  /** Monotonic client-side generation for this error. Bumps whenever `error` changes. */
+  errorVersion?: number;
   createdAt: string;
   archivedAt?: string | null;
   settledAt?: string | null;

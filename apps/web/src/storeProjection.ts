@@ -84,6 +84,7 @@ function toThreadShell(thread: Thread): ThreadShell {
     runtimeMode: thread.runtimeMode,
     interactionMode: thread.interactionMode,
     error: thread.error,
+    errorVersion: thread.errorVersion ?? 0,
     createdAt: thread.createdAt,
     archivedAt: thread.archivedAt ?? null,
     settledAt: thread.settledAt ?? null,

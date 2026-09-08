@@ -603,6 +603,8 @@ import {
   DismissedProviderHealthBannersSchema,
   collectUserMessageBlobPreviewUrls,
   deriveComposerSendState,
+  evictOverflowFailedThreadSend,
+  failedSendSnapshotOwnsCurrentError,
   failWorktreeSetupSnapshot,
   filterSidechatTranscriptMessages,
   hasLiveTurnTakenOver,
@@ -1037,19 +1039,9 @@ type FailedThreadSendSnapshot = Pick<
   restoredToComposer: boolean;
   /** The error string this failure raised, so eviction can tell whether the thread's current error still belongs to it. */
   errorMessage: string;
-  /** The thread's error epoch right after this failure raised its card. */
+  /** The thread's error generation right after this failure raised its card. The generation lives on the thread, so it cannot be evicted while the snapshot lives. */
   errorVersion: number;
 };
-
-// Abandoned error cards would otherwise pin attachment File blobs in the map
-// forever; evict the oldest entry past this bound.
-const MAX_FAILED_THREAD_SEND_SNAPSHOTS = 8;
-// Error epochs are only compared while a failed-send snapshot lives, but
-// setThreadError also runs for errors that never capture one — cap the map so
-// long-lived sessions do not accumulate stale thread identifiers. An evicted
-// epoch makes the eviction check fail closed (the card stays), never wrongly
-// clears.
-const MAX_THREAD_ERROR_VERSIONS = 64;
 
 const EMPTY_COMPOSER_PLUGIN_SUGGESTIONS: ComposerPluginSuggestion[] = [];
 
@@ -1524,10 +1516,10 @@ export default function ChatView({
   useLayoutEffect(() => {
     localDraftErrorsByThreadIdRef.current = localDraftErrorsByThreadId;
   }, [localDraftErrorsByThreadId]);
-  // Monotonic per-thread error epoch, bumped by setThreadError below, so a
-  // failed-send snapshot can tell whether the error it raised is still the one
-  // on the thread.
-  const threadErrorVersionRef = useRef(new Map<ThreadId, number>());
+  // Error generations for local draft threads — the draft-thread counterpart of
+  // the store's `errorVersion`. Read synchronously by in-flight sends, so it is
+  // a ref, not render state.
+  const localDraftErrorVersionsRef = useRef(new Map<ThreadId, number>());
   const [localDispatch, setLocalDispatch] = useState<LocalDispatchSnapshot | null>(null);
   const failedWorktreeSetupDispatchStartedAtRef = useRef<string | null>(null);
   // Live handle to the in-flight send's worktree preparation, resolved by the
@@ -4394,31 +4386,45 @@ export default function ChatView({
       window.cancelAnimationFrame(frame);
     };
   }, [secondaryChromeThreadId, shouldDeferSecondaryChrome]);
-  const setThreadError = useCallback(
-    (targetThreadId: ThreadId | null, error: string | null) => {
-      if (!targetThreadId) return;
-      const errorVersions = threadErrorVersionRef.current;
-      const nextErrorVersion = (errorVersions.get(targetThreadId) ?? 0) + 1;
-      // Re-insert at the tail so the bound evicts the least recently touched.
-      errorVersions.delete(targetThreadId);
-      if (errorVersions.size >= MAX_THREAD_ERROR_VERSIONS) {
-        const oldestVersion = errorVersions.keys().next().value;
-        if (oldestVersion !== undefined) errorVersions.delete(oldestVersion);
+  // The error generation is authoritative on the thread: every write path —
+  // store `setError`, session-set events, snapshot sync, and local draft sends —
+  // bumps it whenever the message changes, so a failed-send snapshot can always
+  // tell whether the card it raised is still the one showing.
+  const getCurrentThreadErrorAndVersion = useCallback(
+    (targetThreadId: ThreadId): { error: string | null; errorVersion: number } => {
+      const thread = getThreadFromState(useStore.getState(), targetThreadId);
+      if (thread) {
+        return { error: thread.error, errorVersion: thread.errorVersion ?? 0 };
       }
-      errorVersions.set(targetThreadId, nextErrorVersion);
+      return {
+        error: localDraftErrorsByThreadIdRef.current[targetThreadId] ?? null,
+        errorVersion: localDraftErrorVersionsRef.current.get(targetThreadId) ?? 0,
+      };
+    },
+    [],
+  );
+  // Returns the error generation after the write; an in-flight send records it
+  // on the failed-send snapshot before React flushes the state update.
+  const setThreadError = useCallback(
+    (targetThreadId: ThreadId | null, error: string | null): number => {
+      if (!targetThreadId) return 0;
       if (getThreadFromState(useStore.getState(), targetThreadId)) {
         setStoreThreadError(targetThreadId, error);
-        return;
+        return getThreadFromState(useStore.getState(), targetThreadId)?.errorVersion ?? 0;
       }
-      setLocalDraftErrorsByThreadId((existing) => {
-        if ((existing[targetThreadId] ?? null) === error) {
-          return existing;
-        }
-        return {
-          ...existing,
-          [targetThreadId]: error,
-        };
-      });
+      const previousError = localDraftErrorsByThreadIdRef.current[targetThreadId] ?? null;
+      if (previousError === error) {
+        return localDraftErrorVersionsRef.current.get(targetThreadId) ?? 0;
+      }
+      const nextVersion = (localDraftErrorVersionsRef.current.get(targetThreadId) ?? 0) + 1;
+      localDraftErrorVersionsRef.current.set(targetThreadId, nextVersion);
+      const nextErrors = {
+        ...localDraftErrorsByThreadIdRef.current,
+        [targetThreadId]: error,
+      };
+      localDraftErrorsByThreadIdRef.current = nextErrors;
+      setLocalDraftErrorsByThreadId(nextErrors);
+      return nextVersion;
     },
     [setStoreThreadError],
   );
@@ -8366,7 +8372,7 @@ export default function ChatView({
     // cached branch query may still be loading or may lag behind an out-of-band checkout.
     if (shouldResumeSettledLocalThread) {
       if (!gitBranchSourceCwd) {
-        setStoreThreadError(threadIdForSend, "Unable to determine the current branch.");
+        setThreadError(threadIdForSend, "Unable to determine the current branch.");
         return false;
       }
 
@@ -8377,7 +8383,7 @@ export default function ChatView({
         });
         currentActiveGitBranchForSend = gitStatus.branch;
       } catch {
-        setStoreThreadError(
+        setThreadError(
           threadIdForSend,
           "Unable to determine the current branch. Try again before sending.",
         );
@@ -8399,7 +8405,7 @@ export default function ChatView({
     const shouldCreateWorktree =
       isFirstMessage && nextThreadEnvMode === "worktree" && !nextThreadWorktreePath;
     if (shouldCreateWorktree && !nextThreadBranch) {
-      setStoreThreadError(
+      setThreadError(
         threadIdForSend,
         "Select a base branch before sending in New worktree mode.",
       );
@@ -8544,7 +8550,6 @@ export default function ChatView({
     // A new dispatch supersedes any payload captured by an earlier failure —
     // only for this thread; another thread's failed send stays retryable.
     failedThreadSendsRef.current.delete(threadIdForSend);
-    threadErrorVersionRef.current.delete(threadIdForSend);
     setThreadError(threadIdForSend, null);
     if (expiredTerminalContextCount > 0) {
       const toastCopy = buildExpiredTerminalContextToastCopy(
@@ -9071,8 +9076,9 @@ export default function ChatView({
         composerTerminalContextsRef.current.length === 0 &&
         composerPastedTextsRef.current.length === 0;
       const sendErrorMessage = err instanceof Error ? err.message : "Failed to send message.";
+      let sendErrorVersion = 0;
       if (!setupCancelled) {
-        setThreadError(threadIdForSend, sendErrorMessage);
+        sendErrorVersion = setThreadError(threadIdForSend, sendErrorMessage);
       }
       if (queuedChatTurn === null && !turnStartSucceeded && !setupCancelled) {
         // The failed send never reached the transcript, so capture its full
@@ -9080,32 +9086,22 @@ export default function ChatView({
         // whatever draft the composer happens to hold later.
         const failedSends = failedThreadSendsRef.current;
         failedSends.delete(threadIdForSend);
-        if (failedSends.size >= MAX_FAILED_THREAD_SEND_SNAPSHOTS) {
-          const oldest = failedSends.keys().next().value;
-          const evicted = oldest === undefined ? null : failedSends.get(oldest);
-          if (oldest !== undefined && evicted) {
-            failedSends.delete(oldest);
-            // The evicted thread's error card can no longer replay its payload
-            // — clear it rather than leave a retry that resends the wrong
-            // transcript message. Only clear when the current error is still
-            // the one this failure raised (same text AND same error epoch);
-            // a newer error — even an identical-message one — is unrelated.
-            const currentError =
-              getThreadFromState(useStore.getState(), oldest)?.error ??
-              localDraftErrorsByThreadIdRef.current[oldest] ??
-              null;
-            if (
-              currentError === evicted.errorMessage &&
-              threadErrorVersionRef.current.get(oldest) === evicted.errorVersion
-            ) {
-              setThreadError(oldest, null);
-            }
-          }
+        // The evicted thread's error card can no longer replay its payload —
+        // clear it rather than leave a retry that resends the wrong transcript
+        // message. Eviction only clears while the snapshot still owns the
+        // current error; a newer error — even an identical-message one — is a
+        // different generation and its card stays.
+        const evictedThreadId = evictOverflowFailedThreadSend(
+          failedSends,
+          getCurrentThreadErrorAndVersion,
+        );
+        if (evictedThreadId !== null) {
+          setThreadError(evictedThreadId, null);
         }
         failedSends.set(threadIdForSend, {
           restoredToComposer: composerDraftWasEmpty,
           errorMessage: sendErrorMessage,
-          errorVersion: threadErrorVersionRef.current.get(threadIdForSend) ?? 0,
+          errorVersion: sendErrorVersion,
           prompt: promptForSend,
           images: composerImagesSnapshot,
           files: composerFilesSnapshot,
@@ -9203,14 +9199,14 @@ export default function ChatView({
           createdAt: new Date().toISOString(),
         })
         .catch((err: unknown) => {
-          setStoreThreadError(
+          setThreadError(
             activeThreadId,
             err instanceof Error ? err.message : "Failed to submit approval decision.",
           );
         });
       setRespondingRequestKeys((existing) => existing.filter((key) => key !== requestKey));
     },
-    [activeThreadId, runtimeMode, setComposerDraftRuntimeMode, setStoreThreadError],
+    [activeThreadId, runtimeMode, setComposerDraftRuntimeMode, setThreadError],
   );
 
   const onRespondToUserInput = useCallback(
@@ -9240,14 +9236,14 @@ export default function ChatView({
           createdAt: new Date().toISOString(),
         })
         .catch((err: unknown) => {
-          setStoreThreadError(
+          setThreadError(
             activeThreadId,
             err instanceof Error ? err.message : "Failed to submit user input.",
           );
         });
       setRespondingUserInputRequestKeys((existing) => existing.filter((key) => key !== requestKey));
     },
-    [activeThreadId, setStoreThreadError],
+    [activeThreadId, setThreadError],
   );
 
   const onCancelActivePendingUserInput = useCallback(() => {
@@ -11408,7 +11404,6 @@ export default function ChatView({
   const dismissActiveThreadError = useCallback(() => {
     if (!activeThread) return;
     failedThreadSendsRef.current.delete(activeThread.id);
-    threadErrorVersionRef.current.delete(activeThread.id);
     setThreadError(activeThread.id, null);
   }, [activeThread, setThreadError]);
   const clearThreadErrorAfterUnblock = useCallback(
@@ -11501,10 +11496,17 @@ export default function ChatView({
       interactionMode,
       envMode,
     });
-    const failedSend = failedThreadSendsRef.current.get(threadId) ?? null;
+    let failedSend = failedThreadSendsRef.current.get(threadId) ?? null;
     if (failedSend) {
       failedThreadSendsRef.current.delete(threadId);
-      threadErrorVersionRef.current.delete(threadId);
+      // The snapshot only owns this card while the current error is still the
+      // generation that raised it. A stale snapshot must not replay its payload
+      // for a newer failure — drop it and fall through to the transcript path.
+      if (!failedSendSnapshotOwnsCurrentError(failedSend, getCurrentThreadErrorAndVersion(threadId))) {
+        failedSend = null;
+      }
+    }
+    if (failedSend) {
       const attachmentIdsMatch = (
         live: ReadonlyArray<{ id: string }>,
         saved: ReadonlyArray<{ id: string }>,
@@ -11591,6 +11593,7 @@ export default function ChatView({
     activeThread,
     enqueueQueuedComposerTurn,
     envMode,
+    getCurrentThreadErrorAndVersion,
     hasQueueableLiveTurn,
     interactionMode,
     providerOptionsForDispatch,

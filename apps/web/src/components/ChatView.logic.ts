@@ -1903,3 +1903,56 @@ export function enrichSubagentWorkEntries(
     };
   });
 }
+
+// Abandoned error cards would otherwise pin attachment File blobs in the map
+// forever; evict the oldest entry past this bound.
+export const MAX_FAILED_THREAD_SEND_SNAPSHOTS = 8;
+
+export interface FailedSendErrorIdentity {
+  /** The error string this failure raised. */
+  errorMessage: string;
+  /** The thread's error generation right after this failure raised its card. */
+  errorVersion: number;
+}
+
+export interface CurrentThreadError {
+  error: string | null;
+  errorVersion: number;
+}
+
+// A failed-send snapshot only owns the thread's error card while the current
+// error is still the generation that failure raised. The generation bumps on
+// every error change, so a rewritten message — even an identical one — is a
+// different generation and the snapshot is stale.
+export function failedSendSnapshotOwnsCurrentError(
+  snapshot: FailedSendErrorIdentity,
+  current: CurrentThreadError,
+): boolean {
+  return (
+    current.error === snapshot.errorMessage && current.errorVersion === snapshot.errorVersion
+  );
+}
+
+// Evicts the oldest snapshot once the map hits the bound. Returns the evicted
+// thread id when the snapshot still owns that thread's current error — the
+// caller must clear that error so the card cannot outlive its retry payload.
+// Returns null when nothing was evicted or the evicted snapshot is stale (a
+// newer error already replaced the card it raised).
+export function evictOverflowFailedThreadSend<S extends FailedSendErrorIdentity>(
+  failedSends: Map<ThreadId, S>,
+  currentError: (threadId: ThreadId) => CurrentThreadError,
+): ThreadId | null {
+  if (failedSends.size < MAX_FAILED_THREAD_SEND_SNAPSHOTS) {
+    return null;
+  }
+  const oldest = failedSends.keys().next().value;
+  if (oldest === undefined) {
+    return null;
+  }
+  const evicted = failedSends.get(oldest);
+  failedSends.delete(oldest);
+  if (!evicted) {
+    return null;
+  }
+  return failedSendSnapshotOwnsCurrentError(evicted, currentError(oldest)) ? oldest : null;
+}

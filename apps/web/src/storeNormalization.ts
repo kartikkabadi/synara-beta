@@ -152,6 +152,7 @@ export function threadShellsEqual(left: ThreadShell | undefined, right: ThreadSh
     left.runtimeMode === right.runtimeMode &&
     left.interactionMode === right.interactionMode &&
     left.error === right.error &&
+    (left.errorVersion ?? 0) === (right.errorVersion ?? 0) &&
     left.createdAt === right.createdAt &&
     (left.archivedAt ?? null) === (right.archivedAt ?? null) &&
     (left.settledAt ?? null) === (right.settledAt ?? null) &&
@@ -1480,6 +1481,18 @@ export function normalizeThreadErrorMessage(message: string | null | undefined):
   return message && !isNonFatalThreadErrorMessage(message) ? message : null;
 }
 
+export function resolveThreadErrorVersion(
+  previous: { error: string | null; errorVersion?: number } | undefined,
+  nextError: string | null,
+): { error: string | null; errorVersion: number } {
+  const previousVersion = previous?.errorVersion ?? 0;
+  const previousError = previous?.error ?? null;
+  if (nextError === previousError) {
+    return { error: nextError, errorVersion: previousVersion };
+  }
+  return { error: nextError, errorVersion: previousVersion + 1 };
+}
+
 export function normalizeThreadSession(
   incoming: ReadModelThread["session"],
   previous: Thread["session"] | undefined | null,
@@ -1606,7 +1619,10 @@ export function normalizeThreadFromReadModel(
       : incomingPendingInteractions === undefined
         ? undefined
         : [...incomingPendingInteractions];
-  const error = normalizeThreadErrorMessage(incoming.session?.lastError);
+  const { error, errorVersion } = resolveThreadErrorVersion(
+    previous,
+    normalizeThreadErrorMessage(incoming.session?.lastError),
+  );
   const lastVisitedAt = previous?.lastVisitedAt ?? incoming.updatedAt;
   const resolvedLatestUserMessageAt =
     Object.hasOwn(incoming, "latestUserMessageAt") && incoming.latestUserMessageAt !== undefined
@@ -1716,6 +1732,7 @@ export function normalizeThreadFromReadModel(
     messages,
     proposedPlans,
     error,
+    errorVersion,
     createdAt: incoming.createdAt,
     archivedAt: incoming.archivedAt ?? null,
     settledAt: incoming.settledAt ?? null,
@@ -1790,7 +1807,10 @@ export function normalizeThreadShellSnapshot(
     deepEqualJson(previous.lastKnownPr, incoming.lastKnownPr)
       ? previous.lastKnownPr
       : (incoming.lastKnownPr ?? null);
-  const error = normalizeThreadErrorMessage(incoming.session?.lastError);
+  const { error, errorVersion } = resolveThreadErrorVersion(
+    previous,
+    normalizeThreadErrorMessage(incoming.session?.lastError),
+  );
   const lastVisitedAt = previous?.lastVisitedAt ?? incoming.updatedAt;
   const nextWorktreePath = incoming.worktreePath;
   const nextWorkingDirectory = incoming.workingDirectory ?? null;
@@ -1829,6 +1849,7 @@ export function normalizeThreadShellSnapshot(
     runtimeMode: incoming.runtimeMode,
     interactionMode: incoming.interactionMode,
     error,
+    errorVersion,
     createdAt: incoming.createdAt,
     archivedAt: incoming.archivedAt ?? null,
     settledAt: incoming.settledAt ?? null,

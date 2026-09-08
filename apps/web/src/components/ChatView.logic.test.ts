@@ -70,6 +70,9 @@ import {
   shouldShowComposerModelBootstrapSkeleton,
   shouldStartActiveTurnLayoutGrace,
   shouldRenderTerminalWorkspace,
+  evictOverflowFailedThreadSend,
+  failedSendSnapshotOwnsCurrentError,
+  MAX_FAILED_THREAD_SEND_SNAPSHOTS,
   worktreeSetupHasError,
 } from "./ChatView.logic";
 
@@ -2942,5 +2945,83 @@ describe("resolveDraftFallbackModelSelection", () => {
         settingsDefaultProvider: "grok",
       }),
     ).toEqual({ provider: "grok", model: "grok-4.6" });
+  });
+});
+
+describe("failed thread send snapshot identity", () => {
+  it("owns the card only while the current error is the generation the snapshot raised", () => {
+    const snapshot = { errorMessage: "rate limited", errorVersion: 2 };
+    expect(
+      failedSendSnapshotOwnsCurrentError(snapshot, {
+        error: "rate limited",
+        errorVersion: 2,
+      }),
+    ).toBe(true);
+    // E→F→E: identical text after an intervening error is a newer generation,
+    // so the snapshot is stale and must not clear the card or drive retry.
+    expect(
+      failedSendSnapshotOwnsCurrentError(snapshot, {
+        error: "rate limited",
+        errorVersion: 3,
+      }),
+    ).toBe(false);
+    expect(
+      failedSendSnapshotOwnsCurrentError(snapshot, { error: null, errorVersion: 3 }),
+    ).toBe(false);
+  });
+});
+
+describe("evictOverflowFailedThreadSend", () => {
+  const snapshotFor = (errorMessage: string, errorVersion: number) => ({
+    errorMessage,
+    errorVersion,
+    prompt: "failed payload",
+  });
+  // Fills the map to the bound so the next call must evict its oldest entry.
+  const fill = (sends: Map<ThreadId, ReturnType<typeof snapshotFor>>) => {
+    for (let index = 0; sends.size < MAX_FAILED_THREAD_SEND_SNAPSHOTS; index += 1) {
+      sends.set(ThreadId.makeUnsafe(`thread-fill-${index}`), snapshotFor("other", 1));
+    }
+  };
+
+  it("leaves the map alone below the bound", () => {
+    const sends = new Map([[ThreadId.makeUnsafe("thread-1"), snapshotFor("e", 1)]]);
+    expect(
+      evictOverflowFailedThreadSend(sends, () => ({ error: "e", errorVersion: 1 })),
+    ).toBeNull();
+    expect(sends.size).toBe(1);
+  });
+
+  it("returns the evicted thread only while its snapshot still owns the current error", () => {
+    const oldest = ThreadId.makeUnsafe("thread-oldest");
+    const sends = new Map<ThreadId, ReturnType<typeof snapshotFor>>([
+      [oldest, snapshotFor("send failed", 1)],
+    ]);
+    fill(sends);
+    expect(
+      evictOverflowFailedThreadSend(sends, () => ({
+        error: "send failed",
+        errorVersion: 1,
+      })),
+    ).toBe(oldest);
+    expect(sends.has(oldest)).toBe(false);
+    expect(sends.size).toBe(MAX_FAILED_THREAD_SEND_SNAPSHOTS - 1);
+  });
+
+  it("evicts the stale snapshot without clearing the newer identical error (E→F→E)", () => {
+    const oldest = ThreadId.makeUnsafe("thread-oldest");
+    const sends = new Map<ThreadId, ReturnType<typeof snapshotFor>>([
+      [oldest, snapshotFor("rate limited", 1)],
+    ]);
+    fill(sends);
+    // The same message was re-raised at a newer generation — the card belongs
+    // to a different failure, so eviction must not clear it.
+    expect(
+      evictOverflowFailedThreadSend(sends, () => ({
+        error: "rate limited",
+        errorVersion: 3,
+      })),
+    ).toBeNull();
+    expect(sends.has(oldest)).toBe(false);
   });
 });
