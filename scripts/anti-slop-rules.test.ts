@@ -254,6 +254,20 @@ describe("no-unknown-parameters", () => {
     expect(byFile.get("built-in.ts")).toEqual(["anti-slop(no-unknown-parameters)"]);
   });
 
+  it("treats a local Promise interface and import as shadowed", () => {
+    const byFile = runRules(
+      {
+        "promise-interface.ts":
+          "interface Promise<T> { value: T }\nexport function f(value: Promise<unknown>) { return value; }\n",
+        "promise-import.ts":
+          "import { Promise } from './external';\nexport function f(value: Promise<unknown>) { return value; }\n",
+      },
+      { "anti-slop/no-unknown-parameters": "error" },
+    );
+    expect(byFile.get("promise-interface.ts")).toBeUndefined();
+    expect(byFile.get("promise-import.ts")).toBeUndefined();
+  });
+
   it("resolves generic defaults that reference earlier type parameters", () => {
     const byFile = runRules(
       {
