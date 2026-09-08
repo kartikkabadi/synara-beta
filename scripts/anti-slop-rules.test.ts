@@ -183,6 +183,20 @@ describe("no-unknown-parameters", () => {
     expect(byFile.get("cause.ts")).toBeUndefined();
   });
 
+  it("does not let aliases inside a top-level block leak into module scope", () => {
+    const byFile = runRules(
+      {
+        "block.ts":
+          "{\n  type Mysterious = unknown;\n}\nexport function f(value: Mysterious) { return value; }\n",
+        "shadowed.ts":
+          "type Mysterious = unknown;\nexport function f(value: Mysterious) { return value; }\n",
+      },
+      { "anti-slop/no-unknown-parameters": "error" },
+    );
+    expect(byFile.get("block.ts")).toBeUndefined();
+    expect(byFile.get("shadowed.ts")).toEqual(["anti-slop(no-unknown-parameters)"]);
+  });
+
   it("does not report parameters whose alias is shadowed by a nested alias", () => {
     const byFile = runRules(
       {
