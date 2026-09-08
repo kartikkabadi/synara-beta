@@ -230,21 +230,38 @@ if [ -w "/Applications" ]; then
     exit 1
   fi
 else
-  osascript - "$prepared_app" "$new_app" "$old_app" "$app" <<'APPLESCRIPT'
+  # /Applications is not writable: the AppleScript installs as root, so the
+  # quarantine flag must also be removed inside the privileged shell - an
+  # xattr run as the invoking user cannot clear a root-owned app, and hiding
+  # that failure would leave the unsigned beta blocked by Gatekeeper. The
+  # privileged step verifies the flag is gone and fails loudly if not.
+  if ! osascript - "$prepared_app" "$new_app" "$old_app" "$app" <<'APPLESCRIPT'
 on run argv
   set preparedApp to quoted form of item 1 of argv
   set newApp to quoted form of item 2 of argv
   set oldApp to quoted form of item 3 of argv
   set installedApp to quoted form of item 4 of argv
-  do shell script "rm -rf " & newApp & " " & oldApp & " && test ! -e " & newApp & " && test ! -e " & oldApp & " && { ditto " & preparedApp & " " & newApp & " || { rm -rf " & newApp & "; exit 1; }; } && { test ! -e " & installedApp & " || mv " & installedApp & " " & oldApp & "; } && { mv " & newApp & " " & installedApp & " || { test ! -e " & oldApp & " || mv " & oldApp & " " & installedApp & " || { rm -rf " & newApp & "; echo Previous application remains at " & oldApp & " >&2; exit 1; }; rm -rf " & newApp & "; exit 1; }; } && rm -rf " & oldApp with administrator privileges
+  do shell script "rm -rf " & newApp & " " & oldApp & " && test ! -e " & newApp & " && test ! -e " & oldApp & " && { ditto " & preparedApp & " " & newApp & " || { rm -rf " & newApp & "; exit 1; }; } && { test ! -e " & installedApp & " || mv " & installedApp & " " & oldApp & "; } && { mv " & newApp & " " & installedApp & " || { test ! -e " & oldApp & " || mv " & oldApp & " " & installedApp & " || { rm -rf " & newApp & "; echo Previous application remains at " & oldApp & " >&2; exit 1; }; rm -rf " & newApp & "; exit 1; }; } && rm -rf " & oldApp & " && { xattr -d com.apple.quarantine " & installedApp & " >/dev/null 2>&1; if xattr " & installedApp & " 2>/dev/null | grep -q com.apple.quarantine; then echo install-macos.sh: could not remove the quarantine flag from the installed app - first launch may be blocked by Gatekeeper >&2; exit 1; fi; }" with administrator privileges
 end run
 APPLESCRIPT
+  then
+    echo "install-macos.sh: privileged installation or quarantine removal failed; see the message above." >&2
+    exit 1
+  fi
 fi
 
 # The beta app is unsigned, so Gatekeeper would block first launch with a
 # damaged-file warning. Removing the quarantine flag from the installed app
 # only (never changing system security settings) lets it start; the checksum
 # and release-signature verification above are the integrity/authenticity gate.
-xattr -d com.apple.quarantine "$app" 2>/dev/null || true
+# Root-owned installs were already handled in the privileged AppleScript above;
+# here the invoking user owns the app. Verify the flag is really gone instead
+# of hiding a failed removal behind `|| true`.
+if [ -w "$app" ]; then
+  xattr -d com.apple.quarantine "$app" >/dev/null 2>&1 || true
+fi
+if xattr "$app" 2>/dev/null | grep -q com.apple.quarantine; then
+  echo "install-macos.sh: warning: the quarantine flag is still present on $app; first launch may be blocked by Gatekeeper." >&2
+fi
 open "$app" 2>/dev/null || echo "install-macos.sh: installed $app but could not open it automatically." >&2
 echo "Installed Synara Beta $tag."

@@ -122,8 +122,23 @@ describe("install-macos.sh", () => {
     NodeAssert.match(script, /old_app="\/Applications\/\.Synara Beta\.app\.backup\.\$install_id"/);
   });
 
-  it("clears quarantine on the installed app only", () => {
-    NodeAssert.match(script, /^xattr -d com\.apple\.quarantine "\$app" 2>\/dev\/null \|\| true$/m);
+  it("clears quarantine on the installed app only, including root-owned installs", () => {
+    // User-owned installs: remove the flag directly, then verify it is really
+    // gone instead of hiding a failed removal behind `|| true`.
+    NodeAssert.match(script, /^if \[ -w "\$app" \]; then$/m);
+    NodeAssert.match(
+      script,
+      /^  xattr -d com\.apple\.quarantine "\$app" >\/dev\/null 2>&1 \|\| true$/m,
+    );
+    NodeAssert.match(script, /quarantine flag is still present/);
+    // Root-owned installs (non-writable /Applications): the privileged
+    // AppleScript removes the flag itself and fails loudly if it cannot, since
+    // an xattr run as the invoking user cannot clear a root-owned app.
+    NodeAssert.match(
+      script,
+      /xattr -d com\.apple\.quarantine " & installedApp & " >\/dev\/null 2>&1; if xattr " & installedApp & " 2>\/dev\/null \| grep -q com\.apple\.quarantine/,
+    );
+    NodeAssert.match(script, /could not remove the quarantine flag from the installed app/);
     NodeAssert.doesNotMatch(script.toLowerCase(), /spctl/);
     NodeAssert.doesNotMatch(script.toLowerCase(), /master-disable/);
   });

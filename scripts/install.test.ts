@@ -181,6 +181,41 @@ describe("install.sh", () => {
     }
   });
 
+  it("pins a requested --tag into the printed PowerShell command on Windows shells", () => {
+    for (const args of [["--tag", "v1.2.3-beta.4"], ["--tag=v1.2.3-beta.4"]]) {
+      const { sandbox } = makeSandbox({ uname: "MINGW64_NT-10.0", releases: RELEASES });
+      try {
+        const result = tryBash(scriptPath, [...args], sandboxEnv(sandbox));
+        NodeAssert.equal(result.status, 0);
+        // The tag must pin both the script download URL and the -Tag argument
+        // instead of being dropped in favor of the newest release.
+        NodeAssert.match(
+          result.stdout,
+          /raw\.githubusercontent\.com\/kartikkabadi\/synara-beta\/v1\.2\.3-beta\.4\/scripts\/install-windows\.ps1/,
+        );
+        NodeAssert.match(result.stdout, /& \$f -Tag 'v1\.2\.3-beta\.4'/);
+        NodeAssert.doesNotMatch(result.stdout, /Invoke-RestMethod/);
+      } finally {
+        NodeFS.rmSync(sandbox, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it("refuses non-release refs before building any download URL", () => {
+    for (const args of [["--tag", "main"], ["--tag=main"]]) {
+      const { sandbox } = makeSandbox({ uname: "Linux", releases: RELEASES });
+      try {
+        const result = tryBash(scriptPath, [...args], sandboxEnv(sandbox));
+        NodeAssert.equal(result.status, 1);
+        NodeAssert.match(result.stderr, /invalid tag 'main'\. Expected vX\.Y\.Z-beta\.N\./);
+        // Nothing may be fetched: the ref must never select executable code.
+        NodeAssert.equal(NodeFS.existsSync(NodePath.join(sandbox, "fetched-urls.txt")), false);
+      } finally {
+        NodeFS.rmSync(sandbox, { recursive: true, force: true });
+      }
+    }
+  });
+
   it("fails with a clear error on unsupported operating systems", () => {
     const { sandbox } = makeSandbox({ uname: "SunOS", releases: RELEASES });
     try {

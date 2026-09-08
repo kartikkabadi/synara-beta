@@ -37,6 +37,69 @@ describe("install-windows.ps1", () => {
     NodeAssert.match(script, /\^v\\d\+\\\.\\d\+\\\.\\d\+-beta\\\.\\d\+\$/);
   });
 
+  it("checks the installed version from beta-specific install metadata before downloading", () => {
+    // The beta NSIS package records DisplayVersion under the beta app's
+    // uninstall registry key; stable uses a different app id, so a Stable
+    // install must never satisfy this check.
+    NodeAssert.match(script, /DisplayVersion/);
+    NodeAssert.match(
+      script,
+      /HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\039b9ac7-21b4-5ecf-8a5a-d0f7bef8a7c6/,
+    );
+    NodeAssert.match(
+      script,
+      /HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall/,
+    );
+    // The check must run before the release download starts.
+    NodeAssert.ok(
+      script.indexOf("DisplayVersion") <
+        script.indexOf('Invoke-WebRequest -Uri "$base/SHA256SUMS"'),
+      "installed-version check must run before the first download",
+    );
+  });
+
+  it("implements -Force semantics for reinstall and downgrade", () => {
+    NodeAssert.match(script, /-not \$Force/);
+    NodeAssert.match(script, /is already installed\. Re-run with -Force to reinstall\./);
+    NodeAssert.match(script, /is newer than \$Tag\. Pass -Force to downgrade\./);
+    // Same-version and downgrade exits must happen before any download.
+    const forceGate = script.indexOf("Re-run with -Force to reinstall");
+    NodeAssert.ok(forceGate > -1);
+    NodeAssert.ok(
+      script.indexOf('Invoke-WebRequest -Uri "$base/SHA256SUMS"') > forceGate,
+      "version checks must run before the first download",
+    );
+  });
+
+  it("compares versions with a beta-aware sort key, not string order", () => {
+    NodeAssert.match(script, /function Get-VersionKey/);
+    NodeAssert.match(
+      script,
+      /\(Get-VersionKey \$installedVersion\) -gt \(Get-VersionKey \$version\)/,
+    );
+    // A stable release (no -beta.N) must sort after its betas, like the bash
+    // installers' version_key.
+    NodeAssert.match(script, /else \{ 9999 \}/);
+  });
+
+  it("requires ssh-keygen with -Y support and gives actionable guidance", () => {
+    NodeAssert.match(script, /Get-Command ssh-keygen -ErrorAction SilentlyContinue/);
+    NodeAssert.match(script, /The OpenSSH client is required to verify the release signature/);
+    NodeAssert.match(script, /Add-WindowsCapability -Online -Name OpenSSH\.Client~~~~0\.0\.1\.0/);
+    // OpenSSH 8.9 introduced ssh-keygen -Y; stock Windows images ship 8.1.
+    NodeAssert.ok(
+      script.includes("OpenSSH(?:_for_Windows)?[_ ](\\d+)\\.(\\d+)"),
+      "version probe must parse the OpenSSH version",
+    );
+    NodeAssert.match(script, /does not support 'ssh-keygen -Y' \(8\.9\+ required\)/);
+    // The gate must run before anything is downloaded.
+    NodeAssert.ok(
+      script.indexOf("Get-Command ssh-keygen") <
+        script.indexOf('Invoke-WebRequest -Uri "$base/SHA256SUMS"'),
+      "ssh-keygen availability check must run before the first download",
+    );
+  });
+
   it("downloads SHA256SUMS and installer exe with basic parsing", () => {
     NodeAssert.match(
       script,

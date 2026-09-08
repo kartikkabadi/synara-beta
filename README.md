@@ -143,7 +143,7 @@ Synara organizes your workflows into clear, modular layers:
 
 ### Fast one-line terminal install
 
-Install Synara Beta with one verified, release-pinned command for your operating system:
+Install Synara Beta with one release-pinned command for your operating system. The downloaded release artifacts (DMG/AppImage/exe) are checksum-verified against an SSH-signed `SHA256SUMS`; the installer scripts themselves are fetched over HTTPS from the pinned release tag and are not signature-verified (see the [Installation Guide](./docs/install.md) for the full trust model).
 
 **macOS (Apple Silicon & Intel)**
 
@@ -151,7 +151,7 @@ Install Synara Beta with one verified, release-pinned command for your operating
 t=$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep '"tag_name"' | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$' | head -1); if [ -z "$t" ]; then echo "Could not resolve the latest Synara Beta release." >&2; (exit 1); else f=$(mktemp /tmp/synara-beta-install.XXXXXX) && curl -fsSL -o "$f" "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-macos.sh" && bash "$f" --tag "$t"; rc=$?; rm -f "${f:-/tmp/synara-beta-install-none}"; (exit $rc); fi
 ```
 
-**Linux (x86_64)**
+**Linux (x86_64 & arm64)**
 
 ```bash
 t=$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep '"tag_name"' | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$' | head -1); if [ -z "$t" ]; then echo "Could not resolve the latest Synara Beta release." >&2; (exit 1); else f=$(mktemp /tmp/synara-beta-install.XXXXXX) && curl -fsSL -o "$f" "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-linux.sh" && bash "$f" --tag "$t"; rc=$?; rm -f "${f:-/tmp/synara-beta-install-none}"; (exit $rc); fi

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# One-line Linux installer for Synara Beta (x86_64).
+# One-line Linux installer for Synara Beta (x86_64 and arm64).
 #
 #   t=$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep '"tag_name"' | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$' | head -1); if [ -z "$t" ]; then echo "Could not resolve the latest Synara Beta release." >&2; (exit 1); else f=$(mktemp /tmp/synara-beta-install.XXXXXX) && curl -fsSL -o "$f" "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-linux.sh" && bash "$f" --tag "$t"; rc=$?; rm -f "${f:-/tmp/synara-beta-install-none}"; (exit $rc); fi
 #   bash install-linux.sh --tag v0.8.2-beta.1
@@ -80,11 +80,13 @@ case "$arch" in
     default_arch="x86_64"
     ;;
   aarch64|arm64)
-    echo "install-linux.sh: unsupported architecture: $arch (no Linux arm64 AppImage is published; x86_64 required)" >&2
-    exit 1
+    # The release workflow publishes an arm64 AppImage alongside x86_64
+    # (electron-builder names AppImages x86_64/arm64).
+    arch_pattern="arm64|aarch64"
+    default_arch="arm64"
     ;;
   *)
-    echo "install-linux.sh: unsupported architecture: $arch (need x86_64)" >&2
+    echo "install-linux.sh: unsupported architecture: $arch (need x86_64 or arm64)" >&2
     exit 1
     ;;
 esac
