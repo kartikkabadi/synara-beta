@@ -42,12 +42,17 @@ export function parseAntiSlopDiagnostics(
 ): Array<{ code: string; filename: string; message: string; line?: number }> {
   return output.diagnostics
     .filter((diagnostic) => diagnostic.code.startsWith(ANTI_SLOP_CODE_PREFIX))
-    .map((diagnostic) => ({
-      code: diagnostic.code,
-      filename: diagnostic.filename,
-      message: diagnostic.message,
-      line: diagnostic.labels?.[0]?.span?.line,
-    }));
+    .map((diagnostic) => {
+      const line = diagnostic.labels?.[0]?.span?.line;
+      return line === undefined
+        ? { code: diagnostic.code, filename: diagnostic.filename, message: diagnostic.message }
+        : {
+            code: diagnostic.code,
+            filename: diagnostic.filename,
+            message: diagnostic.message,
+            line,
+          };
+    });
 }
 
 export function messageFingerprint(message: string, sourceText = ""): string {
