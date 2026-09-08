@@ -65,9 +65,9 @@ $version = $Tag.TrimStart('v')
 # never mistaken for this one - and the app data directory ~/.synara-beta is
 # never read or written here.
 $uninstallKeyPaths = @(
-  'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\039b9ac7-21b4-5ecf-8a5a-d0f7bef8a7c6',
-  'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\039b9ac7-21b4-5ecf-8a5a-d0f7bef8a7c6',
-  'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\039b9ac7-21b4-5ecf-8a5a-d0f7bef8a7c6'
+  'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\a8e63b48-d4f3-4db5-9e12-368107afe65d',
+  'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\a8e63b48-d4f3-4db5-9e12-368107afe65d',
+  'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\a8e63b48-d4f3-4db5-9e12-368107afe65d'
 )
 $installedVersion = ''
 foreach ($uninstallKeyPath in $uninstallKeyPaths) {

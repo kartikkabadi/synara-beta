@@ -44,7 +44,7 @@ describe("install-windows.ps1", () => {
     NodeAssert.match(script, /DisplayVersion/);
     NodeAssert.match(
       script,
-      /HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\039b9ac7-21b4-5ecf-8a5a-d0f7bef8a7c6/,
+      /HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\a8e63b48-d4f3-4db5-9e12-368107afe65d/,
     );
     NodeAssert.match(
       script,
@@ -54,6 +54,24 @@ describe("install-windows.ps1", () => {
     NodeAssert.ok(
       script.indexOf("DisplayVersion") <
         script.indexOf('Invoke-WebRequest -Uri "$base/SHA256SUMS"'),
+      "installed-version check must run before the first download",
+    );
+  });
+
+  it("uses the Windows beta installer GUID from the build config", () => {
+    const configPath = NodePath.resolve(
+      import.meta.dirname,
+      "./lib/desktop-platform-build-config.ts",
+    );
+    const config = NodeFS.readFileSync(configPath, "utf8");
+    const match = config.match(/WINDOWS_BETA_INSTALLER_GUID = "([^"]+)"/);
+    NodeAssert.ok(match, "build config must declare WINDOWS_BETA_INSTALLER_GUID");
+    const guid = match[1];
+    if (!guid) throw new Error("WINDOWS_BETA_INSTALLER_GUID capture failed");
+    const escaped = guid.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    NodeAssert.match(script, new RegExp(escaped));
+    NodeAssert.ok(
+      script.indexOf(guid) < script.indexOf('Invoke-WebRequest -Uri "$base/SHA256SUMS"'),
       "installed-version check must run before the first download",
     );
   });
