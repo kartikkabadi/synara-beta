@@ -216,6 +216,32 @@ describe("install.sh", () => {
     }
   });
 
+  it("appends -Force to the printed PowerShell command when --force is passed on Windows shells", () => {
+    for (const args of [["--force"], ["--tag", "v1.2.3-beta.4", "--force"]]) {
+      const { sandbox } = makeSandbox({ uname: "MINGW64_NT-10.0", releases: RELEASES });
+      try {
+        const result = tryBash(scriptPath, [...args], sandboxEnv(sandbox));
+        NodeAssert.equal(result.status, 0);
+        // The -Force flag must appear inside the try block, before the closing brace,
+        // not as part of the final cleanup Remove-Item.
+        NodeAssert.match(result.stdout, /try \{ & \$f -Tag .*?-Force \} finally/);
+      } finally {
+        NodeFS.rmSync(sandbox, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it("does not append -Force to the printed PowerShell command when --force is absent on Windows shells", () => {
+    const { sandbox } = makeSandbox({ uname: "MINGW64_NT-10.0", releases: RELEASES });
+    try {
+      const result = tryBash(scriptPath, [], sandboxEnv(sandbox));
+      NodeAssert.equal(result.status, 0);
+      NodeAssert.doesNotMatch(result.stdout, /try \{ & \$f -Tag .*?-Force \} finally/);
+    } finally {
+      NodeFS.rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
   it("rejects --tag without a value before resolving anything", () => {
     for (const args of [["--tag"], ["--tag="], ["--tag", "--force"]]) {
       const { sandbox } = makeSandbox({ uname: "Linux", releases: RELEASES });

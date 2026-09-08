@@ -14,6 +14,7 @@ set -euo pipefail
 
 tag=""
 tag_provided=0
+force=0
 args=("$@")
 for ((i=0; i<${#args[@]}; i++)); do
   if [[ "${args[i]}" == "--tag" ]]; then
@@ -31,6 +32,8 @@ for ((i=0; i<${#args[@]}; i++)); do
       exit 1
     fi
     tag_provided=1
+  elif [[ "${args[i]}" == "--force" ]]; then
+    force=1
   fi
 done
 
@@ -53,13 +56,17 @@ case "$OS" in
   MINGW*|MSYS*|CYGWIN*)
     echo "Synara Beta installation on Windows should be run in PowerShell:"
     echo ""
+    force_flag=""
+    if [ "$force" -eq 1 ]; then
+      force_flag=" -Force"
+    fi
     if [ -n "$tag" ]; then
       # Preserve the requested --tag: pin both the script download and the
       # installer invocation to it instead of silently resolving the latest
       # release. The tag is strictly validated above, so it is safe to embed.
-      printf '  $f = Join-Path $env:TEMP $("synara-beta-install-$([Guid]::NewGuid()).ps1"); Invoke-WebRequest "https://raw.githubusercontent.com/kartikkabadi/synara-beta/%s/scripts/install-windows.ps1" -UseBasicParsing -OutFile $f -ErrorAction Stop; Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; Unblock-File -Path $f; try { & $f -Tag '"'"'%s'"'"' } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue }\n' "$tag" "$tag"
+      printf '  $f = Join-Path $env:TEMP $("synara-beta-install-$([Guid]::NewGuid()).ps1"); Invoke-WebRequest "https://raw.githubusercontent.com/kartikkabadi/synara-beta/%s/scripts/install-windows.ps1" -UseBasicParsing -OutFile $f -ErrorAction Stop; Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; Unblock-File -Path $f; try { & $f -Tag '"'"'%s'"'"'%s } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue }\n' "$tag" "$tag" "$force_flag"
     else
-      echo '  $t = ((Invoke-RestMethod "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" -UseBasicParsing -ErrorAction Stop) | Where-Object { $_.tag_name -match '"'"'^v\d+\.\d+\.\d+-beta\.\d+$'"'"' } | Select-Object -First 1).tag_name; if ($t) { $f = Join-Path $env:TEMP $("synara-beta-install-$([Guid]::NewGuid()).ps1"); Invoke-WebRequest "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-windows.ps1" -UseBasicParsing -OutFile $f -ErrorAction Stop; Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; Unblock-File -Path $f; try { & $f -Tag $t } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue } } else { throw "Could not resolve the latest Synara Beta release." }'
+      printf '  $t = ((Invoke-RestMethod "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" -UseBasicParsing -ErrorAction Stop) | Where-Object { $_.tag_name -match '"'"'^v\\d+\\.\\d+\\.\\d+-beta\\.\\d+$'"'"' } | Select-Object -First 1).tag_name; if ($t) { $f = Join-Path $env:TEMP $("synara-beta-install-$([Guid]::NewGuid()).ps1"); Invoke-WebRequest "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-windows.ps1" -UseBasicParsing -OutFile $f -ErrorAction Stop; Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; Unblock-File -Path $f; try { & $f -Tag $t%s } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue } } else { throw "Could not resolve the latest Synara Beta release." }\n' "$force_flag"
     fi
     echo ""
     exit 0
