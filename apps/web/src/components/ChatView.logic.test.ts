@@ -75,6 +75,7 @@ import {
   failedSendSnapshotOwnsCurrentError,
   MAX_FAILED_THREAD_SEND_SNAPSHOTS,
   MAX_LOCAL_DRAFT_ERROR_VERSIONS,
+  releaseFailedSendAtSendCommit,
   releaseFailedSendSnapshotAfterSend,
   releaseRetriedFailedSend,
   releaseSupersededFailedSend,
@@ -3293,5 +3294,116 @@ describe("releaseRetriedFailedSend", () => {
     );
     expect(failedSends.get(threadId)).toBe(newer);
     expect(cleared).toEqual([]);
+  });
+});
+
+// `onSend` has several commit points — the restored-draft queue enqueue, the
+// plan-follow-up enqueue, the direct dispatch, and `onSubmitPlanFollowUp` — and
+// every one of them funnels through `releaseFailedSendAtSendCommit`. A retry
+// passes the identity it captured before its awaits; a fresh send passes
+// nothing and supersedes. These tests pin the overlap contract each path
+// relies on: a newer failure that lands mid-retry keeps its snapshot and card.
+describe("releaseFailedSendAtSendCommit", () => {
+  const snapshot = { errorMessage: "rate limited", errorVersion: 1 };
+  const retriedError = { error: "rate limited", errorVersion: 1 };
+
+  it("supersedes the failed-send pair for a fresh send, including the plan-follow-up queue commit", () => {
+    // A queued plan follow-up must not leave the stale card and pinned payload
+    // behind — it commits like any other send.
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, snapshot]]);
+    const cleared: ThreadId[] = [];
+    releaseFailedSendAtSendCommit(
+      failedSends,
+      threadId,
+      undefined,
+      () => retriedError,
+      (id) => {
+        cleared.push(id);
+      },
+    );
+    expect(failedSends.has(threadId)).toBe(false);
+    expect(cleared).toEqual([threadId]);
+  });
+
+  it("keeps a newer snapshot and card when a direct-dispatch retry commits over an overlapping failure", () => {
+    // The snapshot leg dispatches `send(undefined, "queue", retryTurn)`, which
+    // skips the queue branch and commits at the direct dispatch point — after
+    // awaits during which a newer send can fail.
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const newer = { errorMessage: "network error", errorVersion: 2 };
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, newer]]);
+    const cleared: ThreadId[] = [];
+    releaseFailedSendAtSendCommit(
+      failedSends,
+      threadId,
+      { expectedSnapshot: snapshot, retriedError },
+      () => ({ error: newer.errorMessage, errorVersion: newer.errorVersion }),
+      (id) => {
+        cleared.push(id);
+      },
+    );
+    expect(failedSends.get(threadId)).toBe(newer);
+    expect(cleared).toEqual([]);
+  });
+
+  it("keeps a newer snapshot and card when a restored-draft retry commits to the queue", () => {
+    // The restored-draft leg calls `send(undefined, "queue")` and commits at
+    // the queue-enqueue point after the attachment-persistence await. The
+    // overlapping failure re-raised identical text, so only the snapshot it
+    // recorded proves the card belongs to it.
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const newer = { errorMessage: "rate limited", errorVersion: 1 };
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, newer]]);
+    const cleared: ThreadId[] = [];
+    releaseFailedSendAtSendCommit(
+      failedSends,
+      threadId,
+      { expectedSnapshot: snapshot, retriedError },
+      () => retriedError,
+      (id) => {
+        cleared.push(id);
+      },
+    );
+    expect(failedSends.get(threadId)).toBe(newer);
+    expect(cleared).toEqual([]);
+  });
+
+  it("keeps a newer snapshot and card when a plan follow-up retry commits over an overlapping failure", () => {
+    // The transcript fallback has no captured payload, so the retry carries
+    // only the error identity it was initiated for; a newer failure recorded
+    // in between keeps both halves of its pair.
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const newer = { errorMessage: "network error", errorVersion: 2 };
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, newer]]);
+    const cleared: ThreadId[] = [];
+    releaseFailedSendAtSendCommit(
+      failedSends,
+      threadId,
+      { expectedSnapshot: null, retriedError },
+      () => ({ error: newer.errorMessage, errorVersion: newer.errorVersion }),
+      (id) => {
+        cleared.push(id);
+      },
+    );
+    expect(failedSends.get(threadId)).toBe(newer);
+    expect(cleared).toEqual([]);
+  });
+
+  it("releases the retry's own pair when nothing newer landed before the commit", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, snapshot]]);
+    const cleared: ThreadId[] = [];
+    releaseFailedSendAtSendCommit(
+      failedSends,
+      threadId,
+      { expectedSnapshot: snapshot, retriedError },
+      () => retriedError,
+      (id) => {
+        cleared.push(id);
+      },
+    );
+    expect(failedSends.has(threadId)).toBe(false);
+    expect(cleared).toEqual([threadId]);
   });
 });

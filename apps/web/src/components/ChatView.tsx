@@ -606,9 +606,10 @@ import {
   deriveComposerSendState,
   evictOverflowFailedThreadSend,
   failedSendSnapshotOwnsCurrentError,
+  releaseFailedSendAtSendCommit,
   releaseFailedSendSnapshotAfterSend,
   releaseRetriedFailedSend,
-  releaseSupersededFailedSend,
+  type RetriedFailedSendCommit,
   failWorktreeSetupSnapshot,
   filterSidechatTranscriptMessages,
   hasLiveTurnTakenOver,
@@ -1048,6 +1049,11 @@ type FailedThreadSendSnapshot = Pick<
   errorVersion: number;
 };
 
+// A retry routes through the same send commit points as a fresh send but may
+// only release the snapshot and card it was initiated for. The send handlers
+// carry this identity so the commit can pick the guarded release.
+type RetriedFailedSendRelease = RetriedFailedSendCommit<FailedThreadSendSnapshot>;
+
 const EMPTY_COMPOSER_PLUGIN_SUGGESTIONS: ComposerPluginSuggestion[] = [];
 
 function buildQueuedComposerPreviewText(input: {
@@ -1151,6 +1157,7 @@ interface PlanFollowUpSubmission {
   interactionMode: "default" | "plan";
   dispatchMode: "queue" | "steer";
   queuedTurn?: QueuedComposerPlanFollowUp;
+  retryRelease?: RetriedFailedSendRelease;
 }
 
 /**
@@ -1170,6 +1177,7 @@ interface LateComposerSendHandlers {
     event?: { preventDefault: () => void },
     dispatchMode?: "queue" | "steer",
     queuedTurn?: QueuedComposerChatTurn,
+    retryRelease?: RetriedFailedSendRelease,
   ) => Promise<boolean>;
   readonly submitPlanFollowUp: (submission: PlanFollowUpSubmission) => Promise<boolean>;
   readonly advanceActivePendingUserInput: (
@@ -4426,10 +4434,18 @@ export default function ChatView({
         (pinnedThreadId) => failedThreadSendsRef.current.has(pinnedThreadId),
         targetThreadId,
       );
-      const nextErrors = {
-        ...localDraftErrorsByThreadIdRef.current,
-        [targetThreadId]: error,
-      };
+      // The versions map is the bounded LRU; an error entry whose generation
+      // was evicted is stale — no live snapshot can reference a generation that
+      // no longer exists — so rebuild the record without it rather than letting
+      // it keep every key forever.
+      const nextErrors = {} as Record<ThreadId, string | null>;
+      for (const draftThreadId of localDraftErrorVersionsRef.current.keys()) {
+        const draftError = localDraftErrorsByThreadIdRef.current[draftThreadId];
+        if (draftError !== undefined) {
+          nextErrors[draftThreadId] = draftError;
+        }
+      }
+      nextErrors[targetThreadId] = error;
       localDraftErrorsByThreadIdRef.current = nextErrors;
       setLocalDraftErrorsByThreadId(nextErrors);
       return nextVersion;
@@ -7667,6 +7683,7 @@ export default function ChatView({
     e?: { preventDefault: () => void },
     requestedDispatchMode?: "queue" | "steer",
     queuedTurn?: QueuedComposerChatTurn,
+    retryRelease?: RetriedFailedSendRelease,
   ): Promise<boolean> => {
     const dispatchMode =
       requestedDispatchMode ??
@@ -7850,6 +7867,16 @@ export default function ChatView({
             ...(providerOptionsForDispatch ? { providerOptionsForDispatch } : {}),
             runtimeMode,
           });
+          // A queued plan follow-up is a send commit like any other: release the
+          // failed-send pair it supersedes — or, for a retry, only the pair the
+          // retry was initiated for.
+          releaseFailedSendAtSendCommit(
+            failedThreadSendsRef.current,
+            activeThread.id,
+            retryRelease,
+            getCurrentThreadErrorAndVersion,
+            (targetThreadId) => setThreadError(targetThreadId, null),
+          );
           return true;
         }
         clearComposerInput(activeThread.id);
@@ -7858,6 +7885,7 @@ export default function ChatView({
           text: followUp.text,
           interactionMode: followUp.interactionMode,
           dispatchMode,
+          ...(retryRelease ? { retryRelease } : {}),
         });
       }
     }
@@ -8191,11 +8219,16 @@ export default function ChatView({
       });
       // A queued send (including a restored retry) supersedes whatever failed-send
       // payload and error card the thread was showing. Reading the current error
-      // here would race the attachment-persistence await above, so the release is
-      // unconditional at the commit point — the same cleanup the direct dispatch
-      // path runs below.
-      releaseSupersededFailedSend(failedThreadSendsRef.current, activeThread.id, (targetThreadId) =>
-        setThreadError(targetThreadId, null),
+      // here would race the attachment-persistence await above, so a fresh send
+      // releases unconditionally at the commit point; a retry carries the identity
+      // it captured and releases only its own pair — a newer failure that landed
+      // mid-await keeps its snapshot and card.
+      releaseFailedSendAtSendCommit(
+        failedThreadSendsRef.current,
+        activeThread.id,
+        retryRelease,
+        getCurrentThreadErrorAndVersion,
+        (targetThreadId) => setThreadError(targetThreadId, null),
       );
       return true;
     }
@@ -8561,9 +8594,16 @@ export default function ChatView({
     setTailAnchor({ threadId: threadIdForSend, messageId: messageIdForSend });
 
     // A new dispatch supersedes any payload captured by an earlier failure —
-    // only for this thread; another thread's failed send stays retryable.
-    releaseSupersededFailedSend(failedThreadSendsRef.current, threadIdForSend, (targetThreadId) =>
-      setThreadError(targetThreadId, null),
+    // only for this thread; another thread's failed send stays retryable. A
+    // retry instead releases only the pair it was initiated for: the awaits
+    // above leave a window where a newer failure can land, and it must keep
+    // both its snapshot and its card.
+    releaseFailedSendAtSendCommit(
+      failedThreadSendsRef.current,
+      threadIdForSend,
+      retryRelease,
+      getCurrentThreadErrorAndVersion,
+      (targetThreadId) => setThreadError(targetThreadId, null),
     );
     if (expiredTerminalContextCount > 0) {
       const toastCopy = buildExpiredTerminalContextToastCopy(
@@ -9429,12 +9469,8 @@ export default function ChatView({
     interactionMode: nextInteractionMode,
     dispatchMode,
     queuedTurn,
-  }: {
-    text: string;
-    interactionMode: "default" | "plan";
-    dispatchMode: "queue" | "steer";
-    queuedTurn?: QueuedComposerPlanFollowUp;
-  }): Promise<boolean> {
+    retryRelease,
+  }: PlanFollowUpSubmission): Promise<boolean> {
     const api = readNativeApi();
     if (
       !api ||
@@ -9466,9 +9502,14 @@ export default function ChatView({
     beginLocalDispatch({ expectedUserMessageId: messageIdForSend });
     // A committed send supersedes whatever failed-send payload and error card
     // the thread was showing — release both together so the card cannot outlive
-    // its payload and the payload cannot leak without its card.
-    releaseSupersededFailedSend(failedThreadSendsRef.current, threadIdForSend, (targetThreadId) =>
-      setThreadError(targetThreadId, null),
+    // its payload and the payload cannot leak without its card. A retry carries
+    // the identity it captured and releases only its own pair.
+    releaseFailedSendAtSendCommit(
+      failedThreadSendsRef.current,
+      threadIdForSend,
+      retryRelease,
+      getCurrentThreadErrorAndVersion,
+      (targetThreadId) => setThreadError(targetThreadId, null),
     );
     setOptimisticUserMessages((existing) => [
       ...existing,
@@ -11428,6 +11469,9 @@ export default function ChatView({
   }, [activeThread, setThreadError]);
   const clearThreadErrorAfterUnblock = useCallback(
     (unblockedThreadId: ThreadId) => {
+      // The unblock clears the card; drop its captured payload too so the pair
+      // cannot split (dismiss does the same) and attachments are not pinned.
+      failedThreadSendsRef.current.delete(unblockedThreadId);
       setThreadError(unblockedThreadId, null);
     },
     [setThreadError],
@@ -11497,7 +11541,13 @@ export default function ChatView({
         );
         return;
       }
-      void lateSendHandlers.send(undefined, "queue", retryTurn);
+      // The dispatch routes through `onSend`, whose awaits leave a window for a
+      // newer failure to land — carry the captured identity so the commit
+      // releases only this retry's pair.
+      void lateSendHandlers.send(undefined, "queue", retryTurn, {
+        expectedSnapshot: failedSend,
+        retriedError,
+      });
     };
     const buildRetryTurn = (
       payload: Pick<
@@ -11577,10 +11627,14 @@ export default function ChatView({
       if (failedSend.restoredToComposer && draftMatchesRestored) {
         if (hasQueueableLiveTurn) {
           // A live turn would reject a direct resend — queue the restored draft.
-          // The snapshot is only consumed once the queue accepts the resend;
-          // a rejected send keeps the payload so the user can retry again.
+          // The send carries the captured identity so its commit releases only
+          // this retry's pair; the outer guard still covers accepted-but-not-
+          // dispatched returns, where the snapshot must be retained.
           void releaseFailedSendSnapshotAfterSend(
-            lateSendHandlers.send(undefined, "queue"),
+            lateSendHandlers.send(undefined, "queue", undefined, {
+              expectedSnapshot: failedSend,
+              retriedError,
+            }),
             failedThreadSendsRef.current,
             threadId,
             failedSend,
@@ -11588,7 +11642,10 @@ export default function ChatView({
           );
         } else {
           void releaseFailedSendSnapshotAfterSend(
-            lateSendHandlers.send(undefined),
+            lateSendHandlers.send(undefined, undefined, undefined, {
+              expectedSnapshot: failedSend,
+              retriedError,
+            }),
             failedThreadSendsRef.current,
             threadId,
             failedSend,

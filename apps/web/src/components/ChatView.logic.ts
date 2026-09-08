@@ -2057,3 +2057,40 @@ export function releaseRetriedFailedSend<S extends FailedSendErrorIdentity>(
     clearError(threadId);
   }
 }
+
+// The identity a retry carries through the send path so the commit point can
+// tell it apart from a fresh send. `expectedSnapshot` is the failed-send
+// snapshot the retry was initiated with — null for the transcript fallback,
+// which has no captured payload. `retriedError` is the error generation the
+// retry was initiated for, captured before its first await.
+export interface RetriedFailedSendCommit<S extends FailedSendErrorIdentity> {
+  expectedSnapshot: S | null;
+  retriedError: CurrentThreadError;
+}
+
+// The single release every send commit point runs. A normal send supersedes
+// whatever failed-send payload and error card the thread was showing. A retry
+// routes through the same commit points but replays one captured payload, so
+// callers pass the identity captured when the retry started: only that
+// snapshot and the card it raised are released — a newer failure that landed
+// while the retry was in flight keeps both.
+export function releaseFailedSendAtSendCommit<S extends FailedSendErrorIdentity>(
+  failedSends: Map<ThreadId, S>,
+  threadId: ThreadId,
+  retriedCommit: RetriedFailedSendCommit<S> | undefined,
+  getCurrentError: (threadId: ThreadId) => CurrentThreadError,
+  clearError: (threadId: ThreadId) => void,
+): void {
+  if (retriedCommit) {
+    releaseRetriedFailedSend(
+      failedSends,
+      threadId,
+      retriedCommit.expectedSnapshot,
+      retriedCommit.retriedError,
+      getCurrentError,
+      clearError,
+    );
+    return;
+  }
+  releaseSupersededFailedSend(failedSends, threadId, clearError);
+}
