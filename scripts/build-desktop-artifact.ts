@@ -14,6 +14,7 @@ import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
+import { resolveStagedClientFaviconTarget } from "./lib/desktop-artifact-staging.ts";
 import { desktopIconAssetPaths, publishIconOverrides } from "./lib/brand-assets.ts";
 import {
   createDesktopPlatformBuildConfig,
@@ -475,7 +476,7 @@ function stageClientFavicons(stageAppDir: string, flavor: typeof BuildFlavor.Typ
 
     for (const override of publishIconOverrides(flavor)) {
       const sourcePath = yield* iconSourceFor(override.sourceRelativePath);
-      const targetPath = path.join(stageAppDir, override.targetRelativePath);
+      const targetPath = resolveStagedClientFaviconTarget(stageAppDir, override.targetRelativePath);
       if (!(yield* fs.exists(targetPath))) {
         return yield* new BuildScriptError({
           message: `Missing staged client favicon target: ${targetPath}`,
