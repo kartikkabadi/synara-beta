@@ -19,3 +19,14 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_install_received ON events (install_id, received_at);
 CREATE INDEX IF NOT EXISTS idx_events_kind_received ON events (kind, received_at);
 CREATE INDEX IF NOT EXISTS idx_events_received ON events(received_at);
+
+-- Durable rate-limit reservations. One row per scope per fixed hour; the
+-- worker upserts `event_count` atomically before writing a batch so
+-- concurrent requests cannot both pass on a stale count. Scopes are
+-- `install:<uuid>` and `global` (all ingest). No IP or identity data.
+CREATE TABLE IF NOT EXISTS rate_counters (
+  scope TEXT NOT NULL,
+  window_start TEXT NOT NULL,
+  event_count INTEGER NOT NULL,
+  PRIMARY KEY (scope, window_start)
+);
