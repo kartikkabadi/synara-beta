@@ -6,14 +6,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const ORIGINAL_ENV = { ...process.env };
 
-async function loadTsdownConfig() {
+interface TsdownUserConfig {
+  readonly entry?: string | string[];
+  readonly define?: Record<string, string>;
+}
+
+async function loadTsdownConfig(): Promise<TsdownUserConfig | undefined> {
   vi.resetModules();
-  const mod = await import("../tsdown.config.mts");
-  const configs = mod.default ?? mod;
-  if (!Array.isArray(configs)) {
-    throw new Error("Expected tsdown config to export an array");
-  }
-  return configs.find((c) => Array.isArray(c.entry) && c.entry.includes("src/main.ts"));
+  // tsdown.config is a build-time .mts module; Vitest resolves it at runtime.
+  // @ts-expect-error -- native tsc does not resolve .mts without allowImportingTsExtensions.
+  const mod = (await import("../tsdown.config")) as { default: TsdownUserConfig[] };
+  return mod.default.find((c: TsdownUserConfig) => {
+    if (Array.isArray(c.entry)) {
+      return c.entry.includes("src/main.ts");
+    }
+    return c.entry === "src/main.ts";
+  });
 }
 
 describe("tsdown Windows updater publisher pin", () => {
