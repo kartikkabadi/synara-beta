@@ -41,10 +41,17 @@ export function isGlobalReflectMethodCall(
   callee: ESTree.Expression,
   methodName: string,
 ): boolean {
-  if (!("property" in callee) || !("object" in callee) || !("computed" in callee)) return false;
-  if (!isGlobalReflect(sourceCode, callee.object)) return false;
-  const property = callee.property;
-  return callee.computed
+  const unwrappedCallee = unwrapValueExpression(callee);
+  if (
+    !("property" in unwrappedCallee) ||
+    !("object" in unwrappedCallee) ||
+    !("computed" in unwrappedCallee)
+  ) {
+    return false;
+  }
+  if (!isGlobalReflect(sourceCode, unwrappedCallee.object)) return false;
+  const property = unwrappedCallee.property;
+  return unwrappedCallee.computed
     ? property.type === "Literal" && property.value === methodName
     : property.type === "Identifier" && property.name === methodName;
 }

@@ -3,10 +3,9 @@ import { defineRule } from "@oxlint/plugins";
 import type { ESTree } from "@oxlint/plugins";
 
 import {
-  collectAliasDeclarationsIn,
-  createResolvesToUnknown,
-  firstWinsAliasDeclarations,
-  refineAliasAmbiguity,
+  createScopeIndex,
+  createScopedResolvesToUnknown,
+  type ScopedResolves,
 } from "../shared/resolves-to-unknown.ts";
 import { lexicalTypeParameterNames } from "../shared/lexical-type-parameters.ts";
 
@@ -33,13 +32,14 @@ export const noUnknownReturnsRule = defineRule({
     },
   },
   createOnce(context) {
-    let resolvesToUnknown = createResolvesToUnknown(new Map(), new Set());
+    let resolvesToUnknown: ScopedResolves = () => false;
 
     const checkReturnType = (node: FunctionWithReturnType) => {
       const annotation = node.returnType;
       if (annotation === null || annotation === undefined) return;
       if (
         !resolvesToUnknown(
+          node,
           annotation.typeAnnotation,
           lexicalTypeParameterNames(node, context.sourceCode.visitorKeys),
         )
@@ -51,17 +51,9 @@ export const noUnknownReturnsRule = defineRule({
 
     return {
       Program(node) {
-        const collected = collectAliasDeclarationsIn(node, context.sourceCode.visitorKeys);
-        const conservative = createResolvesToUnknown(
-          firstWinsAliasDeclarations(collected.declarations),
-          collected.ambiguous,
+        resolvesToUnknown = createScopedResolvesToUnknown(
+          createScopeIndex(node, context.sourceCode.visitorKeys),
         );
-        const refined = refineAliasAmbiguity(
-          collected.declarations,
-          collected.ambiguous,
-          (type, name) => conservative(type, new Set(), new Set([name])),
-        );
-        resolvesToUnknown = createResolvesToUnknown(refined.aliases, refined.ambiguous);
       },
       ArrowFunctionExpression: checkReturnType,
       FunctionDeclaration: checkReturnType,

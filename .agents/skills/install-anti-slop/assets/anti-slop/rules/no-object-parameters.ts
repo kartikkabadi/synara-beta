@@ -2,7 +2,7 @@ import { defineRule } from "@oxlint/plugins";
 
 import type { ESTree, SourceCode } from "@oxlint/plugins";
 
-import { collectAliasDeclarationsIn, refineAliasAmbiguity } from "../shared/resolves-to-unknown.ts";
+import { createScopeIndex, type Scope, type ScopeIndex } from "../shared/resolves-to-unknown.ts";
 import { lexicalTypeParameterNames } from "../shared/lexical-type-parameters.ts";
 
 type Parameter = ESTree.ParamPattern;
@@ -48,57 +48,71 @@ export const noObjectParametersRule = defineRule({
     },
   },
   createOnce(context) {
-    let aliases: ReadonlyMap<string, ESTree.TSType> = new Map();
-    let ambiguous: ReadonlySet<string> = new Set();
+    let index: ScopeIndex | null = null;
 
     const resolvesToObjectWith = (
       type: ESTree.TSType,
+      scope: Scope | null,
       shadowedAliases: ReadonlySet<string>,
       visited: Set<string>,
-      aliasTypes: ReadonlyMap<string, ESTree.TSType>,
-      ambiguousAliases: ReadonlySet<string>,
+      substitutions: ReadonlyMap<string, ESTree.TSType>,
     ): boolean => {
       if (type.type === "TSObjectKeyword") return true;
       if (type.type === "TSParenthesizedType") {
         return resolvesToObjectWith(
           type.typeAnnotation,
+          scope,
           shadowedAliases,
           visited,
-          aliasTypes,
-          ambiguousAliases,
+          substitutions,
         );
       }
       if (type.type === "TSUnionType") {
         return type.types.some((member) =>
-          resolvesToObjectWith(member, shadowedAliases, visited, aliasTypes, ambiguousAliases),
+          resolvesToObjectWith(member, scope, shadowedAliases, visited, substitutions),
         );
       }
-      if (
-        type.type !== "TSTypeReference" ||
-        type.typeName.type !== "Identifier" ||
-        (type.typeArguments !== null &&
-          type.typeArguments !== undefined &&
-          type.typeArguments.params.length > 0) ||
-        visited.has(type.typeName.name) ||
-        shadowedAliases.has(type.typeName.name) ||
-        ambiguousAliases.has(type.typeName.name)
-      ) {
-        return false;
+      if (type.type !== "TSTypeReference" || type.typeName.type !== "Identifier") return false;
+      const name = type.typeName.name;
+      const substitution = substitutions.get(name);
+      if (substitution !== undefined) {
+        if (visited.has(name)) return false;
+        const nextVisited = new Set(visited);
+        nextVisited.add(name);
+        return resolvesToObjectWith(
+          substitution,
+          scope,
+          shadowedAliases,
+          nextVisited,
+          substitutions,
+        );
       }
-      const alias = aliasTypes.get(type.typeName.name);
-      if (alias === undefined) return false;
+      if (visited.has(name) || shadowedAliases.has(name)) return false;
+      const found = index?.lookupAlias(name, scope);
+      if (found === null || found === undefined || found.ambiguous) return false;
+      const alias = found.alias;
+      const parameters = alias.typeParameters?.params ?? [];
+      const arguments_ = type.typeArguments?.params ?? [];
+      if (arguments_.length > 0 && parameters.length === 0) return false;
+      const nextSubstitutions = new Map(substitutions);
+      for (const [parameterIndex, parameter] of parameters.entries()) {
+        const argument = arguments_[parameterIndex] ?? parameter.default;
+        if (argument === null || argument === undefined) return false;
+        nextSubstitutions.set(parameter.name.name, argument);
+      }
       const nextVisited = new Set(visited);
-      nextVisited.add(type.typeName.name);
+      nextVisited.add(name);
       return resolvesToObjectWith(
-        alias,
+        alias.typeAnnotation,
+        index?.scopeOf(alias) ?? null,
         shadowedAliases,
         nextVisited,
-        aliasTypes,
-        ambiguousAliases,
+        nextSubstitutions,
       );
     };
 
     const checkParameters = (node: ParameterOwner) => {
+      if (index === null) return;
       const shadowedAliases = lexicalTypeParameterNames(node, context.sourceCode.visitorKeys);
       for (const parameter of node.params) {
         const annotation = parameterAnnotation(parameter);
@@ -106,10 +120,10 @@ export const noObjectParametersRule = defineRule({
         if (
           !resolvesToObjectWith(
             annotation.typeAnnotation,
+            index.scopeOf(node),
             shadowedAliases,
             new Set(),
-            aliases,
-            ambiguous,
+            new Map(),
           )
         ) {
           continue;
@@ -122,42 +136,9 @@ export const noObjectParametersRule = defineRule({
       }
     };
 
-    const nonGenericTypeAliases = (
-      declarations: ReadonlyMap<string, readonly ESTree.TSTypeAliasDeclaration[]>,
-    ): Map<string, ESTree.TSType> => {
-      const aliasTypes = new Map<string, ESTree.TSType>();
-      for (const [name, list] of declarations) {
-        const first = list[0];
-        if (first === undefined) continue;
-        if (first.typeParameters !== null && first.typeParameters !== undefined) continue;
-        aliasTypes.set(name, first.typeAnnotation);
-      }
-      return aliasTypes;
-    };
-
     return {
       Program(node) {
-        const collected = collectAliasDeclarationsIn(node, context.sourceCode.visitorKeys);
-        const conservativeAliases = nonGenericTypeAliases(collected.declarations);
-        const refined = refineAliasAmbiguity(
-          collected.declarations,
-          collected.ambiguous,
-          (type, name) =>
-            resolvesToObjectWith(
-              type,
-              new Set(),
-              new Set([name]),
-              conservativeAliases,
-              collected.ambiguous,
-            ),
-        );
-        const aliasTypes = new Map<string, ESTree.TSType>();
-        for (const [name, alias] of refined.aliases) {
-          if (alias.typeParameters !== null && alias.typeParameters !== undefined) continue;
-          aliasTypes.set(name, alias.typeAnnotation);
-        }
-        aliases = aliasTypes;
-        ambiguous = refined.ambiguous;
+        index = createScopeIndex(node, context.sourceCode.visitorKeys);
       },
       ArrowFunctionExpression: checkParameters,
       FunctionDeclaration: checkParameters,

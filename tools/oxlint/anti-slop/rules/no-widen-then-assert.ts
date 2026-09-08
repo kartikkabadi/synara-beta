@@ -26,9 +26,10 @@ function collectShadowedRecordBuiltIns(program: ESTree.Program): ReadonlySet<str
         ? statement.declaration
         : statement;
     if (declaration?.type === "ImportDeclaration") {
+      // Any import binding that reuses a record built-in name shadows it in
+      // type position, regardless of importKind: class and generic value
+      // imports are type-capable too.
       for (const specifier of declaration.specifiers) {
-        const kind = "importKind" in specifier ? specifier.importKind : declaration.importKind;
-        if (kind !== "type") continue;
         if (recordBuiltInNames.has(specifier.local.name)) shadowed.add(specifier.local.name);
       }
       continue;

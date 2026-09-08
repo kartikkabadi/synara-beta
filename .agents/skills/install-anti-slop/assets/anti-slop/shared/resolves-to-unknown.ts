@@ -1,10 +1,21 @@
 import type { ESTree } from "@oxlint/plugins";
 
+type Substitutions = ReadonlyMap<string, ESTree.TSType>;
+
+export type Scope = {
+  readonly parent: Scope | null;
+  readonly aliases: Map<string, ESTree.TSTypeAliasDeclaration[]>;
+};
+
 type VisitorKeys = Readonly<Record<string, readonly string[]>>;
 
-export type AliasDeclarations = ReadonlyMap<string, ESTree.TSTypeAliasDeclaration>;
-
-type Substitutions = ReadonlyMap<string, ESTree.TSType>;
+const SCOPE_STARTERS = new Set([
+  "Program",
+  "BlockStatement",
+  "StaticBlock",
+  "SwitchStatement",
+  "TSModuleBlock",
+]);
 
 function isNode(value: unknown): value is ESTree.Node {
   return (
@@ -12,84 +23,92 @@ function isNode(value: unknown): value is ESTree.Node {
   );
 }
 
-function collectAliasDeclarations(
+function isAliasDeclaration(node: ESTree.Node): node is ESTree.TSTypeAliasDeclaration {
+  return node.type === "TSTypeAliasDeclaration";
+}
+
+function indexScopes(
   node: ESTree.Node,
+  scope: Scope,
+  nodeScopes: Map<ESTree.Node, Scope>,
   visitorKeys: VisitorKeys,
-  declarations: Map<string, ESTree.TSTypeAliasDeclaration[]>,
-  ambiguous: Set<string>,
 ): void {
-  if (node.type === "TSTypeAliasDeclaration") {
-    const list = declarations.get(node.id.name) ?? [];
+  nodeScopes.set(node, scope);
+  if (isAliasDeclaration(node)) {
+    const list = scope.aliases.get(node.id.name) ?? [];
     list.push(node);
-    declarations.set(node.id.name, list);
-    if (list.length > 1) ambiguous.add(node.id.name);
+    scope.aliases.set(node.id.name, list);
   }
   const record = node as unknown as Readonly<Record<string, unknown>>;
   for (const key of visitorKeys[node.type] ?? []) {
     const value = record[key];
     if (isNode(value)) {
-      collectAliasDeclarations(value, visitorKeys, declarations, ambiguous);
+      indexScopes(value, scopeForChild(value, scope), nodeScopes, visitorKeys);
       continue;
     }
     if (!Array.isArray(value)) continue;
     for (const child of value) {
-      if (isNode(child)) collectAliasDeclarations(child, visitorKeys, declarations, ambiguous);
+      if (isNode(child)) {
+        indexScopes(child, scopeForChild(child, scope), nodeScopes, visitorKeys);
+      }
     }
   }
 }
 
-export function collectAliasDeclarationsIn(
-  program: ESTree.Program,
-  visitorKeys: VisitorKeys,
-): {
-  declarations: ReadonlyMap<string, readonly ESTree.TSTypeAliasDeclaration[]>;
-  ambiguous: ReadonlySet<string>;
-} {
-  const declarations = new Map<string, ESTree.TSTypeAliasDeclaration[]>();
-  const ambiguous = new Set<string>();
-  for (const statement of program.body) {
-    collectAliasDeclarations(statement, visitorKeys, declarations, ambiguous);
-  }
-  return { declarations, ambiguous };
-}
-
-export function firstWinsAliasDeclarations(
-  declarations: ReadonlyMap<string, readonly ESTree.TSTypeAliasDeclaration[]>,
-): AliasDeclarations {
-  const aliases = new Map<string, ESTree.TSTypeAliasDeclaration>();
-  for (const [name, list] of declarations) {
-    const first = list[0];
-    if (first !== undefined) aliases.set(name, first);
-  }
-  return aliases;
+function scopeForChild(child: ESTree.Node, scope: Scope): Scope {
+  return SCOPE_STARTERS.has(child.type) ? { parent: scope, aliases: new Map() } : scope;
 }
 
 /**
- * Keeps an ambiguous alias name resolvable when every declaration of that name
- * resolves the same way, so same-name reuse only suppresses when it truly shadows.
+ * Indexes type-alias declarations by lexical scope. Function and block bodies
+ * open scopes, so a nested alias shadows outer names only for uses inside its
+ * own scope and can never affect annotations outside it. Function parameter and
+ * return-type annotations resolve in the scope where the function is declared,
+ * matching TypeScript.
  */
-export function refineAliasAmbiguity(
-  declarations: ReadonlyMap<string, readonly ESTree.TSTypeAliasDeclaration[]>,
-  ambiguous: ReadonlySet<string>,
-  resolves: (type: ESTree.TSType, name: string) => boolean,
-): { aliases: AliasDeclarations; ambiguous: ReadonlySet<string> } {
-  const refined = new Set<string>();
-  for (const name of ambiguous) {
-    const verdicts = new Set<boolean>();
-    for (const declaration of declarations.get(name) ?? []) {
-      verdicts.add(resolves(declaration.typeAnnotation, name));
-    }
-    if (verdicts.size > 1) refined.add(name);
+export function createScopeIndex(program: ESTree.Program, visitorKeys: VisitorKeys): ScopeIndex {
+  const rootScope: Scope = { parent: null, aliases: new Map() };
+  const nodeScopes = new Map<ESTree.Node, Scope>();
+  for (const statement of program.body) {
+    indexScopes(statement, rootScope, nodeScopes, visitorKeys);
   }
-  return { aliases: firstWinsAliasDeclarations(declarations), ambiguous: refined };
+  const lookupAlias = (
+    name: string,
+    scope: Scope | null,
+  ): { alias: ESTree.TSTypeAliasDeclaration; ambiguous: boolean } | null => {
+    let current = scope;
+    while (current !== null) {
+      const list = current.aliases.get(name);
+      const first = list?.[0];
+      if (first !== undefined) return { alias: first, ambiguous: (list?.length ?? 0) > 1 };
+      current = current.parent;
+    }
+    return null;
+  };
+  return {
+    scopeOf: (node) => nodeScopes.get(node) ?? null,
+    lookupAlias,
+    allAliases: () => [...nodeScopes.keys()].filter(isAliasDeclaration),
+  };
 }
 
-export type ResolvesToUnknown = (
-  type: ESTree.TSType,
-  shadowedAliases: ReadonlySet<string>,
-  visited?: Set<string>,
-  substitutions?: Substitutions,
-) => boolean;
+export type ScopeIndex = ReturnType<typeof createScopeIndex>;
+
+export type VisitorKeys = Readonly<Record<string, readonly string[]>>;
+
+function typeSignature(type: ESTree.TSType): string {
+  const unwrapped = type.type === "TSParenthesizedType" ? type.typeAnnotation : type;
+  if (unwrapped.type !== "TSTypeReference" || unwrapped.typeName.type !== "Identifier") {
+    return unwrapped.type;
+  }
+  const arguments_ = unwrapped.typeArguments?.params ?? [];
+  return `${unwrapped.typeName.name}<${arguments_.map(typeSignature).join(",")}>`;
+}
+
+/** Visit key for an alias body's self-reference, blocking direct alias cycles. */
+export function selfAliasVisitKey(name: string): string {
+  return `${name}#${name}<>`;
+}
 
 function resolveSubstitutionArgument(
   type: ESTree.TSType,
@@ -97,75 +116,116 @@ function resolveSubstitutionArgument(
   resolving: ReadonlySet<string> = new Set(),
 ): ESTree.TSType {
   const unwrapped = type.type === "TSParenthesizedType" ? type.typeAnnotation : type;
-  if (unwrapped.type !== "TSTypeReference" || unwrapped.typeName.type !== "Identifier") return type;
+  if (unwrapped.type !== "TSTypeReference" || unwrapped.typeName.type !== "Identifier") {
+    return type;
+  }
   const name = unwrapped.typeName.name;
-  if (resolving.has(name)) return type;
-  const substitution = base.get(name);
-  if (substitution === undefined) return type;
+  const substitution = resolving.has(name) ? undefined : base.get(name);
+  const resolved = substitution === undefined ? type : substitution;
+  const arguments_ = unwrapped.typeArguments?.params;
+  if (arguments_ === undefined || arguments_.length === 0) return resolved;
   const nextResolving = new Set(resolving);
   nextResolving.add(name);
-  return resolveSubstitutionArgument(substitution, base, nextResolving);
+  const substitutedArguments = arguments_.map((argument) =>
+    resolveSubstitutionArgument(argument, base, nextResolving),
+  );
+  const source = resolved.type === "TSTypeReference" ? resolved : unwrapped;
+  return {
+    ...source,
+    typeArguments: {
+      ...(unwrapped.typeArguments ?? { params: [] }),
+      params: substitutedArguments,
+    },
+  };
 }
 
-/** Builds a resolver that decides whether a type annotation resolves to `unknown`. */
-export function createResolvesToUnknown(
-  aliases: AliasDeclarations,
-  ambiguous: ReadonlySet<string>,
-): ResolvesToUnknown {
-  const resolvesToUnknown: ResolvesToUnknown = (
-    type,
-    shadowedAliases,
-    visited = new Set<string>(),
-    substitutions = new Map<string, ESTree.TSType>(),
-  ) => {
+export type ScopedResolves = (
+  useSite: ESTree.Node,
+  type: ESTree.TSType,
+  shadowedAliases: ReadonlySet<string>,
+  visited?: Set<string>,
+  substitutions?: Substitutions,
+) => boolean;
+
+/** Builds a scope-aware resolver that decides whether a type annotation resolves to `unknown`. */
+export function createScopedResolvesToUnknown(index: ScopeIndex): ScopedResolves {
+  const rootScope: Scope = { parent: null, aliases: new Map() };
+
+  const resolvesToUnknownAt = (
+    type: ESTree.TSType,
+    scope: Scope | null,
+    shadowedAliases: ReadonlySet<string>,
+    visited: Set<string>,
+    substitutions: Substitutions,
+  ): boolean => {
     if (type.type === "TSUnknownKeyword") return true;
     if (type.type === "TSParenthesizedType") {
-      return resolvesToUnknown(type.typeAnnotation, shadowedAliases, visited, substitutions);
+      return resolvesToUnknownAt(
+        type.typeAnnotation,
+        scope,
+        shadowedAliases,
+        visited,
+        substitutions,
+      );
     }
     if (type.type === "TSUnionType") {
       return type.types.some((member) =>
-        resolvesToUnknown(member, shadowedAliases, visited, substitutions),
+        resolvesToUnknownAt(member, scope, shadowedAliases, visited, substitutions),
       );
     }
     if (type.type !== "TSTypeReference" || type.typeName.type !== "Identifier") return false;
     const name = type.typeName.name;
+    const visitKey = `${name}#${typeSignature(type)}`;
     const substitution = substitutions.get(name);
     if (substitution !== undefined) {
-      if (visited.has(name)) return false;
+      if (visited.has(visitKey)) return false;
       const nextVisited = new Set(visited);
-      nextVisited.add(name);
-      return resolvesToUnknown(substitution, shadowedAliases, nextVisited, substitutions);
+      nextVisited.add(visitKey);
+      return resolvesToUnknownAt(substitution, scope, shadowedAliases, nextVisited, substitutions);
     }
-    if (shadowedAliases.has(name) || ambiguous.has(name) || visited.has(name)) return false;
-    const alias = aliases.get(name);
-    if (alias !== undefined) {
-      const parameters = alias.typeParameters?.params ?? [];
-      const arguments_ = type.typeArguments?.params ?? [];
-      const nextSubstitutions = new Map(substitutions);
-      for (const [index, parameter] of parameters.entries()) {
-        const argument = arguments_[index] ?? parameter.default;
-        if (argument === null || argument === undefined) return false;
-        nextSubstitutions.set(
-          parameter.name.name,
-          resolveSubstitutionArgument(argument, substitutions),
+    if (shadowedAliases.has(name) || visited.has(visitKey)) return false;
+    const found = index.lookupAlias(name, scope);
+    if (found === null) {
+      if (name === "Promise" || name === "PromiseLike") {
+        const value = type.typeArguments?.params[0];
+        return (
+          value !== undefined &&
+          resolvesToUnknownAt(value, scope, shadowedAliases, visited, substitutions)
         );
       }
-      const nextVisited = new Set(visited);
-      nextVisited.add(name);
-      return resolvesToUnknown(
-        alias.typeAnnotation,
-        shadowedAliases,
-        nextVisited,
-        nextSubstitutions,
+      return false;
+    }
+    if (found.ambiguous) return false;
+    const alias = found.alias;
+    const aliasScope = index.scopeOf(alias) ?? rootScope;
+    const parameters = alias.typeParameters?.params ?? [];
+    const arguments_ = type.typeArguments?.params ?? [];
+    const nextSubstitutions = new Map(substitutions);
+    for (const [parameterIndex, parameter] of parameters.entries()) {
+      const argument = arguments_[parameterIndex] ?? parameter.default;
+      if (argument === null || argument === undefined) return false;
+      nextSubstitutions.set(
+        parameter.name.name,
+        resolveSubstitutionArgument(argument, substitutions),
       );
     }
-    if (name === "Promise" || name === "PromiseLike") {
-      const value = type.typeArguments?.params[0];
-      return (
-        value !== undefined && resolvesToUnknown(value, shadowedAliases, visited, substitutions)
-      );
-    }
-    return false;
+    const nextVisited = new Set(visited);
+    nextVisited.add(visitKey);
+    return resolvesToUnknownAt(
+      alias.typeAnnotation,
+      aliasScope,
+      shadowedAliases,
+      nextVisited,
+      nextSubstitutions,
+    );
   };
-  return resolvesToUnknown;
+
+  return (useSite, type, shadowedAliases, visited = new Set<string>(), substitutions = new Map()) =>
+    resolvesToUnknownAt(
+      type,
+      index.scopeOf(useSite) ?? rootScope,
+      shadowedAliases,
+      visited,
+      substitutions,
+    );
 }

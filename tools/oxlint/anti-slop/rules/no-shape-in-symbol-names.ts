@@ -36,9 +36,9 @@ function isDeclaredName(node: NamedNode): boolean {
     case "TSMethodSignature":
       return parent.key === node && !parent.computed;
     case "Property":
-      return parent.parent?.type === "ObjectPattern"
-        ? parent.value === node
-        : parent.key === node && !parent.computed;
+      // Only destructured bindings declare a symbol; object-literal keys and
+      // destructured source keys are property accesses, not declarations.
+      return parent.parent?.type === "ObjectPattern" && parent.value === node;
     case "ArrayPattern":
       return (parent.elements as readonly unknown[]).includes(node);
     case "AssignmentPattern":
@@ -55,6 +55,11 @@ function isDeclaredName(node: NamedNode): boolean {
       return parent.key === node;
     case "TSIndexSignature":
       return (parent.parameters as readonly unknown[]).includes(node);
+    case "TSCallSignatureDeclaration":
+    case "TSConstructSignatureDeclaration":
+    case "TSConstructorType":
+    case "TSFunctionType":
+      return (parent.params as readonly unknown[]).includes(node);
     case "TSDeclareFunction":
       return parent.id === node || (parent.params as readonly unknown[]).includes(node);
     default:

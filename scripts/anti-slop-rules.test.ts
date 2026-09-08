@@ -75,6 +75,19 @@ function runRules(
 }
 
 describe("no-module-mocking", () => {
+  it("reports namespace-import mocking like direct vi imports", () => {
+    const byFile = runRules(
+      {
+        "namespace.ts":
+          'import * as vitest from "vitest";\nvitest.vi.mock("./seam", () => ({}));\n',
+        "direct.ts": 'import { vi } from "vitest";\nvi.mock("./seam", () => ({}));\n',
+      },
+      { "anti-slop/no-module-mocking": "error" },
+    );
+    expect(byFile.get("namespace.ts")).toEqual(["anti-slop(no-module-mocking)"]);
+    expect(byFile.get("direct.ts")).toEqual(["anti-slop(no-module-mocking)"]);
+  });
+
   it("reports jest.setMock like the other mocking entry points", () => {
     const byFile = runRules(
       {
@@ -94,11 +107,14 @@ describe("no-conditional-empty-object-spread", () => {
       {
         "parens.ts": "const cond = false;\nexport const x = { ...(cond ? ({}) : { a: 1 }) };\n",
         "plain.ts": "const cond = false;\nexport const x = { ...(cond ? {} : { a: 1 }) };\n",
+        "asserted.ts":
+          "const cond = false;\nexport const x = { ...(cond ? ({} as object) : { a: 1 }) };\n",
       },
       { "anti-slop/no-conditional-empty-object-spread": "error" },
     );
     expect(byFile.get("parens.ts")).toEqual(["anti-slop(no-conditional-empty-object-spread)"]);
     expect(byFile.get("plain.ts")).toEqual(["anti-slop(no-conditional-empty-object-spread)"]);
+    expect(byFile.get("asserted.ts")).toEqual(["anti-slop(no-conditional-empty-object-spread)"]);
   });
 });
 
@@ -281,6 +297,28 @@ describe("no-unsafe-dictionary-type", () => {
     );
     expect(byFile.get("nested-record.ts")).toEqual(["anti-slop(no-unsafe-dictionary-type)"]);
   });
+
+  it("resolves generic interface dictionaries instantiated with unsafe values", () => {
+    const byFile = runRules(
+      {
+        "generic-interface.ts":
+          "interface Box<T> { [key: string]: T }\nexport let b: Box<unknown> = {};\nexport let safe: Box<string> = {};\n",
+      },
+      { "anti-slop/no-unsafe-dictionary-type": "error" },
+    );
+    expect(byFile.get("generic-interface.ts")).toEqual(["anti-slop(no-unsafe-dictionary-type)"]);
+  });
+
+  it("treats imported built-in names as shadowed regardless of import kind", () => {
+    const byFile = runRules(
+      {
+        "imported-record.ts":
+          'import { Record } from "./record";\nexport let r: Record<string, unknown> = {};\n',
+      },
+      { "anti-slop/no-unsafe-dictionary-type": "error" },
+    );
+    expect(byFile.get("imported-record.ts")).toBeUndefined();
+  });
 });
 
 describe("no-unknown-returns", () => {
@@ -348,6 +386,17 @@ describe("no-known-value-widening", () => {
     expect(byFile.get("nested-assert.ts")).toEqual(["anti-slop(no-known-value-widening)"]);
   });
 
+  it("reports a non-null-asserted widening exactly once", () => {
+    const byFile = runRules(
+      {
+        "non-null-assert.ts":
+          "export function f() {\n  const value = { a: 1 };\n  const x: unknown = (value as unknown)!;\n  return x;\n}\n",
+      },
+      { "anti-slop/no-known-value-widening": "error" },
+    );
+    expect(byFile.get("non-null-assert.ts")).toEqual(["anti-slop(no-known-value-widening)"]);
+  });
+
   it("does not flag finite mapped-type annotations", () => {
     const byFile = runRules(
       {
@@ -370,6 +419,9 @@ describe("no-shape-in-symbol-names", () => {
         "access.ts": "declare const box: { radius: number };\nexport const s = box.shape;\n",
         "import-ref.ts": "import { shape } from 'geometry';\nexport const s = shape;\n",
         "substring.ts": "export const reshape = (value: string) => value;\n",
+        "literal-key.ts": "export const box = { shape: 'round' };\n",
+        "destructure-rename.ts":
+          "declare const box: Record<string, number>;\nexport const s = box;\nconst { shape: sides } = box;\nexport const n = sides;\n",
       },
       { "anti-slop/no-shape-in-symbol-names": "error" },
     );
@@ -378,6 +430,21 @@ describe("no-shape-in-symbol-names", () => {
     expect(byFile.get("access.ts")).toBeUndefined();
     expect(byFile.get("import-ref.ts")).toBeUndefined();
     expect(byFile.get("substring.ts")).toEqual(reported);
+    expect(byFile.get("literal-key.ts")).toBeUndefined();
+    expect(byFile.get("destructure-rename.ts")).toBeUndefined();
+  });
+
+  it("reports signature parameters in function and constructor types", () => {
+    const byFile = runRules(
+      {
+        "function-type.ts": "export type Handler = (shape: string) => void;\n",
+        "constructor-type.ts": "export type Maker = new (shape: string) => object;\n",
+      },
+      { "anti-slop/no-shape-in-symbol-names": "error" },
+    );
+    const reported = ["anti-slop(no-shape-in-symbol-names)"];
+    expect(byFile.get("function-type.ts")).toEqual(reported);
+    expect(byFile.get("constructor-type.ts")).toEqual(reported);
   });
 
   it("reports declare-function names and destructured binding values", () => {
@@ -430,16 +497,38 @@ describe("no-object-parameters", () => {
     expect(byFile.get("nested-alias.ts")).toEqual(reported);
     expect(byFile.get("clean.ts")).toBeUndefined();
   });
+
+  it("resolves generic object aliases including defaults and arguments", () => {
+    const byFile = runRules(
+      {
+        "generic-default.ts":
+          "type Broad<T = object> = T;\nexport function f(input: Broad) { return input; }\n",
+        "generic-arg.ts":
+          "type Identity<T> = T;\nexport function g(input: Identity<object>) { return input; }\n",
+        "typed-arg.ts":
+          "type Identity<T> = T;\nexport function h(input: Identity<string>) { return input; }\n",
+      },
+      { "anti-slop/no-object-parameters": "error" },
+    );
+    const reported = ["anti-slop(no-object-parameters)"];
+    expect(byFile.get("generic-default.ts")).toEqual(reported);
+    expect(byFile.get("generic-arg.ts")).toEqual(reported);
+    expect(byFile.get("typed-arg.ts")).toBeUndefined();
+  });
 });
 
 describe("no-service-constructor-imports", () => {
-  it("flags only make constructors named after their owning module", () => {
+  it("flags only make constructors named after their owning Layers module", () => {
     const byFile = runRules(
       {
         "foreign-factory.ts":
           'import { makeSocketUrl } from "../wsTransport";\nexport const u = makeSocketUrl(null, "/ws");\n',
         "owning-module.ts":
+          "import { makeWsDeviceHandlers } from './device/Layers/wsDeviceHandlers';\nexport const h = makeWsDeviceHandlers({});\n",
+        "outside-layers.ts":
           "import { makeWsDeviceHandlers } from './device/wsDeviceHandlers';\nexport const h = makeWsDeviceHandlers({});\n",
+        "type-only.ts":
+          "import type { makeWsDeviceHandlers } from './device/Layers/wsDeviceHandlers';\nexport type H = typeof makeWsDeviceHandlers;\n",
       },
       { "anti-slop-effect/no-service-constructor-imports": "error" },
     );
@@ -447,5 +536,7 @@ describe("no-service-constructor-imports", () => {
     expect(byFile.get("owning-module.ts")).toEqual([
       "anti-slop-effect(no-service-constructor-imports)",
     ]);
+    expect(byFile.get("outside-layers.ts")).toBeUndefined();
+    expect(byFile.get("type-only.ts")).toBeUndefined();
   });
 });

@@ -4,6 +4,8 @@ import type { ESTree } from "@oxlint/plugins";
 
 const SERVICE_CONSTRUCTOR_NAME = /^make[A-Z]/u;
 const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]sx?$/u;
+const TEST_PATH = /(?:^|\/)(?:e2e|fixtures|__fixtures__|__tests__|__mocks__)\//u;
+const EFFECT_LAYER_PATH = /(?:^|\/)Layers\//u;
 
 function isProjectLocalImport(source: string): boolean {
   return source.startsWith("./") || source.startsWith("../");
@@ -46,14 +48,22 @@ export const noServiceConstructorImportsRule = defineRule({
     },
   },
   create(context) {
-    const isTestFile = TEST_FILE.test(context.filename.replaceAll("\\", "/"));
+    const normalizedFilename = context.filename.replaceAll("\\", "/");
+    const isTestFile = TEST_FILE.test(normalizedFilename) || TEST_PATH.test(normalizedFilename);
 
     return {
       ImportDeclaration(node) {
         if (isTestFile || !isProjectLocalImport(node.source.value)) return;
+        // Type-only imports create no runtime constructor dependency.
+        if (node.importKind === "type") return;
+        // Restrict the make<Capability> heuristic to Effect capability modules
+        // (the repository's Layers/ convention) so ordinary runtime factories
+        // are never reported.
+        if (!EFFECT_LAYER_PATH.test(node.source.value)) return;
 
         for (const specifier of node.specifiers) {
           if (specifier.type !== "ImportSpecifier") continue;
+          if (specifier.importKind === "type") continue;
 
           const importedName = getImportedName(specifier);
           if (!SERVICE_CONSTRUCTOR_NAME.test(importedName)) continue;

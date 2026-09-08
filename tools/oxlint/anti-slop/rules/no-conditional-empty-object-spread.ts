@@ -3,7 +3,13 @@ import type { ESTree } from "@oxlint/plugins";
 
 function unwrapParentheses(node: ESTree.Expression): ESTree.Expression {
   let current = node;
-  while (current.type === "ParenthesizedExpression") {
+  while (
+    current.type === "ParenthesizedExpression" ||
+    current.type === "TSAsExpression" ||
+    current.type === "TSTypeAssertion" ||
+    current.type === "TSSatisfiesExpression" ||
+    current.type === "TSNonNullExpression"
+  ) {
     current = current.expression;
   }
   return current;

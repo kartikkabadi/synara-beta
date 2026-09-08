@@ -22,21 +22,58 @@ function importedName(node: ESTree.Node): string | null {
   return node.imported.type === "Identifier" ? node.imported.name : node.imported.value;
 }
 
-function isTestFrameworkObject(
+function unwrapValueExpression(expression: ESTree.Expression): ESTree.Expression {
+  let current = expression;
+  while (
+    current.type === "ParenthesizedExpression" ||
+    current.type === "TSAsExpression" ||
+    current.type === "TSSatisfiesExpression" ||
+    current.type === "TSNonNullExpression" ||
+    current.type === "TSTypeAssertion"
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function isTestFrameworkNamespaceImport(
   sourceCode: SourceCode,
   expression: ESTree.Expression,
-): expression is ESTree.IdentifierReference {
+): boolean {
   if (expression.type !== "Identifier") return false;
+  const variable = resolveVariable(sourceCode, expression);
+  if (variable === null || variable.defs.length === 0) return false;
+  return variable.defs.some((definition) => {
+    if (definition.type !== "ImportBinding" || definition.parent?.type !== "ImportDeclaration") {
+      return false;
+    }
+    const source = definition.parent.source.value;
+    return (
+      definition.node.type === "ImportNamespaceSpecifier" &&
+      (source === "vitest" || source === "@jest/globals")
+    );
+  });
+}
+
+function isTestFrameworkObject(sourceCode: SourceCode, expression: ESTree.Expression): boolean {
+  const unwrapped = unwrapValueExpression(expression);
+  if (unwrapped.type === "MemberExpression" && !unwrapped.computed) {
+    // Namespace access such as `vitest.vi.mock`: the namespace import decides.
+    const member = unwrapped.property.type === "Identifier" ? unwrapped.property.name : null;
+    if (member !== "vi" && member !== "jest") return false;
+    return isTestFrameworkNamespaceImport(sourceCode, unwrapped.object);
+  }
+  if (unwrapped.type !== "Identifier") return false;
   if (
-    (expression.name === "vi" || expression.name === "jest") &&
-    sourceCode.isGlobalReference(expression)
+    (unwrapped.name === "vi" || unwrapped.name === "jest") &&
+    sourceCode.isGlobalReference(unwrapped)
   ) {
     return true;
   }
 
-  const variable = resolveVariable(sourceCode, expression);
+  const variable = resolveVariable(sourceCode, unwrapped);
   if (variable === null || variable.defs.length === 0) {
-    return expression.name === "vi" || expression.name === "jest";
+    return unwrapped.name === "vi" || unwrapped.name === "jest";
   }
   return variable.defs.some((definition) => {
     if (definition.type !== "ImportBinding" || definition.parent?.type !== "ImportDeclaration") {
@@ -51,10 +88,17 @@ function isTestFrameworkObject(
 }
 
 function moduleMockCall(sourceCode: SourceCode, callee: ESTree.Expression): boolean {
-  if (!("property" in callee) || !("object" in callee) || !("computed" in callee)) return false;
-  if (!isTestFrameworkObject(sourceCode, callee.object)) return false;
-  const property = callee.property;
-  const method = callee.computed
+  const unwrappedCallee = unwrapValueExpression(callee);
+  if (
+    !("property" in unwrappedCallee) ||
+    !("object" in unwrappedCallee) ||
+    !("computed" in unwrappedCallee)
+  ) {
+    return false;
+  }
+  if (!isTestFrameworkObject(sourceCode, unwrappedCallee.object)) return false;
+  const property = unwrappedCallee.property;
+  const method = unwrappedCallee.computed
     ? property.type === "Literal" && typeof property.value === "string"
       ? property.value
       : null

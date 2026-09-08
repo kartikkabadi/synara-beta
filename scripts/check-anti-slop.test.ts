@@ -27,6 +27,16 @@ describe("messageFingerprint", () => {
     expect(messageFingerprint("same message")).toBe(messageFingerprint("same message"));
     expect(messageFingerprint("first message")).not.toBe(messageFingerprint("second message"));
   });
+
+  it("separates identical messages from different source lines", () => {
+    expect(messageFingerprint("same message", "const a = unknownValue as string;")).not.toBe(
+      messageFingerprint("same message", "const b = otherValue as string;"),
+    );
+    expect(messageFingerprint("same message", "same line")).toBe(
+      messageFingerprint("same message", "same line"),
+    );
+    expect(messageFingerprint("same message")).toBe(messageFingerprint("same message", ""));
+  });
 });
 
 describe("parseAntiSlopDiagnostics", () => {

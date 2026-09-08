@@ -12,6 +12,7 @@ export interface OxlintDiagnostic {
   code: string;
   filename: string;
   message: string;
+  labels?: ReadonlyArray<{ span?: { readonly line?: number } }>;
 }
 
 export interface OxlintOutput {
@@ -38,33 +39,50 @@ const ANTI_SLOP_CODE_PREFIX = "anti-slop";
 
 export function parseAntiSlopDiagnostics(
   output: OxlintOutput,
-): Array<{ code: string; filename: string; message: string }> {
+): Array<{ code: string; filename: string; message: string; line?: number }> {
   return output.diagnostics
     .filter((diagnostic) => diagnostic.code.startsWith(ANTI_SLOP_CODE_PREFIX))
     .map((diagnostic) => ({
       code: diagnostic.code,
       filename: diagnostic.filename,
       message: diagnostic.message,
+      line: diagnostic.labels?.[0]?.span?.line,
     }));
 }
 
-export function messageFingerprint(message: string): string {
+export function messageFingerprint(message: string, sourceText = ""): string {
+  const input = sourceText === "" ? message : `${message}\u0000${sourceText}`;
   let hash = 0x811c9dc5;
-  for (let index = 0; index < message.length; index++) {
-    hash ^= message.charCodeAt(index);
+  for (let index = 0; index < input.length; index++) {
+    hash ^= input.charCodeAt(index);
     hash = Math.imul(hash, 0x01000193);
   }
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
+function sourceLineText(filename: string, line: number | undefined, cache: Map<string, string[]>) {
+  if (line === undefined) return "";
+  let lines = cache.get(filename);
+  if (lines === undefined) {
+    try {
+      lines = readFileSync(filename, "utf8").split("\n");
+    } catch {
+      lines = [];
+    }
+    cache.set(filename, lines);
+  }
+  return (lines[line - 1] ?? "").trim();
+}
+
 export function countViolationsByRuleAndFile(
-  diagnostics: Array<{ code: string; filename: string; message: string }>,
+  diagnostics: Array<{ code: string; filename: string; message: string; line?: number }>,
 ): ViolationCounts {
   const counts: ViolationCounts = new Map();
-  for (const { code, filename, message } of diagnostics) {
+  const lineCache = new Map<string, string[]>();
+  for (const { code, filename, message, line } of diagnostics) {
     const key = `${code}:${filename}`;
     const messages = countByMessage(counts, key);
-    const fingerprint = messageFingerprint(message);
+    const fingerprint = messageFingerprint(message, sourceLineText(filename, line, lineCache));
     messages.set(fingerprint, (messages.get(fingerprint) ?? 0) + 1);
   }
   return counts;

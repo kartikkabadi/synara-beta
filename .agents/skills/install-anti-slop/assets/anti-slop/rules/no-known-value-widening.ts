@@ -28,7 +28,13 @@ function unwrapExpression(expression: ESTree.Expression): ESTree.Expression {
 
 function unwrapParentheses(expression: ESTree.Expression): ESTree.Expression {
   let current = expression;
-  while (current.type === "ParenthesizedExpression") current = current.expression;
+  while (
+    current.type === "ParenthesizedExpression" ||
+    current.type === "TSSatisfiesExpression" ||
+    current.type === "TSNonNullExpression"
+  ) {
+    current = current.expression;
+  }
   return current;
 }
 
@@ -185,7 +191,7 @@ export const noKnownValueWideningRule = defineRule({
 
     return {
       Program(node) {
-        environment = createTypeEnvironment(node, context.sourceCode.visitorKeys);
+        environment = createTypeEnvironment(node);
       },
       VariableDeclarator(node) {
         if (node.init === null || node.id.type !== "Identifier") return;

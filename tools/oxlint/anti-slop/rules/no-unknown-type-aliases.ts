@@ -3,10 +3,11 @@ import { defineRule } from "@oxlint/plugins";
 import type { ESTree } from "@oxlint/plugins";
 
 import {
-  collectAliasDeclarationsIn,
-  createResolvesToUnknown,
-  firstWinsAliasDeclarations,
-  refineAliasAmbiguity,
+  createScopeIndex,
+  createScopedResolvesToUnknown,
+  selfAliasVisitKey,
+  type ScopeIndex,
+  type ScopedResolves,
 } from "../shared/resolves-to-unknown.ts";
 import { lexicalTypeParameterNames } from "../shared/lexical-type-parameters.ts";
 
@@ -24,35 +25,31 @@ export const noUnknownTypeAliasesRule = defineRule({
     },
   },
   createOnce(context) {
-    let resolvesToUnknown = createResolvesToUnknown(new Map(), new Set());
+    let resolvesToUnknown: ScopedResolves = () => false;
+    let index: ScopeIndex | null = null;
 
     return {
       Program(node) {
-        const collected = collectAliasDeclarationsIn(node, context.sourceCode.visitorKeys);
-        const conservative = createResolvesToUnknown(
-          firstWinsAliasDeclarations(collected.declarations),
-          collected.ambiguous,
-        );
-        const refined = refineAliasAmbiguity(
-          collected.declarations,
-          collected.ambiguous,
-          (type, name) => conservative(type, new Set(), new Set([name])),
-        );
-        resolvesToUnknown = createResolvesToUnknown(refined.aliases, refined.ambiguous);
-        for (const [name, list] of collected.declarations) {
-          for (const alias of list) {
-            const shadowedAliases = lexicalTypeParameterNames(
+        index = createScopeIndex(node, context.sourceCode.visitorKeys);
+        resolvesToUnknown = createScopedResolvesToUnknown(index);
+        for (const alias of index.allAliases()) {
+          const name = alias.id.name;
+          const shadowedAliases = lexicalTypeParameterNames(alias, context.sourceCode.visitorKeys);
+          if (
+            !resolvesToUnknown(
               alias,
-              context.sourceCode.visitorKeys,
-            );
-            if (!resolvesToUnknown(alias.typeAnnotation, shadowedAliases, new Set([name])))
-              continue;
-            context.report({
-              node: alias.id,
-              messageId: "unknownAlias",
-              data: { alias: name },
-            });
+              alias.typeAnnotation,
+              shadowedAliases,
+              new Set([selfAliasVisitKey(name)]),
+            )
+          ) {
+            continue;
           }
+          context.report({
+            node: alias.id,
+            messageId: "unknownAlias",
+            data: { alias: name },
+          });
         }
       },
     };
