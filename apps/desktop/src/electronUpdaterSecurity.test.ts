@@ -264,4 +264,49 @@ describe("electronUpdaterSecurity", () => {
       ),
     ).resolves.toContain("no valid embedded publisher subject DN");
   });
+
+  it("lets unsigned beta updates through when no publisher pin is embedded", async () => {
+    const updater = {
+      verifyUpdateCodeSignature: vi.fn(
+        async (_publisherNames: string[], _updateFile: string) => "old verifier",
+      ),
+    };
+
+    hardenElectronUpdater({ BaseUpdater: class {} }, updater, "win32", [], {
+      allowUnsignedUpdates: true,
+    });
+
+    await expect(
+      updater.verifyUpdateCodeSignature(
+        ["CN=Feed Controlled, O=Unexpected"],
+        "C:\\Temp\\SynaraSetup.exe",
+      ),
+    ).resolves.toBeNull();
+  });
+
+  it("keeps the fail-closed gate for signed flavors even when a beta allows unsigned", async () => {
+    const updater = {
+      verifyUpdateCodeSignature: vi.fn(
+        async (_publisherNames: string[], _updateFile: string) => "old verifier",
+      ),
+    };
+
+    hardenElectronUpdater(
+      { BaseUpdater: class {} },
+      updater,
+      "win32",
+      ["CN=Real Publisher, O=Acme"],
+      { allowUnsignedUpdates: true },
+    );
+
+    // With a real embedded pin, the signature verification still runs (and
+    // fails against a mismatched feed publisher) — the beta escape hatch only
+    // applies when there is no pin at all.
+    await expect(
+      updater.verifyUpdateCodeSignature(
+        ["CN=Feed Controlled, O=Unexpected"],
+        "C:\\Temp\\SynaraSetup.exe",
+      ),
+    ).resolves.not.toBeNull();
+  });
 });
