@@ -1036,6 +1036,7 @@ type FailedThreadSendSnapshot = Pick<
   | "pastedTexts"
   | "skills"
   | "mentions"
+  | "sourceProposedPlan"
 > & {
   restoredToComposer: boolean;
   /** The error string this failure raised, so eviction can tell whether the thread's current error still belongs to it. */
@@ -9116,6 +9117,7 @@ export default function ChatView({
           pastedTexts: composerPastedTextsSnapshot,
           skills: composerSkillsSnapshot,
           mentions: composerMentionsSnapshot,
+          sourceProposedPlan: sourceProposedPlanForSend,
         });
       }
       if (queuedChatTurn === null && !turnStartSucceeded && composerDraftWasEmpty) {
@@ -11468,6 +11470,7 @@ export default function ChatView({
         | "pastedTexts"
         | "skills"
         | "mentions"
+        | "sourceProposedPlan"
       >,
     ): QueuedComposerChatTurn => ({
       id: randomUUID(),
@@ -11498,6 +11501,7 @@ export default function ChatView({
       selectedPromptEffort,
       modelSelection: selectedModelSelection,
       ...(providerOptionsForDispatch ? { providerOptionsForDispatch } : {}),
+      ...(payload.sourceProposedPlan ? { sourceProposedPlan: payload.sourceProposedPlan } : {}),
       runtimeMode,
       interactionMode,
       envMode,
