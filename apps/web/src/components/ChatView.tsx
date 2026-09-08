@@ -1033,7 +1033,11 @@ type FailedThreadSendSnapshot = Pick<
   | "pastedTexts"
   | "skills"
   | "mentions"
-> & { restoredToComposer: boolean };
+> & {
+  restoredToComposer: boolean;
+  /** The error string this failure raised, so eviction can tell whether the thread's current error still belongs to it. */
+  errorMessage: string;
+};
 
 // Abandoned error cards would otherwise pin attachment File blobs in the map
 // forever; evict the oldest entry past this bound.
@@ -1506,6 +1510,8 @@ export default function ChatView({
   const [localDraftErrorsByThreadId, setLocalDraftErrorsByThreadId] = useState<
     Record<ThreadId, string | null>
   >({});
+  const localDraftErrorsByThreadIdRef = useRef(localDraftErrorsByThreadId);
+  localDraftErrorsByThreadIdRef.current = localDraftErrorsByThreadId;
   const [localDispatch, setLocalDispatch] = useState<LocalDispatchSnapshot | null>(null);
   const failedWorktreeSetupDispatchStartedAtRef = useRef<string | null>(null);
   // Live handle to the in-flight send's worktree preparation, resolved by the
@@ -9046,16 +9052,25 @@ export default function ChatView({
         failedSends.delete(threadIdForSend);
         if (failedSends.size >= MAX_FAILED_THREAD_SEND_SNAPSHOTS) {
           const oldest = failedSends.keys().next().value;
-          if (oldest !== undefined) {
+          const evicted = oldest === undefined ? null : failedSends.get(oldest);
+          if (oldest !== undefined && evicted) {
             failedSends.delete(oldest);
             // The evicted thread's error card can no longer replay its payload
             // — clear it rather than leave a retry that resends the wrong
-            // transcript message.
-            setThreadError(oldest, null);
+            // transcript message. Only clear when the current error is still
+            // the one this failure raised; a newer error is unrelated.
+            const currentError =
+              getThreadFromState(useStore.getState(), oldest)?.error ??
+              localDraftErrorsByThreadIdRef.current[oldest] ??
+              null;
+            if (currentError === evicted.errorMessage) {
+              setThreadError(oldest, null);
+            }
           }
         }
         failedSends.set(threadIdForSend, {
           restoredToComposer: composerDraftWasEmpty,
+          errorMessage: err instanceof Error ? err.message : "Failed to send message.",
           prompt: promptForSend,
           images: composerImagesSnapshot,
           files: composerFilesSnapshot,
