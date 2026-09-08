@@ -607,6 +607,7 @@ import {
   evictOverflowFailedThreadSend,
   failedSendSnapshotOwnsCurrentError,
   releaseFailedSendSnapshotAfterSend,
+  releaseSupersededFailedSend,
   failWorktreeSetupSnapshot,
   filterSidechatTranscriptMessages,
   hasLiveTurnTakenOver,
@@ -8187,12 +8188,14 @@ export default function ChatView({
         interactionMode: interactionModeForSend,
         envMode: envModeForSend,
       });
-      if (activeThread.error !== null || failedThreadSendsRef.current.has(activeThread.id)) {
-        // A queued send (including a restored retry) supersedes any shown error.
-        // Clear the error only when one is actually being replaced; the snapshot
-        // release below will delete the matching failed-send record.
-        setThreadError(activeThread.id, null);
-      }
+      // A queued send (including a restored retry) supersedes whatever failed-send
+      // payload and error card the thread was showing. Reading the current error
+      // here would race the attachment-persistence await above, so the release is
+      // unconditional at the commit point — the same cleanup the direct dispatch
+      // path runs below.
+      releaseSupersededFailedSend(failedThreadSendsRef.current, activeThread.id, (targetThreadId) =>
+        setThreadError(targetThreadId, null),
+      );
       return true;
     }
     const threadIdForSend = activeThread.id;
@@ -8558,8 +8561,9 @@ export default function ChatView({
 
     // A new dispatch supersedes any payload captured by an earlier failure —
     // only for this thread; another thread's failed send stays retryable.
-    failedThreadSendsRef.current.delete(threadIdForSend);
-    setThreadError(threadIdForSend, null);
+    releaseSupersededFailedSend(failedThreadSendsRef.current, threadIdForSend, (targetThreadId) =>
+      setThreadError(targetThreadId, null),
+    );
     if (expiredTerminalContextCount > 0) {
       const toastCopy = buildExpiredTerminalContextToastCopy(
         expiredTerminalContextCount,
@@ -9459,7 +9463,12 @@ export default function ChatView({
 
     sendInFlightRef.current = true;
     beginLocalDispatch({ expectedUserMessageId: messageIdForSend });
-    setThreadError(threadIdForSend, null);
+    // A committed send supersedes whatever failed-send payload and error card
+    // the thread was showing — release both together so the card cannot outlive
+    // its payload and the payload cannot leak without its card.
+    releaseSupersededFailedSend(failedThreadSendsRef.current, threadIdForSend, (targetThreadId) =>
+      setThreadError(targetThreadId, null),
+    );
     setOptimisticUserMessages((existing) => [
       ...existing,
       {
@@ -11453,13 +11462,12 @@ export default function ChatView({
     const threadId = activeThread.id;
     const dispatchRetryTurn = (retryTurn: QueuedComposerChatTurn) => {
       if (hasQueueableLiveTurn) {
-        setThreadError(threadId, null);
         enqueueQueuedComposerTurn(threadId, retryTurn);
-        // The queued turn now durably owns the payload — release the snapshot,
-        // but only if it is still the exact snapshot this retry is holding.
-        if (failedThreadSendsRef.current.get(threadId) === failedSend) {
-          failedThreadSendsRef.current.delete(threadId);
-        }
+        // The queued turn now durably owns the payload — release the snapshot
+        // and the card together, the same cleanup an accepted send runs.
+        releaseSupersededFailedSend(failedThreadSendsRef.current, threadId, (targetThreadId) =>
+          setThreadError(targetThreadId, null),
+        );
         return;
       }
       void lateSendHandlers.send(undefined, "queue", retryTurn);

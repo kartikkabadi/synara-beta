@@ -2005,3 +2005,19 @@ export async function releaseFailedSendSnapshotAfterSend<S extends FailedSendErr
   }
   return accepted;
 }
+
+// Accepting a send supersedes whatever failed-send payload and error card the
+// thread was showing — the same pairing the direct dispatch path runs when it
+// commits the turn. The delete and the clear must move together: a card
+// without its payload can never retry, and a payload without its card leaks
+// attachments. It runs unconditionally at the commit point so an error that
+// lands while the send is still being prepared (e.g. a live turn failing
+// during attachment persistence) is superseded along with the rest.
+export function releaseSupersededFailedSend<S extends FailedSendErrorIdentity>(
+  failedSends: Map<ThreadId, S>,
+  threadId: ThreadId,
+  clearError: (threadId: ThreadId) => void,
+): void {
+  failedSends.delete(threadId);
+  clearError(threadId);
+}

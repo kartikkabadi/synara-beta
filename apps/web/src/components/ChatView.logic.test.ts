@@ -76,6 +76,7 @@ import {
   MAX_FAILED_THREAD_SEND_SNAPSHOTS,
   MAX_LOCAL_DRAFT_ERROR_VERSIONS,
   releaseFailedSendSnapshotAfterSend,
+  releaseSupersededFailedSend,
   worktreeSetupHasError,
 } from "./ChatView.logic";
 
@@ -3118,5 +3119,52 @@ describe("releaseFailedSendSnapshotAfterSend", () => {
     );
     expect(accepted).toBe(true);
     expect(failedSends.get(threadId)).toBe(newer);
+  });
+});
+
+describe("releaseSupersededFailedSend", () => {
+  const snapshot = { errorMessage: "rate limited", errorVersion: 1 };
+
+  it("releases the superseded snapshot and clears the error together", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, snapshot]]);
+    const cleared: ThreadId[] = [];
+    releaseSupersededFailedSend(failedSends, threadId, (id) => {
+      cleared.push(id);
+    });
+    expect(failedSends.has(threadId)).toBe(false);
+    expect(cleared).toEqual([threadId]);
+  });
+
+  it("still clears the error when no failed-send snapshot exists", () => {
+    // An accepted send supersedes whatever card is showing, including a fresh
+    // error that has no captured payload — it must not survive the commit.
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const failedSends = new Map<ThreadId, typeof snapshot>();
+    const cleared: ThreadId[] = [];
+    releaseSupersededFailedSend(failedSends, threadId, (id) => {
+      cleared.push(id);
+    });
+    expect(cleared).toEqual([threadId]);
+  });
+
+  it("releases a snapshot recorded while the send was still preparing, so its payload cannot outlive the superseded card", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const newer = { errorMessage: "network error", errorVersion: 2 };
+    const failedSends = new Map<ThreadId, typeof newer>([[threadId, newer]]);
+    const cleared: ThreadId[] = [];
+    releaseSupersededFailedSend(failedSends, threadId, (id) => {
+      cleared.push(id);
+    });
+    expect(failedSends.has(threadId)).toBe(false);
+    expect(cleared).toEqual([threadId]);
+  });
+
+  it("leaves another thread's failed send untouched", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const otherThreadId = ThreadId.makeUnsafe("thread-2");
+    const failedSends = new Map<ThreadId, typeof snapshot>([[otherThreadId, snapshot]]);
+    releaseSupersededFailedSend(failedSends, threadId, () => {});
+    expect(failedSends.get(otherThreadId)).toBe(snapshot);
   });
 });
