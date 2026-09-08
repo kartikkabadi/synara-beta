@@ -220,7 +220,7 @@ describe("diagnosticsClient", () => {
   });
 
   it("ignores stale flush completions after consent is withdrawn", async () => {
-    let resolve: (response: Response) => void;
+    let resolve: (response: Response) => void = () => {};
     const client = createDiagnosticsClient({
       stateDir,
       sanitizeContext,
@@ -242,7 +242,7 @@ describe("diagnosticsClient", () => {
   });
 
   it("does not drop events recorded during a failing flush", async () => {
-    let resolve: (response: Response) => void;
+    let resolve: (response: Response) => void = () => {};
     const client = createDiagnosticsClient({
       stateDir,
       sanitizeContext,

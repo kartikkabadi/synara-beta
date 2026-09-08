@@ -21,6 +21,7 @@
     "**/*.ts",
     "../apps/server/src/device/helperSandbox.ts",
     "../apps/desktop/src/diagnosticsSanitizer.ts",
-    "../infrastructure/diagnostics-worker/src/contract.ts"
+    "../infrastructure/diagnostics-worker/src/contract.ts",
+    "../infrastructure/diagnostics-worker/src/index.ts"
   ]
 }
