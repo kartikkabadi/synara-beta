@@ -90,11 +90,19 @@ esac
 tmp="$(mktemp -d)"
 mnt="$tmp/mnt"
 # If the script dies between moving the old app aside and moving the new one
-# into place, restore the old app so the installation never disappears.
+# into place, restore the old app so the installation never disappears. The
+# backup may be root-owned after a privileged install, in which case the
+# unprivileged move will fail and we leave the backup path in place.
 restore_on_exit() {
   if [ -n "${swap_started:-}" ] && [ ! -d "$app" ] && [ -d "$old_app" ]; then
-    mv "$old_app" "$app" 2>/dev/null || true
-    echo "install-macos.sh: interrupted - previous installation restored." >&2
+    if mv "$old_app" "$app" 2>/dev/null; then
+      echo "install-macos.sh: interrupted - previous installation restored." >&2
+    else
+      # The backup may be root-owned after a privileged install. We cannot
+      # prompt for admin privileges from an EXIT trap, so leave the backup
+      # path in place; the user can move it back manually or re-run.
+      echo "install-macos.sh: interrupted - previous installation remains at $old_app" >&2
+    fi
   fi
   hdiutil detach "$mnt" >/dev/null 2>&1 || true
   rm -rf "$tmp"
@@ -234,20 +242,25 @@ else
   # quarantine flag must also be removed inside the privileged shell - an
   # xattr run as the invoking user cannot clear a root-owned app, and hiding
   # that failure would leave the unsigned beta blocked by Gatekeeper. The
-  # privileged step verifies the flag is gone and fails loudly if not.
+  # privileged step keeps the previous backup until quarantine removal succeeds,
+  # and restores the backup if quarantine cannot be cleared.
+  swap_started=1
   if ! osascript - "$prepared_app" "$new_app" "$old_app" "$app" <<'APPLESCRIPT'
 on run argv
   set preparedApp to quoted form of item 1 of argv
   set newApp to quoted form of item 2 of argv
   set oldApp to quoted form of item 3 of argv
   set installedApp to quoted form of item 4 of argv
-  do shell script "rm -rf " & newApp & " " & oldApp & " && test ! -e " & newApp & " && test ! -e " & oldApp & " && { ditto " & preparedApp & " " & newApp & " || { rm -rf " & newApp & "; exit 1; }; } && { test ! -e " & installedApp & " || mv " & installedApp & " " & oldApp & "; } && { mv " & newApp & " " & installedApp & " || { test ! -e " & oldApp & " || mv " & oldApp & " " & installedApp & " || { rm -rf " & newApp & "; echo Previous application remains at " & oldApp & " >&2; exit 1; }; rm -rf " & newApp & "; exit 1; }; } && rm -rf " & oldApp & " && { xattr -d com.apple.quarantine " & installedApp & " >/dev/null 2>&1; if xattr " & installedApp & " 2>/dev/null | grep -q com.apple.quarantine; then echo install-macos.sh: could not remove the quarantine flag from the installed app - first launch may be blocked by Gatekeeper >&2; exit 1; fi; }" with administrator privileges
+  set cmd to "rm -rf " & newApp & " " & oldApp & " && test ! -e " & newApp & " && test ! -e " & oldApp & " && { ditto " & preparedApp & " " & newApp & " || { rm -rf " & newApp & "; exit 1; }; } && { test ! -e " & installedApp & " || mv " & installedApp & " " & oldApp & "; } && { mv " & newApp & " " & installedApp & " || { test ! -e " & oldApp & " || mv " & oldApp & " " & installedApp & " || { rm -rf " & newApp & "; echo 'install-macos.sh: previous application remains at the backup path' >&2; exit 1; }; rm -rf " & newApp & "; exit 1; }; } && { xattr -d com.apple.quarantine " & installedApp & " >/dev/null 2>&1; if xattr " & installedApp & " 2>/dev/null | grep -q com.apple.quarantine; then mv " & installedApp & " " & newApp & " && { test ! -e " & oldApp & " || mv " & oldApp & " " & installedApp & "; } && rm -rf " & newApp & " && echo 'install-macos.sh: could not remove the quarantine flag from the installed app - first launch may be blocked by Gatekeeper' >&2 && exit 1; fi; } && rm -rf " & oldApp
+  do shell script cmd with administrator privileges
 end run
 APPLESCRIPT
   then
+    swap_started=""
     echo "install-macos.sh: privileged installation or quarantine removal failed; see the message above." >&2
     exit 1
   fi
+  swap_started=""
 fi
 
 # The beta app is unsigned, so Gatekeeper would block first launch with a

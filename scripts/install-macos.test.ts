@@ -77,6 +77,54 @@ describe("install-macos.sh", () => {
     NodeAssert.match(missing.stderr, /--tag requires a value/);
   });
 
+  it("refuses to run on non-Darwin hosts", () => {
+    const sandbox = NodeFS.mkdtempSync("/tmp/synara-macos-non-darwin-");
+    const stubBin = NodePath.join(sandbox, "bin");
+    NodeFS.mkdirSync(stubBin, { recursive: true });
+    NodeFS.writeFileSync(
+      NodePath.join(stubBin, "uname"),
+      '#!/bin/sh\nif [ "$1" = "-s" ]; then echo Linux; else exit 1; fi\n',
+    );
+    NodeFS.chmodSync(NodePath.join(stubBin, "uname"), 0o755);
+    try {
+      const result = tryBash(scriptPath, [], {
+        ...process.env,
+        PATH: `${stubBin}${NodePath.delimiter}${process.env.PATH ?? ""}`,
+      });
+      NodeAssert.equal(result.status, 1);
+      NodeAssert.match(result.stderr, /unsupported operating system/);
+    } finally {
+      NodeFS.rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it("reports a clear error when the release list contains no beta tag", () => {
+    const sandbox = NodeFS.mkdtempSync("/tmp/synara-macos-no-release-");
+    const stubBin = NodePath.join(sandbox, "bin");
+    NodeFS.mkdirSync(stubBin, { recursive: true });
+    NodeFS.writeFileSync(
+      NodePath.join(stubBin, "uname"),
+      '#!/bin/sh\nif [ "$1" = "-s" ]; then echo Darwin; elif [ "$1" = "-m" ]; then echo arm64; else exit 1; fi\n',
+    );
+    NodeFS.writeFileSync(
+      NodePath.join(stubBin, "curl"),
+      '#!/bin/sh\necho "[]"\n',
+    );
+    for (const stub of ["uname", "curl"]) {
+      NodeFS.chmodSync(NodePath.join(stubBin, stub), 0o755);
+    }
+    try {
+      const result = tryBash(scriptPath, [], {
+        ...process.env,
+        PATH: `${stubBin}${NodePath.delimiter}${process.env.PATH ?? ""}`,
+      });
+      NodeAssert.equal(result.status, 1);
+      NodeAssert.match(result.stderr, /could not resolve a release tag/);
+    } finally {
+      NodeFS.rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
   it("accepts only strict vX.Y.Z-beta.N tags", () => {
     NodeAssert.match(
       script,
@@ -122,6 +170,10 @@ describe("install-macos.sh", () => {
     NodeAssert.match(script, /old_app="\/Applications\/\.Synara Beta\.app\.backup\.\$install_id"/);
   });
 
+  it("marks a privileged swap for restore_on_exit", () => {
+    NodeAssert.match(script, /swap_started=1/);
+  });
+
   it("clears quarantine on the installed app only, including root-owned installs", () => {
     // User-owned installs: remove the flag directly, then verify it is really
     // gone instead of hiding a failed removal behind `|| true`.
@@ -141,6 +193,25 @@ describe("install-macos.sh", () => {
     NodeAssert.match(script, /could not remove the quarantine flag from the installed app/);
     NodeAssert.doesNotMatch(script.toLowerCase(), /spctl/);
     NodeAssert.doesNotMatch(script.toLowerCase(), /master-disable/);
+  });
+
+  it("keeps the previous app as a privileged rollback until quarantine removal succeeds", () => {
+    const quarantine = script.indexOf(
+      'xattr -d com.apple.quarantine " & installedApp & "',
+    );
+    NodeAssert.ok(quarantine > -1, "privileged AppleScript must clear quarantine");
+    const lastBackupRemove = script.lastIndexOf('rm -rf " & oldApp');
+    NodeAssert.ok(
+      lastBackupRemove > quarantine,
+      "privileged AppleScript must remove the backup only after quarantine succeeds",
+    );
+  });
+
+  it("restores the previous app when quarantine removal fails", () => {
+    const quarantineFailure = script.indexOf("grep -q com.apple.quarantine; then mv");
+    NodeAssert.ok(quarantineFailure > -1, "privileged AppleScript must react to quarantine failure");
+    NodeAssert.match(script, /then mv " & installedApp & " " & newApp/);
+    NodeAssert.match(script, /mv " & oldApp & " " & installedApp/);
   });
 
   it("opens the app at the end and echoes success", () => {
