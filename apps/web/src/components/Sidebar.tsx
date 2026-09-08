@@ -5491,6 +5491,7 @@ export default function Sidebar() {
   }, [desktopUpdateState, surfaceDesktopUpdateError]);
 
   const showDesktopUpdateButton = isElectron && shouldShowDesktopUpdateButton(desktopUpdateState);
+  const isBetaDesktopFlavor = desktopUpdateState?.flavor === "beta";
 
   const desktopUpdateTooltip = desktopUpdateState
     ? getDesktopUpdateButtonTooltip(desktopUpdateState, {
@@ -5519,7 +5520,10 @@ export default function Sidebar() {
     desktopUpdateButtonPresentation.secondaryLabel !== null;
   const desktopUpdateDownloadPercent = getDesktopUpdateDownloadPercent(desktopUpdateState);
   const desktopUpdateRowButtonClasses = cn(
-    "inline-flex h-6 shrink-0 items-center justify-center gap-1.5 rounded-full bg-[var(--info)] px-2.5 font-system-ui text-[length:var(--app-font-size-ui-xs,10px)] font-medium leading-none text-white transition-colors",
+    "inline-flex h-6 shrink-0 items-center justify-center gap-1.5 rounded-full px-2.5 font-system-ui text-[length:var(--app-font-size-ui-xs,10px)] font-medium leading-none text-white transition-colors",
+    isBetaDesktopFlavor
+      ? "bg-[image:var(--beta-gradient)]"
+      : "bg-[var(--info)]",
     desktopUpdateButtonHasSecondaryLabel && "min-h-6 py-0.5",
     desktopUpdateButtonInteractivityClasses,
   );
@@ -5869,6 +5873,14 @@ export default function Sidebar() {
     <div className="flex w-full items-center gap-1.5">
       <SidebarTrigger className="shrink-0 text-muted-foreground/75 hover:text-foreground md:hidden" />
       {headerControls}
+      {isBetaDesktopFlavor ? (
+        <span
+          aria-label="Synara Beta"
+          className="inline-flex items-center rounded-full bg-[image:var(--beta-gradient)] px-1.5 py-0.5 text-[9px] font-semibold uppercase leading-none tracking-wide text-white"
+        >
+          Beta
+        </span>
+      ) : null}
     </div>
   );
   const renameProjectDialogProject = renameProjectDialogId
