@@ -10,14 +10,13 @@ import { MAX_BATCH, UUID_PATTERN, validateEvent, type DiagnosticsEvent } from ".
 
 // Minimal structural stand-ins for the Cloudflare D1 API. These keep the
 // worker dependency-free while the desktop/scripts test suite imports it.
-interface D1PreparedStatement {
+export interface D1PreparedStatement {
   bind(...values: unknown[]): D1PreparedStatement;
   first<T = unknown>(): Promise<T | null>;
-  all<T = unknown>(): Promise<{ results: T[] }>;
   run(): Promise<unknown>;
 }
 
-interface D1Database {
+export interface D1Database {
   prepare(sql: string): D1PreparedStatement;
   batch(statements: D1PreparedStatement[]): Promise<unknown[]>;
 }

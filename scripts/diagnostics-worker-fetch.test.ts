@@ -7,36 +7,29 @@
 
 import { describe, expect, it } from "vitest";
 
-import worker from "../infrastructure/diagnostics-worker/src/index";
+import worker, {
+  type D1Database,
+  type D1PreparedStatement,
+  type Env,
+} from "../infrastructure/diagnostics-worker/src/index";
 
-interface FakeEnv {
-  DB: {
-    prepare: () => {
-      bind: () => {
-        first: () => Promise<{ count: number }>;
-      };
-    };
-    batch: (statements: unknown[]) => Promise<unknown[]>;
-  };
-  batches: unknown[][];
-}
+type CapturingEnv = Env & { batches: unknown[][] };
 
-function makeEnv(): FakeEnv {
+function makeEnv(): CapturingEnv {
   const batches: unknown[][] = [];
-  return {
-    DB: {
-      prepare: () => ({
-        bind: () => ({
-          first: async () => ({ count: 0 }),
-        }),
-      }),
-      batch: async (statements: unknown[]) => {
-        batches.push(statements);
-        return statements.map(() => ({}));
-      },
-    },
-    batches,
+  const statement: D1PreparedStatement = {
+    bind: () => statement,
+    first: async () => null,
+    run: async () => ({}),
   };
+  const db: D1Database = {
+    prepare: () => statement,
+    batch: async (statements) => {
+      batches.push(statements);
+      return statements.map(() => ({}));
+    },
+  };
+  return { DB: db, batches };
 }
 
 function workerEvent(kind: string, installId?: string) {
@@ -53,7 +46,10 @@ function workerEvent(kind: string, installId?: string) {
   };
 }
 
-function makeIngestRequest(body: unknown, extraHeaders?: Record<string, string>): Request {
+function makeIngestRequest(
+  body: { events: unknown[] },
+  extraHeaders?: Record<string, string>,
+): Request {
   const json = JSON.stringify(body);
   return new Request("https://example.com/v1/events", {
     method: "POST",
@@ -68,19 +64,13 @@ function makeIngestRequest(body: unknown, extraHeaders?: Record<string, string>)
 
 describe("diagnostics worker fetch handler", () => {
   it("returns health on /health", async () => {
-    const response = await worker.fetch(
-      new Request("https://example.com/health"),
-      makeEnv() as unknown as Parameters<typeof worker.fetch>[1],
-    );
+    const response = await worker.fetch(new Request("https://example.com/health"), makeEnv());
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true });
   });
 
   it("does not expose /v1/stats", async () => {
-    const response = await worker.fetch(
-      new Request("https://example.com/v1/stats"),
-      makeEnv() as unknown as Parameters<typeof worker.fetch>[1],
-    );
+    const response = await worker.fetch(new Request("https://example.com/v1/stats"), makeEnv());
     expect(response.status).toBe(404);
   });
 
@@ -91,7 +81,7 @@ describe("diagnostics worker fetch handler", () => {
         headers: { "content-length": String(1024 * 1024 + 1) },
         body: "",
       }),
-      makeEnv() as unknown as Parameters<typeof worker.fetch>[1],
+      makeEnv(),
     );
     expect(response.status).toBe(413);
   });
@@ -103,7 +93,7 @@ describe("diagnostics worker fetch handler", () => {
         headers: { "content-type": "application/json" },
         body: "not-json",
       }),
-      makeEnv() as unknown as Parameters<typeof worker.fetch>[1],
+      makeEnv(),
     );
     expect(response.status).toBe(400);
   });
@@ -113,7 +103,7 @@ describe("diagnostics worker fetch handler", () => {
       makeIngestRequest({
         events: [{ ...workerEvent("session_started"), provider: undefined }],
       }),
-      makeEnv() as unknown as Parameters<typeof worker.fetch>[1],
+      makeEnv(),
     );
     expect(response.status).toBe(422);
   });
@@ -126,17 +116,14 @@ describe("diagnostics worker fetch handler", () => {
           workerEvent("app_start", "1f2a3b4c-1111-4111-8111-111111111111"),
         ],
       }),
-      makeEnv() as unknown as Parameters<typeof worker.fetch>[1],
+      makeEnv(),
     );
     expect(response.status).toBe(422);
   });
 
   it("rejects an oversized batch", async () => {
     const events = Array.from({ length: 51 }, () => workerEvent("test"));
-    const response = await worker.fetch(
-      makeIngestRequest({ events }),
-      makeEnv() as unknown as Parameters<typeof worker.fetch>[1],
-    );
+    const response = await worker.fetch(makeIngestRequest({ events }), makeEnv());
     expect(response.status).toBe(413);
   });
 
@@ -144,7 +131,7 @@ describe("diagnostics worker fetch handler", () => {
     const env = makeEnv();
     const response = await worker.fetch(
       makeIngestRequest({ events: [workerEvent("app_start")] }),
-      env as unknown as Parameters<typeof worker.fetch>[1],
+      env,
     );
     expect(response.status).toBe(202);
     await expect(response.json()).resolves.toEqual({ accepted: 1 });
