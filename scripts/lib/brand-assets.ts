@@ -14,6 +14,40 @@ export const BRAND_ASSET_PATHS = {
   developmentWebAppleTouchIconPng: "assets/dev/blueprint-web-apple-touch-180.png",
 } as const;
 
+export const BETA_ASSET_PATHS = {
+  betaMacIconPng: "assets/beta/beta-macos-1024.png",
+  betaMacLegacyIconPng: "assets/beta/beta-macos-legacy-1024.png",
+  betaLinuxIconPng: "assets/beta/beta-universal-1024.png",
+  betaWindowsIconIco: "assets/beta/beta-windows.ico",
+} as const;
+
+export type DesktopBuildFlavor = "production" | "canary" | "beta";
+
+export interface DesktopIconAssetPaths {
+  readonly macIconPng: string;
+  readonly macLegacyIconPng: string;
+  readonly linuxIconPng: string;
+  readonly windowsIconIco: string;
+}
+
+/** Beta builds carry their own red/purple brand; every other flavor keeps production. */
+export function desktopIconAssetPaths(flavor: DesktopBuildFlavor): DesktopIconAssetPaths {
+  if (flavor === "beta") {
+    return {
+      macIconPng: BETA_ASSET_PATHS.betaMacIconPng,
+      macLegacyIconPng: BETA_ASSET_PATHS.betaMacLegacyIconPng,
+      linuxIconPng: BETA_ASSET_PATHS.betaLinuxIconPng,
+      windowsIconIco: BETA_ASSET_PATHS.betaWindowsIconIco,
+    };
+  }
+  return {
+    macIconPng: BRAND_ASSET_PATHS.productionMacIconPng,
+    macLegacyIconPng: BRAND_ASSET_PATHS.productionMacLegacyIconPng,
+    linuxIconPng: BRAND_ASSET_PATHS.productionLinuxIconPng,
+    windowsIconIco: BRAND_ASSET_PATHS.productionWindowsIconIco,
+  };
+}
+
 export interface IconOverride {
   readonly sourceRelativePath: string;
   readonly targetRelativePath: string;

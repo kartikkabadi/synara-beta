@@ -472,6 +472,10 @@
   --warning: var(--color-amber-500);
   --warning-foreground: var(--color-amber-700);
   --claude: #d97757;
+  /* Beta brand: red -> magenta -> purple. Used only on beta-flavor desktop
+     surfaces (update pill, beta badge); production builds never reference it. */
+  --beta-gradient: linear-gradient(135deg, #ff4d45 0%, #d6409f 55%, #8b54d0 100%);
+  --beta-accent: #d6409f;
 
   @variant dark {
     color-scheme: dark;

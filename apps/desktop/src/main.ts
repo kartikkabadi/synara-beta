@@ -542,7 +542,7 @@ const desktopRuntimeInfo = resolveDesktopRuntimeInfo({
   runningUnderArm64Translation: app.runningUnderARM64Translation === true,
 });
 const initialUpdateState = (): DesktopUpdateState =>
-  createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo);
+  createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo, desktopFlavor);
 
 function logTimestamp(): string {
   return new Date().toISOString();
@@ -3354,7 +3354,7 @@ function configureAutoUpdater(): void {
     githubUpdateSource === null ? null : buildGitHubReleasesPageUrl(githubUpdateSource);
   const enabled = shouldEnableAutoUpdates();
   setUpdateState({
-    ...createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo),
+    ...createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo, desktopFlavor),
     enabled,
     status: enabled ? "idle" : "disabled",
     releaseUrl,
