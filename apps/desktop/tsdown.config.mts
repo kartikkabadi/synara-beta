@@ -12,17 +12,13 @@ import { defineConfig } from "tsdown";
 
 const sourcemapEnv = process.env.SYNARA_DESKTOP_SOURCEMAP?.trim().toLowerCase();
 const buildSourcemap = sourcemapEnv === "1" || sourcemapEnv === "true";
-// Embed the updater publisher pin only when this build will actually be signed
-// (the workflow sets every Azure secret together). An unsigned beta build must
-// ship without a pin, or the updater would verify an unsigned installer against
-// it and block every one-click update.
-const windowsSigningConfigured = Boolean(
-  process.env.AZURE_TRUSTED_SIGNING_ENDPOINT?.trim() &&
-  process.env.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME?.trim() &&
-  process.env.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME?.trim() &&
-  process.env.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME?.trim() &&
-  process.env.AZURE_TRUSTED_SIGNING_SUBJECT_DN?.trim(),
-);
+// Embed the updater publisher pin only when the packaging script has explicitly
+// marked this build as signed (SYNARA_DESKTOP_SIGNED=1). An unsigned beta build
+// must ship without a pin, or the updater would verify an unsigned installer
+// against it and block every one-click update.
+const windowsSigningConfigured =
+  process.env.SYNARA_DESKTOP_SIGNED?.trim() === "1" ||
+  process.env.SYNARA_DESKTOP_SIGNED?.trim().toLowerCase() === "true";
 const windowsUpdaterPublisher = windowsSigningConfigured
   ? (process.env.AZURE_TRUSTED_SIGNING_SUBJECT_DN?.trim() ?? "")
   : "";
