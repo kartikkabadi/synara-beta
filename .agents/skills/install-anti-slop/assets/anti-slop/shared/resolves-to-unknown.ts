@@ -8,6 +8,7 @@ export type Scope = {
   readonly parent: Scope | null;
   readonly aliases: Map<string, ESTree.TSTypeAliasDeclaration[]>;
   readonly interfaces: Map<string, ESTree.TSInterfaceDeclaration[]>;
+  readonly typeNames: Map<string, ESTree.Node[]>;
   readonly depth: number;
 };
 
@@ -25,32 +26,42 @@ function isBuiltInTypeWrapper(name: string): boolean {
   return BUILT_IN_TYPE_WRAPPERS.has(name);
 }
 
-function collectShadowedTypeWrappers(program: ESTree.Program): ReadonlySet<string> {
-  const shadowed = new Set<string>();
-  for (const statement of program.body) {
-    if (statement.type === "ImportDeclaration") {
-      for (const specifier of statement.specifiers) {
-        if (isBuiltInTypeWrapper(specifier.local.name)) shadowed.add(specifier.local.name);
-      }
-      continue;
-    }
-    const declaration =
-      statement.type === "ExportNamedDeclaration" || statement.type === "ExportDefaultDeclaration"
-        ? statement.declaration
-        : statement;
-    if (
-      declaration !== null &&
-      declaration !== undefined &&
-      "id" in declaration &&
-      declaration.id !== null &&
-      declaration.id !== undefined &&
-      declaration.id.type === "Identifier" &&
-      isBuiltInTypeWrapper(declaration.id.name)
-    ) {
-      shadowed.add(declaration.id.name);
-    }
-  }
-  return shadowed;
+const typeNameDeclarationTypes = new Set([
+  "TSTypeAliasDeclaration",
+  "TSInterfaceDeclaration",
+  "TSEnumDeclaration",
+  "TSModuleDeclaration",
+  "TSImportEqualsDeclaration",
+  "ClassDeclaration",
+]);
+
+function isTypeNameDeclaration(node: ESTree.Node): node is ESTree.Node & { id: ESTree.Identifier } {
+  return (
+    typeNameDeclarationTypes.has(node.type) &&
+    "id" in node &&
+    (node as unknown as Record<string, unknown>).id !== null &&
+    (node as unknown as Record<string, unknown>).id !== undefined &&
+    ((node as unknown as Record<string, unknown>).id as ESTree.Node).type === "Identifier"
+  );
+}
+
+function addTypeNameToScope(scope: Scope, name: string, node: ESTree.Node): void {
+  const list = scope.typeNames.get(name) ?? [];
+  list.push(node);
+  scope.typeNames.set(name, list);
+}
+
+function isImportSpecifier(node: ESTree.Node): node is {
+  type: string;
+  local: ESTree.Identifier;
+} {
+  return (
+    (node.type === "ImportSpecifier" ||
+      node.type === "ImportDefaultSpecifier" ||
+      node.type === "ImportNamespaceSpecifier") &&
+    (node as unknown as Record<string, unknown>).local !== undefined &&
+    ((node as unknown as Record<string, unknown>).local as ESTree.Node).type === "Identifier"
+  );
 }
 
 function isNode(value: unknown): value is ESTree.Node {
@@ -67,6 +78,14 @@ function isInterfaceDeclaration(node: ESTree.Node): node is ESTree.TSInterfaceDe
   return node.type === "TSInterfaceDeclaration";
 }
 
+function indexTypeNameDeclaration(node: ESTree.Node, scope: Scope): void {
+  if (isTypeNameDeclaration(node)) {
+    addTypeNameToScope(scope, node.id.name, node);
+  } else if (isImportSpecifier(node)) {
+    addTypeNameToScope(scope, node.local.name, node);
+  }
+}
+
 function indexScopes(
   node: ESTree.Node,
   scope: Scope,
@@ -74,6 +93,7 @@ function indexScopes(
   visitorKeys: VisitorKeys,
 ): void {
   nodeScopes.set(node, scope);
+  indexTypeNameDeclaration(node, scope);
   if (isAliasDeclaration(node)) {
     const list = scope.aliases.get(node.id.name) ?? [];
     list.push(node);
@@ -102,7 +122,13 @@ function indexScopes(
 
 function scopeForChild(child: ESTree.Node, scope: Scope): Scope {
   return SCOPE_STARTERS.has(child.type)
-    ? { parent: scope, aliases: new Map(), interfaces: new Map(), depth: scope.depth + 1 }
+    ? {
+        parent: scope,
+        aliases: new Map(),
+        interfaces: new Map(),
+        typeNames: new Map(),
+        depth: scope.depth + 1,
+      }
     : scope;
 }
 
@@ -114,9 +140,14 @@ function scopeForChild(child: ESTree.Node, scope: Scope): Scope {
  * matching TypeScript.
  */
 export function createScopeIndex(program: ESTree.Program, visitorKeys: VisitorKeys): ScopeIndex {
-  const rootScope: Scope = { parent: null, aliases: new Map(), interfaces: new Map(), depth: 0 };
+  const rootScope: Scope = {
+    parent: null,
+    aliases: new Map(),
+    interfaces: new Map(),
+    typeNames: new Map(),
+    depth: 0,
+  };
   const nodeScopes = new Map<ESTree.Node, Scope>();
-  const shadowedBuiltInWrappers = collectShadowedTypeWrappers(program);
   for (const statement of program.body) {
     indexScopes(statement, scopeForChild(statement, rootScope), nodeScopes, visitorKeys);
   }
@@ -145,11 +176,25 @@ export function createScopeIndex(program: ESTree.Program, visitorKeys: VisitorKe
     }
     return null;
   };
+  const isBuiltInShadowed = (name: string, scope: Scope | null): boolean => {
+    let current = scope;
+    while (current !== null) {
+      if (
+        current.aliases.has(name) ||
+        current.interfaces.has(name) ||
+        current.typeNames.has(name)
+      ) {
+        return true;
+      }
+      current = current.parent;
+    }
+    return false;
+  };
   return {
     scopeOf: (node) => nodeScopes.get(node) ?? null,
     lookupAlias,
     lookupInterface,
-    isBuiltInShadowed: (name) => shadowedBuiltInWrappers.has(name),
+    isBuiltInShadowed,
     allAliases: () => [...nodeScopes.keys()].filter(isAliasDeclaration),
   };
 }
@@ -180,7 +225,13 @@ export type ScopedResolves = (
 
 /** Builds a scope-aware resolver that decides whether a type annotation resolves to `unknown`. */
 export function createScopedResolvesToUnknown(index: ScopeIndex): ScopedResolves {
-  const rootScope: Scope = { parent: null, aliases: new Map(), interfaces: new Map(), depth: 0 };
+  const rootScope: Scope = {
+    parent: null,
+    aliases: new Map(),
+    interfaces: new Map(),
+    typeNames: new Map(),
+    depth: 0,
+  };
 
   const resolvesToUnknownAt = (
     type: ESTree.TSType,
@@ -224,7 +275,7 @@ export function createScopedResolvesToUnknown(index: ScopeIndex): ScopedResolves
     const found = index.lookupAlias(name, scope);
     if (found === null) {
       if (name === "Promise" || name === "PromiseLike") {
-        if (index.lookupInterface(name, scope) !== null || index.isBuiltInShadowed(name)) {
+        if (index.isBuiltInShadowed(name, scope)) {
           return false;
         }
         const value = type.typeArguments?.params[0];

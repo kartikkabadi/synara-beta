@@ -316,6 +316,17 @@ describe("no-unsafe-dictionary-type", () => {
     expect(byFile.get("generic-default.ts")).toEqual(["anti-slop(no-unsafe-dictionary-type)"]);
   });
 
+  it("does not let an outer alias shadow a generic parameter when checking the alias body", () => {
+    const byFile = runRules(
+      {
+        "outer-shadow.ts":
+          "type T = unknown;\ntype Dict<T = unknown> = Record<string, T>;\nexport let d: Dict = {};\n",
+      },
+      { "anti-slop/no-unsafe-dictionary-type": "error" },
+    );
+    expect(byFile.get("outer-shadow.ts")).toEqual(["anti-slop(no-unsafe-dictionary-type)"]);
+  });
+
   it("sees type aliases declared inside functions", () => {
     const byFile = runRules(
       {

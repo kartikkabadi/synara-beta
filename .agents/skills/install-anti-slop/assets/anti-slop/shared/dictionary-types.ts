@@ -175,33 +175,34 @@ function isEffectivelyEmptyInterface(
 function resolvedSubstitutionArgument(
   type: ESTree.TSType,
   base: TypeAliasEnvironment,
-  scope: Scope | null,
-  resolving: ReadonlySet<string> = new Set(),
+  argumentScope: Scope | null,
   local: TypeAliasEnvironment | null = null,
 ): ResolvedSubstitution {
   const unwrapped = unwrapTransparentType(type);
   const substitutions = local ?? base;
   if (unwrapped.type !== "TSTypeReference") {
-    return { type, scope, substitutions };
+    return { type, scope: argumentScope, substitutions };
   }
   const name = typeReferenceName(unwrapped);
-  if (name === null || resolving.has(name)) {
-    return { type, scope, substitutions };
+  if (name === null) {
+    return { type, scope: argumentScope, substitutions };
   }
   // Resolve one level through the caller's own substitutions so nested
-  // generic arguments keep their original scope.
+  // generic arguments keep their original scope. Defaults that reference an
+  // earlier parameter are resolved in the alias declaration scope.
   const direct = base.get(name) ?? local?.get(name);
   if (direct !== undefined) {
     return direct;
   }
-  return { type, scope, substitutions };
+  return { type, scope: argumentScope, substitutions };
 }
 
 function substitutionEnvironment(
   parameters: readonly ESTree.TSTypeParameter[] | undefined,
   typeArguments: readonly ESTree.TSType[] | undefined,
   base: TypeAliasEnvironment,
-  scope: Scope | null,
+  useSiteScope: Scope | null,
+  declarationScope: Scope | null,
 ): TypeAliasEnvironment | null {
   const arguments_ = typeArguments ?? [];
   const next = new Map(base);
@@ -209,9 +210,10 @@ function substitutionEnvironment(
     const argument = arguments_[index] ?? parameter.default;
     if (argument === null || argument === undefined) return null;
     const isDefault = arguments_[index] === undefined;
+    const argumentScope = isDefault ? declarationScope : useSiteScope;
     next.set(
       parameter.name.name,
-      resolvedSubstitutionArgument(argument, base, scope, new Set(), isDefault ? next : null),
+      resolvedSubstitutionArgument(argument, base, argumentScope, isDefault ? next : null),
     );
   }
   return next;
@@ -221,13 +223,16 @@ function aliasSubstitution(
   alias: ESTree.TSTypeAliasDeclaration,
   type: ESTree.TSTypeReference,
   base: TypeAliasEnvironment,
-  scope: Scope | null,
+  useSiteScope: Scope | null,
+  environment: TypeEnvironment,
 ): TypeAliasEnvironment | null {
+  const declarationScope = environment.scopeOf(alias) ?? null;
   return substitutionEnvironment(
     alias.typeParameters?.params,
     type.typeArguments?.params,
     base,
-    scope,
+    useSiteScope,
+    declarationScope,
   );
 }
 
@@ -278,11 +283,13 @@ function collectInterfaceIndexSignatures(
     const baseDeclarations = findInterface(extendName, environment, declarationScope);
     if (baseDeclarations === null) continue;
     for (const baseDeclaration of baseDeclarations) {
+      const baseDeclarationScope = environment.scopeOf(baseDeclaration) ?? null;
       const baseSubstitutions = substitutionEnvironment(
         baseDeclaration.typeParameters?.params,
         extend.typeArguments?.params,
         interfaceSubstitutions,
         declarationScope,
+        baseDeclarationScope,
       );
       if (baseSubstitutions === null) continue;
       results.push(
@@ -361,9 +368,10 @@ function unsafeDirectValue(
       : unsafeDirectValue(value, environment, substitutions, resolvingAliases, scope);
   }
 
+  if (resolvingAliases.has(name)) return null;
+
   const interfaceDeclarations = findInterface(name, environment, scope);
   const found = findAlias(name, environment, scope);
-  if (resolvingAliases.has(name) && interfaceDeclarations === null) return null;
 
   const aliasCloser =
     found !== null &&
@@ -380,7 +388,13 @@ function unsafeDirectValue(
   if (aliasCloser) {
     const alias = found.alias;
     const aliasScope = environment.scopeOf(alias) ?? null;
-    const nextSubstitutions = aliasSubstitution(alias, unwrapped, substitutions, scope);
+    const nextSubstitutions = aliasSubstitution(
+      alias,
+      unwrapped,
+      substitutions,
+      scope,
+      environment,
+    );
     if (nextSubstitutions === null) return null;
     const nextResolving = new Set(resolvingAliases);
     nextResolving.add(name);
@@ -396,11 +410,13 @@ function unsafeDirectValue(
   if (interfaceDeclarations !== null) {
     if (isEffectivelyEmptyInterface(interfaceDeclarations)) return "empty-object";
     for (const declaration of interfaceDeclarations) {
+      const declarationScope = environment.scopeOf(declaration) ?? null;
       const interfaceSubstitutions = substitutionEnvironment(
         declaration.typeParameters?.params,
         unwrapped.typeArguments?.params,
         substitutions,
         scope,
+        declarationScope,
       );
       if (interfaceSubstitutions === null) continue;
       const indexSignatures = collectInterfaceIndexSignatures(
@@ -428,7 +444,7 @@ function unsafeDirectValue(
   if (found === null || resolvingAliases.has(name) || found.ambiguous) return null;
   const alias = found.alias;
   const aliasScope = environment.scopeOf(alias) ?? null;
-  const nextSubstitutions = aliasSubstitution(alias, unwrapped, substitutions, scope);
+  const nextSubstitutions = aliasSubstitution(alias, unwrapped, substitutions, scope, environment);
   if (nextSubstitutions === null) return null;
   const nextResolving = new Set(resolvingAliases);
   nextResolving.add(name);
@@ -503,11 +519,13 @@ function dictionaryValueTypes(
   if (interfaceDeclarations !== null) {
     const results: ResolvedType[] = [];
     for (const declaration of interfaceDeclarations) {
+      const declarationScope = environment.scopeOf(declaration) ?? null;
       const interfaceSubstitutions = substitutionEnvironment(
         declaration.typeParameters?.params,
         unwrapped.typeArguments?.params,
         substitutions,
         scope,
+        declarationScope,
       );
       if (interfaceSubstitutions === null) continue;
       results.push(
@@ -529,7 +547,7 @@ function dictionaryValueTypes(
   const alias = found.alias;
   if (found.ambiguous) return [];
   const aliasScope = environment.scopeOf(alias) ?? null;
-  const nextSubstitutions = aliasSubstitution(alias, unwrapped, substitutions, scope);
+  const nextSubstitutions = aliasSubstitution(alias, unwrapped, substitutions, scope, environment);
   if (nextSubstitutions === null) return [];
   const nextResolving = new Set(resolvingAliases);
   nextResolving.add(name);
@@ -651,7 +669,7 @@ function classifyWideningTargetAt(
   if (found.ambiguous) return null;
   const alias = found.alias;
   const aliasScope = environment.scopeOf(alias) ?? null;
-  const nextSubstitutions = aliasSubstitution(alias, unwrapped, substitutions, scope);
+  const nextSubstitutions = aliasSubstitution(alias, unwrapped, substitutions, scope, environment);
   if (nextSubstitutions === null) return null;
   const nextResolving = new Set(resolvingAliases);
   nextResolving.add(name);
@@ -718,7 +736,13 @@ function isBroadMappedKey(
   if (found !== null && !found.ambiguous) {
     const alias = found.alias;
     const aliasScope = environment.scopeOf(alias) ?? null;
-    const nextSubstitutions = aliasSubstitution(alias, unwrapped, substitutions, scope);
+    const nextSubstitutions = aliasSubstitution(
+      alias,
+      unwrapped,
+      substitutions,
+      scope,
+      environment,
+    );
     if (nextSubstitutions !== null) {
       const nextResolving = new Set(resolvingAliases);
       nextResolving.add(name);
@@ -791,7 +815,7 @@ function classifyAliasBroadTarget(
   if (found === null || found.ambiguous || resolvingAliases.has(name)) return null;
   const alias = found.alias;
   const aliasScope = environment.scopeOf(alias) ?? null;
-  const nextSubstitutions = aliasSubstitution(alias, unwrapped, substitutions, scope);
+  const nextSubstitutions = aliasSubstitution(alias, unwrapped, substitutions, scope, environment);
   if (nextSubstitutions === null) return null;
   const nextResolving = new Set(resolvingAliases);
   nextResolving.add(name);
