@@ -2,6 +2,7 @@ import { defineRule } from "@oxlint/plugins";
 import type { ESTree, Variable } from "@oxlint/plugins";
 
 import { createScopeIndex, type ScopeIndex } from "../shared/resolves-to-unknown.ts";
+import { lexicalTypeParameterNames } from "../shared/lexical-type-parameters.ts";
 
 type BroadTypeKind = "top" | "object" | "record";
 
@@ -18,15 +19,79 @@ const functionBoundaryTypes = new Set([
 ]);
 
 const recordBuiltInNames = new Set(["Record", "Readonly", "PropertyKey"]);
-let scopeIndex: ScopeIndex | null = null;
+
+const typeNameDeclarationTypes = new Set([
+  "TSTypeAliasDeclaration",
+  "TSInterfaceDeclaration",
+  "TSEnumDeclaration",
+  "TSModuleDeclaration",
+  "TSImportEqualsDeclaration",
+  "ClassDeclaration",
+]);
+
+type ProgramState = {
+  readonly scopeIndex: ScopeIndex;
+  readonly visitorKeys: Readonly<Record<string, readonly string[]>>;
+  readonly shadowedBuiltIns: ReadonlySet<string>;
+};
+
+const programState = new WeakMap<ESTree.Program, ProgramState>();
+
+function programFor(node: ESTree.Node): ESTree.Program | null {
+  let current: ESTree.Node | null = node;
+  while (current !== null) {
+    if (current.type === "Program") return current;
+    current = current.parent;
+  }
+  return null;
+}
+
+function recordBuiltInState(at: ESTree.TSType): ProgramState | null {
+  const program = programFor(at);
+  if (program === null) return null;
+  return programState.get(program) ?? null;
+}
+
+function collectShadowedRecordBuiltIns(program: ESTree.Program): ReadonlySet<string> {
+  const shadowed = new Set<string>();
+  for (const statement of program.body) {
+    if (statement.type === "ImportDeclaration") {
+      for (const specifier of statement.specifiers) {
+        if (recordBuiltInNames.has(specifier.local.name)) shadowed.add(specifier.local.name);
+      }
+      continue;
+    }
+    const declaration =
+      statement.type === "ExportNamedDeclaration" || statement.type === "ExportDefaultDeclaration"
+        ? statement.declaration
+        : statement;
+    if (
+      declaration !== null &&
+      declaration !== undefined &&
+      "type" in declaration &&
+      typeNameDeclarationTypes.has(declaration.type) &&
+      "id" in declaration &&
+      declaration.id !== null &&
+      declaration.id !== undefined &&
+      declaration.id.type === "Identifier" &&
+      recordBuiltInNames.has(declaration.id.name)
+    ) {
+      shadowed.add(declaration.id.name);
+    }
+  }
+  return shadowed;
+}
 
 function isRecordBuiltInName(name: string, at: ESTree.TSType): boolean {
   if (!recordBuiltInNames.has(name)) return false;
-  if (scopeIndex === null) return true;
-  const scope = scopeIndex.scopeOf(at);
-  const alias = scopeIndex.lookupAlias(name, scope);
+  const state = recordBuiltInState(at);
+  if (state === null) return true;
+  if (state.shadowedBuiltIns.has(name)) return false;
+  if (lexicalTypeParameterNames(at, state.visitorKeys).has(name)) return false;
+  const scope = state.scopeIndex.scopeOf(at);
+  const alias = state.scopeIndex.lookupAlias(name, scope);
   if (alias !== null) return false;
-  const interfaces = scopeIndex.lookupInterface(name, scope);
+  const interfaces = state.scopeIndex.lookupInterface(name, scope);
   return interfaces === null || interfaces.length === 0;
 }
 
@@ -380,7 +445,10 @@ export const noWidenThenAssertRule = defineRule({
     return {
       Program(node) {
         scopes = context.sourceCode.scopeManager.scopes;
-        scopeIndex = createScopeIndex(node, context.sourceCode.visitorKeys);
+        const scopeIndex = createScopeIndex(node, context.sourceCode.visitorKeys);
+        const visitorKeys = context.sourceCode.visitorKeys;
+        const shadowedBuiltIns = collectShadowedRecordBuiltIns(node);
+        programState.set(node, { scopeIndex, visitorKeys, shadowedBuiltIns });
       },
       TSAsExpression: checkAssertion,
       TSTypeAssertion: checkAssertion,
