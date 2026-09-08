@@ -15,5 +15,12 @@
   // device-helper-smoke.ts spawns the helper through the server's sandbox
   // wrapper so the smoke run exercises the same confinement the app applies.
   // Duplicating that logic here is what would let the two drift.
-  "include": ["**/*.ts", "../apps/server/src/device/helperSandbox.ts"]
+  // The diagnostics contract test imports the worker's validator for the same
+  // reason: the collector and the desktop sanitizer must not drift.
+  "include": [
+    "**/*.ts",
+    "../apps/server/src/device/helperSandbox.ts",
+    "../apps/desktop/src/diagnosticsSanitizer.ts",
+    "../infrastructure/diagnostics-worker/src/contract.ts"
+  ]
 }

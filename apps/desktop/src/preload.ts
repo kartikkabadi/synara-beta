@@ -168,6 +168,13 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.removeListener(IPC.updateState, wrappedListener);
     };
   },
+  diagnostics: {
+    getState: () => ipcRenderer.invoke(IPC.diagnosticsGetState),
+    setEnabled: (enabled) => ipcRenderer.invoke(IPC.diagnosticsSetEnabled, enabled),
+    getSamplePayload: () => ipcRenderer.invoke(IPC.diagnosticsGetSamplePayload),
+    recordEvent: (input) => ipcRenderer.invoke(IPC.diagnosticsRecordEvent, input),
+    sendTestEvent: () => ipcRenderer.invoke(IPC.diagnosticsSendTestEvent),
+  },
   notifications: {
     isSupported: () => ipcRenderer.invoke(IPC.notificationsIsSupported),
     show: (input) => ipcRenderer.invoke(IPC.notificationsShow, input),

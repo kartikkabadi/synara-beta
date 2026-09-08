@@ -41,6 +41,8 @@ import {
   RuntimeMode,
 } from "@synara/contracts";
 import { automationRequiresTargetThread } from "@synara/shared/automationMode";
+
+import { toDiagnosticsProvider } from "../diagnosticsProvider";
 import { respondingInteractionReclaimAt } from "@synara/shared/pendingInteractions";
 import { providerSupportsNativeTurnSteering } from "@synara/shared/providerMetadata";
 import { getDefaultModel, getModelCapabilities, normalizeModelSlug } from "@synara/shared/model";
@@ -8867,6 +8869,12 @@ export default function ChatView({
         }),
       );
       turnStartSucceeded = true;
+      window.desktopBridge?.diagnostics
+        ?.recordEvent({
+          kind: "session_started",
+          provider: toDiagnosticsProvider(selectedModelSelectionForSend.provider),
+        })
+        .catch(() => {});
       if (
         shouldResumeSettledLocalThread &&
         currentActiveGitBranchForSend !== null &&

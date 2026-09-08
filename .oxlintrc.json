@@ -13,7 +13,8 @@
     ".docs/**",
     ".plans/**",
     ".playwright-mcp/**",
-    "tools/oxlint/anti-slop/**"
+    "tools/oxlint/anti-slop/**",
+    "infrastructure/**"
   ],
   "plugins": ["eslint", "oxc", "react", "unicorn", "typescript"],
   "jsPlugins": [

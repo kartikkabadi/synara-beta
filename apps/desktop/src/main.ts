@@ -49,7 +49,9 @@ import {
   type UpdateDownloadedEvent,
 } from "electron-updater";
 
-import type { ContextMenuItem } from "@synara/contracts";
+import type { ContextMenuItem, DiagnosticsEventInput } from "@synara/contracts";
+
+import { createDiagnosticsClient } from "./diagnosticsClient";
 import { isKeyboardShortcutsHelpChord } from "@synara/shared/browserShortcuts";
 import { getMacTrafficLightPosition } from "@synara/shared/desktopChrome";
 import { DEVICE_HELPER_SOURCE_DIR_ENV } from "@synara/shared/deviceHelperCache";
@@ -349,6 +351,7 @@ const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_WINDOW_STATE_PATH = Path.join(STATE_DIR, "desktop-window-state.json");
 const DESKTOP_APP_ICON_PATH = Path.join(STATE_DIR, "desktop-app-icon");
 const DESKTOP_CUSTOM_TITLE_BAR_PATH = Path.join(STATE_DIR, "desktop-custom-title-bar.json");
+const DIAGNOSTICS_STATE_DIR = Path.join(STATE_DIR, "diagnostics");
 const DESKTOP_SCHEME = desktopIdentity.scheme;
 const APP_DISPLAY_NAME = desktopIdentity.displayName;
 const APP_USER_MODEL_ID = desktopIdentity.bundleId;
@@ -547,6 +550,20 @@ const initialUpdateState = (): DesktopUpdateState =>
     desktopRuntimeInfo,
     desktopFlavor === "development" ? "production" : desktopFlavor,
   );
+const diagnosticsClient = createDiagnosticsClient({
+  stateDir: DIAGNOSTICS_STATE_DIR,
+  sanitizeContext: {
+    appVersion: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    flavor: desktopFlavor,
+    installId: "pending",
+    now: () => new Date(),
+  },
+});
+function recordDiagnosticsEvent(input: DiagnosticsEventInput): boolean {
+  return diagnosticsClient.record(input);
+}
 
 function logTimestamp(): string {
   return new Date().toISOString();
@@ -2622,8 +2639,17 @@ function emitUpdateState(): void {
 }
 
 function setUpdateState(patch: Partial<DesktopUpdateState>): void {
+  const previousStatus = updateState.status;
   updateState = { ...updateState, ...patch };
   emitUpdateState();
+  if (updateState.status === previousStatus) return;
+  if (updateState.status === "available") {
+    recordDiagnosticsEvent({ kind: "update_available" });
+  } else if (updateState.status === "downloaded") {
+    recordDiagnosticsEvent({ kind: "update_installed" });
+  } else if (updateState.status === "error" && previousStatus === "downloading") {
+    recordDiagnosticsEvent({ kind: "update_failed" });
+  }
 }
 
 function shouldEnableAutoUpdates(): boolean {
@@ -4616,6 +4642,31 @@ function registerIpcHandlers(): void {
     requestGracefulAppQuit("custom-title-bar-relaunch");
   });
 
+  ipcMain.removeHandler(IPC.diagnosticsGetState);
+  ipcMain.handle(IPC.diagnosticsGetState, async () => diagnosticsClient.getState());
+
+  ipcMain.removeHandler(IPC.diagnosticsSetEnabled);
+  ipcMain.handle(IPC.diagnosticsSetEnabled, async (_event, rawEnabled: unknown) => {
+    if (typeof rawEnabled !== "boolean") return diagnosticsClient.getState();
+    return diagnosticsClient.setEnabled(rawEnabled);
+  });
+
+  ipcMain.removeHandler(IPC.diagnosticsGetSamplePayload);
+  ipcMain.handle(IPC.diagnosticsGetSamplePayload, async () => diagnosticsClient.getSamplePayload());
+
+  ipcMain.removeHandler(IPC.diagnosticsRecordEvent);
+  ipcMain.handle(IPC.diagnosticsRecordEvent, async (_event, rawInput: unknown) => {
+    if (!rawInput || typeof rawInput !== "object") return false;
+    return recordDiagnosticsEvent(rawInput as DiagnosticsEventInput);
+  });
+
+  ipcMain.removeHandler(IPC.diagnosticsSendTestEvent);
+  ipcMain.handle(IPC.diagnosticsSendTestEvent, async () => {
+    const recorded = recordDiagnosticsEvent({ kind: "test" });
+    if (recorded) void diagnosticsClient.flush();
+    return recorded;
+  });
+
   ipcMain.removeHandler(IPC.updateGetState);
   ipcMain.handle(IPC.updateGetState, async () => updateState);
 
@@ -5154,6 +5205,7 @@ if (!hasSingleInstanceLock) {
 
 async function bootstrap(): Promise<void> {
   writeDesktopLogHeader("bootstrap start");
+  recordDiagnosticsEvent({ kind: "app_start" });
   if (!(await requireCurrentDesktopMigrationBundle())) {
     return;
   }
@@ -5212,6 +5264,8 @@ async function bootstrap(): Promise<void> {
 
 app.on("before-quit", (event) => {
   writeDesktopLogHeader("before-quit received");
+  recordDiagnosticsEvent({ kind: "app_quit" });
+  void diagnosticsClient.flush();
   if (desktopShutdownComplete) {
     return;
   }
