@@ -100,7 +100,7 @@ export const noObjectParametersRule = defineRule({
           substitutions,
         );
       }
-      if (visited.has(name) || shadowedAliases.has(name)) return false;
+      if (visited.has(visitKey) || shadowedAliases.has(name)) return false;
       const found = index?.lookupAlias(name, scope);
       if (found === null || found === undefined || found.ambiguous) return false;
       const alias = found.alias;

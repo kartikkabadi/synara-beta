@@ -114,8 +114,10 @@ function typeReferenceName(type: ESTree.TSTypeReference): string | null {
 function isBuiltIn(name: string, environment: TypeEnvironment, scope: Scope | null): boolean {
   if (!BUILT_INS.has(name)) return false;
   if (environment.shadowedBuiltIns.has(name)) return false;
-  const found = environment.scopeIndex?.lookupAlias(name, scope);
-  return found === null || found === undefined;
+  const alias = environment.scopeIndex?.lookupAlias(name, scope);
+  if (alias !== null && alias !== undefined) return false;
+  const interfaces = environment.scopeIndex?.lookupInterface(name, scope);
+  return interfaces === null || interfaces === undefined || interfaces.length === 0;
 }
 
 function isUnappliedReferenceTo(type: ESTree.TSType, name: string): boolean {
@@ -360,6 +362,37 @@ function unsafeDirectValue(
   }
 
   const interfaceDeclarations = findInterface(name, environment, scope);
+  const found = findAlias(name, environment, scope);
+  if (resolvingAliases.has(name) && interfaceDeclarations === null) return null;
+
+  const aliasCloser =
+    found !== null &&
+    !found.ambiguous &&
+    !resolvingAliases.has(name) &&
+    (interfaceDeclarations === null ||
+      (() => {
+        const aliasScope = environment.scopeOf(found.alias);
+        const interfaceScope = environment.scopeOf(interfaceDeclarations[0]);
+        if (aliasScope === null || interfaceScope === null) return true;
+        return aliasScope.depth >= interfaceScope.depth;
+      })());
+
+  if (aliasCloser) {
+    const alias = found.alias;
+    const aliasScope = environment.scopeOf(alias) ?? null;
+    const nextSubstitutions = aliasSubstitution(alias, unwrapped, substitutions, scope);
+    if (nextSubstitutions === null) return null;
+    const nextResolving = new Set(resolvingAliases);
+    nextResolving.add(name);
+    return unsafeDirectValue(
+      alias.typeAnnotation,
+      environment,
+      nextSubstitutions,
+      nextResolving,
+      aliasScope,
+    );
+  }
+
   if (interfaceDeclarations !== null) {
     if (isEffectivelyEmptyInterface(interfaceDeclarations)) return "empty-object";
     for (const declaration of interfaceDeclarations) {
@@ -392,10 +425,8 @@ function unsafeDirectValue(
     return null;
   }
 
-  const found = findAlias(name, environment, scope);
-  if (found === null || resolvingAliases.has(name)) return null;
+  if (found === null || resolvingAliases.has(name) || found.ambiguous) return null;
   const alias = found.alias;
-  if (found.ambiguous) return null;
   const aliasScope = environment.scopeOf(alias) ?? null;
   const nextSubstitutions = aliasSubstitution(alias, unwrapped, substitutions, scope);
   if (nextSubstitutions === null) return null;
