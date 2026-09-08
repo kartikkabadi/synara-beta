@@ -19,8 +19,18 @@ const FIELD_ROWS: ReadonlyArray<{
 }> = [
   { field: "kind", purpose: "Which event happened", example: "session_started", collected: true },
   { field: "schemaVersion", purpose: "Payload schema version", example: "1", collected: true },
-  { field: "appVersion", purpose: "Which beta build you run", example: "0.8.3-beta.1", collected: true },
-  { field: "platform / arch", purpose: "OS and CPU family", example: "darwin / arm64", collected: true },
+  {
+    field: "appVersion",
+    purpose: "Which beta build you run",
+    example: "0.8.3-beta.1",
+    collected: true,
+  },
+  {
+    field: "platform / arch",
+    purpose: "OS and CPU family",
+    example: "darwin / arm64",
+    collected: true,
+  },
   { field: "flavor", purpose: "Build channel", example: "beta", collected: true },
   {
     field: "eventId",

@@ -225,9 +225,10 @@ describe("diagnosticsClient", () => {
       stateDir,
       sanitizeContext,
       flushIntervalMs: 0,
-      fetchImpl: (async () => new Promise((res) => {
-        resolve = res;
-      })) as typeof fetch,
+      fetchImpl: (async () =>
+        new Promise((res) => {
+          resolve = res;
+        })) as typeof fetch,
     });
     client.setEnabled(true);
     client.record({ kind: "app_start" });
@@ -246,9 +247,10 @@ describe("diagnosticsClient", () => {
       stateDir,
       sanitizeContext,
       flushIntervalMs: 0,
-      fetchImpl: (async () => new Promise((res) => {
-        resolve = res;
-      })) as typeof fetch,
+      fetchImpl: (async () =>
+        new Promise((res) => {
+          resolve = res;
+        })) as typeof fetch,
     });
     client.setEnabled(true);
     client.record({ kind: "app_start" });
