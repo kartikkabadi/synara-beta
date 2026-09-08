@@ -106,10 +106,7 @@ describe("install-macos.sh", () => {
       NodePath.join(stubBin, "uname"),
       '#!/bin/sh\nif [ "$1" = "-s" ]; then echo Darwin; elif [ "$1" = "-m" ]; then echo arm64; else exit 1; fi\n',
     );
-    NodeFS.writeFileSync(
-      NodePath.join(stubBin, "curl"),
-      '#!/bin/sh\necho "[]"\n',
-    );
+    NodeFS.writeFileSync(NodePath.join(stubBin, "curl"), '#!/bin/sh\necho "[]"\n');
     for (const stub of ["uname", "curl"]) {
       NodeFS.chmodSync(NodePath.join(stubBin, stub), 0o755);
     }
@@ -196,9 +193,7 @@ describe("install-macos.sh", () => {
   });
 
   it("keeps the previous app as a privileged rollback until quarantine removal succeeds", () => {
-    const quarantine = script.indexOf(
-      'xattr -d com.apple.quarantine " & installedApp & "',
-    );
+    const quarantine = script.indexOf('xattr -d com.apple.quarantine " & installedApp & "');
     NodeAssert.ok(quarantine > -1, "privileged AppleScript must clear quarantine");
     const lastBackupRemove = script.lastIndexOf('rm -rf " & oldApp');
     NodeAssert.ok(
@@ -209,7 +204,10 @@ describe("install-macos.sh", () => {
 
   it("restores the previous app when quarantine removal fails", () => {
     const quarantineFailure = script.indexOf("grep -q com.apple.quarantine; then mv");
-    NodeAssert.ok(quarantineFailure > -1, "privileged AppleScript must react to quarantine failure");
+    NodeAssert.ok(
+      quarantineFailure > -1,
+      "privileged AppleScript must react to quarantine failure",
+    );
     NodeAssert.match(script, /then mv " & installedApp & " " & newApp/);
     NodeAssert.match(script, /mv " & oldApp & " " & installedApp/);
   });

@@ -94,7 +94,10 @@ export function countViolationsByRuleAndFile(
   for (const { code, filename, message, line } of diagnostics) {
     const key = `${code}:${filename}`;
     const messages = countByMessage(counts, key);
-    const fingerprint = messageFingerprint(message, sourceLineText(filename, line, lineCache, root));
+    const fingerprint = messageFingerprint(
+      message,
+      sourceLineText(filename, line, lineCache, root),
+    );
     messages.set(fingerprint, (messages.get(fingerprint) ?? 0) + 1);
   }
   return counts;

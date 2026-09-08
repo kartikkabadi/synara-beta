@@ -221,7 +221,12 @@ function aliasSubstitution(
   base: TypeAliasEnvironment,
   scope: Scope | null,
 ): TypeAliasEnvironment | null {
-  return substitutionEnvironment(alias.typeParameters?.params, type.typeArguments?.params, base, scope);
+  return substitutionEnvironment(
+    alias.typeParameters?.params,
+    type.typeArguments?.params,
+    base,
+    scope,
+  );
 }
 
 function findAlias(
@@ -255,13 +260,18 @@ function collectInterfaceIndexSignatures(
   const results: ResolvedType[] = [];
   for (const member of declaration.body.body) {
     if (member.type === "TSIndexSignature" && member.typeAnnotation !== null) {
-      results.push({ type: member.typeAnnotation.typeAnnotation, substitutions: interfaceSubstitutions });
+      results.push({
+        type: member.typeAnnotation.typeAnnotation,
+        substitutions: interfaceSubstitutions,
+      });
     }
   }
 
   for (const extend of declaration.extends) {
     const extendName =
-      extend.expression.type === "Identifier" ? (extend.expression as ESTree.IdentifierReference).name : null;
+      extend.expression.type === "Identifier"
+        ? (extend.expression as ESTree.IdentifierReference).name
+        : null;
     if (extendName === null) continue;
     const baseDeclarations = findInterface(extendName, environment, declarationScope);
     if (baseDeclarations === null) continue;
@@ -304,7 +314,8 @@ function unsafeDirectValue(
     return "empty-object";
   if (unwrapped.type === "TSUnionType") {
     return unwrapped.types.some(
-      (member) => unsafeDirectValue(member, environment, substitutions, resolvingAliases, scope) !== null,
+      (member) =>
+        unsafeDirectValue(member, environment, substitutions, resolvingAliases, scope) !== null,
     )
       ? "union"
       : null;
@@ -325,7 +336,13 @@ function unsafeDirectValue(
   if (resolved !== undefined) {
     return isUnappliedReferenceTo(resolved.type, name)
       ? null
-      : unsafeDirectValue(resolved.type, environment, resolved.substitutions, resolvingAliases, resolved.scope);
+      : unsafeDirectValue(
+          resolved.type,
+          environment,
+          resolved.substitutions,
+          resolvingAliases,
+          resolved.scope,
+        );
   }
 
   if (TRANSPARENT_WRAPPERS.has(name) && isBuiltIn(name, environment, scope)) {
@@ -337,7 +354,9 @@ function unsafeDirectValue(
 
   if (name === "Record" && isBuiltIn(name, environment, scope)) {
     const value = unwrapped.typeArguments?.params[1] ?? null;
-    return value === null ? null : unsafeDirectValue(value, environment, substitutions, resolvingAliases, scope);
+    return value === null
+      ? null
+      : unsafeDirectValue(value, environment, substitutions, resolvingAliases, scope);
   }
 
   const interfaceDeclarations = findInterface(name, environment, scope);
@@ -382,7 +401,13 @@ function unsafeDirectValue(
   if (nextSubstitutions === null) return null;
   const nextResolving = new Set(resolvingAliases);
   nextResolving.add(name);
-  return unsafeDirectValue(alias.typeAnnotation, environment, nextSubstitutions, nextResolving, aliasScope);
+  return unsafeDirectValue(
+    alias.typeAnnotation,
+    environment,
+    nextSubstitutions,
+    nextResolving,
+    aliasScope,
+  );
 }
 
 function dictionaryValueTypes(
@@ -415,7 +440,13 @@ function dictionaryValueTypes(
   if (resolved !== undefined) {
     return isUnappliedReferenceTo(resolved.type, name)
       ? []
-      : dictionaryValueTypes(resolved.type, environment, resolved.substitutions, resolvingAliases, resolved.scope);
+      : dictionaryValueTypes(
+          resolved.type,
+          environment,
+          resolved.substitutions,
+          resolvingAliases,
+          resolved.scope,
+        );
   }
 
   if (TRANSPARENT_WRAPPERS.has(name) && isBuiltIn(name, environment, scope)) {
@@ -471,7 +502,13 @@ function dictionaryValueTypes(
   if (nextSubstitutions === null) return [];
   const nextResolving = new Set(resolvingAliases);
   nextResolving.add(name);
-  return dictionaryValueTypes(alias.typeAnnotation, environment, nextSubstitutions, nextResolving, aliasScope);
+  return dictionaryValueTypes(
+    alias.typeAnnotation,
+    environment,
+    nextSubstitutions,
+    nextResolving,
+    aliasScope,
+  );
 }
 
 export function classifyUnsafeDictionaryValue(
@@ -543,7 +580,13 @@ function classifyWideningTargetAt(
         : null;
   }
   if (unwrapped.type === "TSMappedType") {
-    return isBroadMappedKey(unwrapped.constraint, environment, substitutions, resolvingAliases, scope)
+    return isBroadMappedKey(
+      unwrapped.constraint,
+      environment,
+      substitutions,
+      resolvingAliases,
+      scope,
+    )
       ? { kind: "open dictionary" }
       : null;
   }
@@ -554,12 +597,20 @@ function classifyWideningTargetAt(
   if (resolved !== undefined) {
     return isUnappliedReferenceTo(resolved.type, name)
       ? null
-      : classifyWideningTargetAt(resolved.type, environment, resolved.substitutions, resolvingAliases, resolved.scope);
+      : classifyWideningTargetAt(
+          resolved.type,
+          environment,
+          resolved.substitutions,
+          resolvingAliases,
+          resolved.scope,
+        );
   }
 
   if (TRANSPARENT_WRAPPERS.has(name) && isBuiltIn(name, environment, scope)) {
     const wrapped = unwrapped.typeArguments?.params[0];
-    return wrapped === undefined ? null : classifyWideningTargetAt(wrapped, environment, substitutions, resolvingAliases, scope);
+    return wrapped === undefined
+      ? null
+      : classifyWideningTargetAt(wrapped, environment, substitutions, resolvingAliases, scope);
   }
 
   if (name === "Record" && isBuiltIn(name, environment, scope)) return { kind: "open dictionary" };
@@ -574,7 +625,13 @@ function classifyWideningTargetAt(
   const nextResolving = new Set(resolvingAliases);
   nextResolving.add(name);
   if ((alias.typeParameters?.params.length ?? 0) > 0) {
-    return resolvesToDictionary(alias.typeAnnotation, environment, nextSubstitutions, nextResolving, aliasScope)
+    return resolvesToDictionary(
+      alias.typeAnnotation,
+      environment,
+      nextSubstitutions,
+      nextResolving,
+      aliasScope,
+    )
       ? { kind: "generic container" }
       : null;
   }
@@ -613,7 +670,13 @@ function isBroadMappedKey(
   if (name === null) return false;
   const resolved = substitutions.get(name);
   if (resolved !== undefined && !isUnappliedReferenceTo(resolved.type, name)) {
-    return isBroadMappedKey(resolved.type, environment, resolved.substitutions, resolvingAliases, resolved.scope);
+    return isBroadMappedKey(
+      resolved.type,
+      environment,
+      resolved.substitutions,
+      resolvingAliases,
+      resolved.scope,
+    );
   }
 
   if (resolvingAliases.has(name)) return false;
@@ -628,7 +691,13 @@ function isBroadMappedKey(
     if (nextSubstitutions !== null) {
       const nextResolving = new Set(resolvingAliases);
       nextResolving.add(name);
-      return isBroadMappedKey(alias.typeAnnotation, environment, nextSubstitutions, nextResolving, aliasScope);
+      return isBroadMappedKey(
+        alias.typeAnnotation,
+        environment,
+        nextSubstitutions,
+        nextResolving,
+        aliasScope,
+      );
     }
   }
 
@@ -651,7 +720,13 @@ function classifyAliasBroadTarget(
       : null;
   }
   if (unwrapped.type === "TSMappedType") {
-    return isBroadMappedKey(unwrapped.constraint, environment, substitutions, resolvingAliases, scope)
+    return isBroadMappedKey(
+      unwrapped.constraint,
+      environment,
+      substitutions,
+      resolvingAliases,
+      scope,
+    )
       ? { kind: "open dictionary" }
       : null;
   }
@@ -662,7 +737,13 @@ function classifyAliasBroadTarget(
   if (resolved !== undefined) {
     return isUnappliedReferenceTo(resolved.type, name)
       ? null
-      : classifyAliasBroadTarget(resolved.type, environment, resolved.substitutions, resolvingAliases, resolved.scope);
+      : classifyAliasBroadTarget(
+          resolved.type,
+          environment,
+          resolved.substitutions,
+          resolvingAliases,
+          resolved.scope,
+        );
   }
 
   if (TRANSPARENT_WRAPPERS.has(name) && isBuiltIn(name, environment, scope)) {
