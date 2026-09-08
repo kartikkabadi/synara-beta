@@ -425,15 +425,13 @@ export interface RebuiltMessageAttachments {
 // expired or evicted blob 404s and the caller drops that attachment.
 async function fetchAttachmentAsFile(
   attachment: ChatImageAttachment | ChatFileAttachment,
-): Promise<File | null> {
+): Promise<{ file: File; url: string } | null> {
   try {
-    const response = await fetch(
-      resolveWsHttpUrl(`/attachments/${encodeURIComponent(attachment.id)}`),
-      { credentials: "include" },
-    );
+    const url = resolveWsHttpUrl(`/attachments/${encodeURIComponent(attachment.id)}`);
+    const response = await fetch(url, { credentials: "include" });
     if (!response.ok) return null;
     const blob = await response.blob();
-    return new File([blob], attachment.name, { type: attachment.mimeType });
+    return { file: new File([blob], attachment.name, { type: attachment.mimeType }), url };
   } catch {
     return null;
   }
@@ -458,17 +456,19 @@ export async function rebuildComposerAttachmentsFromMessage(
       result.assistantSelections.push(attachment);
       continue;
     }
-    const file = await fetchAttachmentAsFile(attachment);
-    if (!file) continue;
+    const fetched = await fetchAttachmentAsFile(attachment);
+    if (!fetched) continue;
     if (attachment.type === "image") {
+      // The remote route URL doubles as the preview: no blob URL is allocated
+      // here, so retry cloning and preview-URL cleanup have nothing to leak.
       result.images.push({
         type: "image",
         id: attachment.id,
         name: attachment.name,
         mimeType: attachment.mimeType,
         sizeBytes: attachment.sizeBytes,
-        previewUrl: URL.createObjectURL(file),
-        file,
+        previewUrl: fetched.url,
+        file: fetched.file,
       });
     } else {
       result.files.push({
@@ -477,7 +477,7 @@ export async function rebuildComposerAttachmentsFromMessage(
         name: attachment.name,
         mimeType: attachment.mimeType,
         sizeBytes: attachment.sizeBytes,
-        file,
+        file: fetched.file,
       });
     }
   }

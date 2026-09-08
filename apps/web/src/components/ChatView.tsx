@@ -421,9 +421,11 @@ import {
   appendAssistantSelectionsToPrompt,
   formatAssistantSelectionQueuePreview,
   formatAssistantSelectionTitleSeed,
+  stripEmbeddedAssistantSelections,
 } from "../lib/assistantSelections";
 import {
   appendBrowserAnnotationsToPrompt,
+  extractTrailingBrowserAnnotations,
   formatBrowserAnnotationLabel,
 } from "../lib/browserAnnotations";
 import {
@@ -1031,10 +1033,7 @@ type FailedThreadSendSnapshot = Pick<
   | "pastedTexts"
   | "skills"
   | "mentions"
-> & {
-  threadId: ThreadId;
-  restoredToComposer: boolean;
-};
+> & { restoredToComposer: boolean };
 
 const EMPTY_COMPOSER_PLUGIN_SUGGESTIONS: ComposerPluginSuggestion[] = [];
 
@@ -1716,7 +1715,8 @@ export default function ChatView({
   const sendPreflightInFlightRef = useRef(false);
   // Set by the send catch when a dispatch fails before the turn exists: the
   // error card's "Try again" reads this to resend the exact failed payload.
-  const failedThreadSendRef = useRef<FailedThreadSendSnapshot | null>(null);
+  // Keyed by thread so a dispatch on another thread cannot erase it.
+  const failedThreadSendsRef = useRef(new Map<ThreadId, FailedThreadSendSnapshot>());
   const dragDepthRef = useRef(0);
   const terminalOpenByThreadRef = useRef<Record<string, boolean>>({});
   const activatedThreadIdRef = useRef<ThreadId | null>(null);
@@ -8506,8 +8506,9 @@ export default function ChatView({
     tailAnchorScrollInFlightRef.current = true;
     setTailAnchor({ threadId: threadIdForSend, messageId: messageIdForSend });
 
-    // A new dispatch supersedes any payload captured by an earlier failure.
-    failedThreadSendRef.current = null;
+    // A new dispatch supersedes any payload captured by an earlier failure —
+    // only for this thread; another thread's failed send stays retryable.
+    failedThreadSendsRef.current.delete(threadIdForSend);
     setThreadError(threadIdForSend, null);
     if (expiredTerminalContextCount > 0) {
       const toastCopy = buildExpiredTerminalContextToastCopy(
@@ -9037,8 +9038,7 @@ export default function ChatView({
         // The failed send never reached the transcript, so capture its full
         // payload: the error card's retry replays this exact content instead of
         // whatever draft the composer happens to hold later.
-        failedThreadSendRef.current = {
-          threadId: threadIdForSend,
+        failedThreadSendsRef.current.set(threadIdForSend, {
           restoredToComposer: composerDraftWasEmpty,
           prompt: promptForSend,
           images: composerImagesSnapshot,
@@ -9050,7 +9050,7 @@ export default function ChatView({
           pastedTexts: composerPastedTextsSnapshot,
           skills: composerSkillsSnapshot,
           mentions: composerMentionsSnapshot,
-        };
+        });
       }
       if (queuedChatTurn === null && !turnStartSucceeded && composerDraftWasEmpty) {
         setOptimisticUserMessages((existing) => {
@@ -11347,7 +11347,7 @@ export default function ChatView({
   );
   const dismissActiveThreadError = useCallback(() => {
     if (!activeThread) return;
-    failedThreadSendRef.current = null;
+    failedThreadSendsRef.current.delete(activeThread.id);
     setThreadError(activeThread.id, null);
   }, [activeThread, setThreadError]);
   const clearThreadErrorAfterUnblock = useCallback(
@@ -11440,21 +11440,39 @@ export default function ChatView({
       interactionMode,
       envMode,
     });
-    const failedSend =
-      failedThreadSendRef.current?.threadId === threadId ? failedThreadSendRef.current : null;
+    const failedSend = failedThreadSendsRef.current.get(threadId) ?? null;
     if (failedSend) {
-      failedThreadSendRef.current = null;
-      const composerHasDraft =
-        (composerEditorRef.current?.readSnapshot()?.value ?? promptRef.current).trim().length > 0 ||
-        composerImagesRef.current.length > 0 ||
-        composerFilesRef.current.length > 0 ||
-        composerAssistantSelectionsRef.current.length > 0 ||
-        composerBrowserAnnotationsRef.current.length > 0 ||
-        composerFileCommentsRef.current.length > 0 ||
-        composerTerminalContextsRef.current.length > 0 ||
-        composerPastedTextsRef.current.length > 0;
-      if (failedSend.restoredToComposer && composerHasDraft) {
-        void lateSendHandlers.send(undefined);
+      failedThreadSendsRef.current.delete(threadId);
+      const attachmentIdsMatch = (
+        live: ReadonlyArray<{ id: string }>,
+        saved: ReadonlyArray<{ id: string }>,
+      ) => live.length === saved.length && live.every((a, i) => a.id === saved[i]?.id);
+      const liveComposerText = (
+        composerEditorRef.current?.readSnapshot()?.value ?? promptRef.current
+      ).trim();
+      // Send through the live composer only while it still holds the restored
+      // failed draft — an edited or replaced draft means the user moved on, so
+      // retry replays the captured payload and leaves their draft untouched.
+      const draftMatchesRestored =
+        liveComposerText === failedSend.prompt.trim() &&
+        attachmentIdsMatch(composerImagesRef.current, failedSend.images) &&
+        attachmentIdsMatch(composerFilesRef.current, failedSend.files) &&
+        attachmentIdsMatch(
+          composerAssistantSelectionsRef.current,
+          failedSend.assistantSelections,
+        ) &&
+        composerBrowserAnnotationsRef.current.length === failedSend.browserAnnotations.length &&
+        composerFileCommentsRef.current.length === failedSend.fileComments.length &&
+        composerTerminalContextsRef.current.length === failedSend.terminalContexts.length &&
+        composerPastedTextsRef.current.length === failedSend.pastedTexts.length;
+      if (failedSend.restoredToComposer && draftMatchesRestored) {
+        if (hasQueueableLiveTurn) {
+          // A live turn would reject a direct resend — queue the restored draft.
+          setThreadError(threadId, null);
+          void lateSendHandlers.send(undefined, "queue");
+        } else {
+          void lateSendHandlers.send(undefined);
+        }
         return;
       }
       dispatchRetryTurn(buildRetryTurn(failedSend));
@@ -11464,7 +11482,29 @@ export default function ChatView({
     const { images, files, assistantSelections } = await rebuildComposerAttachmentsFromMessage(
       lastUserMessage?.attachments ?? [],
     );
-    const prompt = lastUserMessage?.text.trim() ?? "";
+    // The rebuild awaited network fetches; if the user switched threads in
+    // between, the send handlers now belong to a different thread — abort
+    // rather than land this retry in the wrong conversation.
+    if (activatedThreadIdRef.current !== threadId) {
+      return;
+    }
+    // The stored text ends with serialized composer blocks; the outermost
+    // browser-annotations block is keyed to the old message id, so strip it and
+    // hand the drafts back to the send path to re-serialize under the new id.
+    let retryPromptText = lastUserMessage?.text ?? "";
+    let browserAnnotations: BrowserAnnotationDraft[] = [];
+    if (lastUserMessage) {
+      const extracted = extractTrailingBrowserAnnotations(retryPromptText, lastUserMessage.id);
+      browserAnnotations = extracted.annotations;
+      retryPromptText = extracted.promptText;
+    }
+    // Assistant selections ride the wire as attachment entries AND a serialized
+    // prompt block. The rebuilt attachments carry the entries, so strip the
+    // stale block — the send path re-appends a fresh one.
+    if (assistantSelections.length > 0) {
+      retryPromptText = stripEmbeddedAssistantSelections(retryPromptText);
+    }
+    const prompt = retryPromptText.trim();
     if (!prompt && images.length === 0 && files.length === 0 && assistantSelections.length === 0) {
       return;
     }
@@ -11474,7 +11514,7 @@ export default function ChatView({
         images,
         files,
         assistantSelections,
-        browserAnnotations: [],
+        browserAnnotations,
         terminalContexts: [],
         fileComments: [],
         pastedTexts: [],
