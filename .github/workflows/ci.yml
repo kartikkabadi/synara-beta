@@ -95,7 +95,7 @@ jobs:
 
       - name: Anti-slop ratchet
         env:
-          SYNARA_ANTI_SLOP_BASE_REF: ${{ github.base_ref != '' && format('origin/{0}', github.base_ref) || 'origin/main' }}
+          SYNARA_ANTI_SLOP_BASE_REF: ${{ github.base_ref != '' && format('origin/{0}', github.base_ref) || (github.event_name == 'push' && github.event.before || 'origin/main') }}
         run: bun run lint:anti-slop
 
   static-typecheck:
