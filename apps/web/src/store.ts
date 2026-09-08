@@ -15,6 +15,8 @@ import { Debouncer } from "@tanstack/react-pacer";
 import { resolveThreadBranchRegressionGuard } from "@synara/shared/git";
 import { create } from "zustand";
 
+import { createProviderSessionStartTracker } from "./diagnosticsSessions";
+import { toDiagnosticsProvider } from "./diagnosticsProvider";
 import { resolveCreateBranchFlowCompletedMerge } from "./storeNormalization";
 import {
   applySpaceOrder,
@@ -32,7 +34,7 @@ import {
 } from "./storeProjection";
 import { applyOrchestrationEvents, applyOrchestrationEventsHotPath } from "./storeEventReducer";
 import { persistState, readPersistedState, rememberProjectState } from "./storePersistence";
-import { initialState, type AppState } from "./storeState";
+import { EMPTY_THREAD_IDS, initialState, type AppState } from "./storeState";
 import type { Project, ThreadWorkspacePatch } from "./types";
 
 type ReadModelThread = OrchestrationReadModel["threads"][number];
@@ -359,6 +361,31 @@ if (typeof window !== "undefined") {
     persistAppStateNow();
   });
 }
+
+// Diagnostics: one session_started event per provider session. Watching the
+// normalized session slice covers every dispatch path — a per-call-site
+// recorder would count queued/steering turns as new sessions and miss
+// non-composer dispatch entirely.
+const trackProviderSessionStart = createProviderSessionStartTracker((provider) => {
+  // The desktop bridge only exists in the packaged renderer; in tests and
+  // plain browser dev sessions the optional chain simply no-ops.
+  if (!("window" in globalThis)) return;
+  window.desktopBridge?.diagnostics
+    ?.recordEvent({ kind: "session_started", provider: toDiagnosticsProvider(provider) })
+    .catch(() => {});
+});
+useStore.subscribe((state, previousState) => {
+  if (
+    state.threadSessionById === previousState.threadSessionById &&
+    state.threadIds === previousState.threadIds
+  ) {
+    return;
+  }
+  trackProviderSessionStart({
+    threadIds: state.threadIds ?? EMPTY_THREAD_IDS,
+    sessionById: state.threadSessionById,
+  });
+});
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {

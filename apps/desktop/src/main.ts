@@ -556,7 +556,9 @@ const diagnosticsClient = createDiagnosticsClient({
     appVersion: app.getVersion(),
     platform: process.platform,
     arch: process.arch,
-    flavor: desktopFlavor,
+    // The diagnostics schema only knows release flavors; map development the
+    // same way the update state does so dev-build events are not dropped.
+    flavor: desktopFlavor === "development" ? "production" : desktopFlavor,
     installId: "pending",
     now: () => new Date(),
   },
@@ -2757,10 +2759,12 @@ function processInstallMarkerOnStartup(): void {
         `[desktop-updater] Failed to persist restart install failure: ${formatErrorMessage(error)}`,
       );
     }
+    // Only a newly observed failure counts. An "already-failed" marker is
+    // re-read on every later restart and must not inflate failure metrics.
+    recordDiagnosticsEvent({ kind: "update_failed" });
   }
 
   automaticUpdateActivitySuppressed = true;
-  recordDiagnosticsEvent({ kind: "update_failed" });
   const message = `Synara restarted, but update ${marker.toVersion} was not installed. Try again.`;
   setUpdateState(
     reduceDesktopUpdateStateOnInstallRestartFailure(

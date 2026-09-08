@@ -56,7 +56,9 @@ where it goes, and how to turn it off.
    `infrastructure/diagnostics-worker/`.
 4. The worker re-validates the whole batch against the same contract and
    stores it in a Cloudflare D1 database. Batches with any invalid event are
-   rejected whole.
+   rejected whole. Durable rate limits — an atomic per-install hourly quota
+   and a global hourly cap — bound ingest abuse, and a daily scheduled job
+   deletes events older than 90 days.
 5. If sending fails five times in a row, the backlog is dropped. Diagnostics
    never degrades the app.
 

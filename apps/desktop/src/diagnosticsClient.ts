@@ -131,22 +131,41 @@ function reconcileInstallIds(
 
 export function createDiagnosticsClient(options: DiagnosticsOptions): DiagnosticsClient {
   const endpointUrl = options.endpointUrl ?? DEFAULT_DIAGNOSTICS_ENDPOINT_URL;
-  const state = readDiagnosticsState(options.stateDir);
+  // Distinguish a persisted opt-out from a missing/corrupt state file: only a
+  // state file that parsed and says disabled proves consent was revoked.
+  const persistedState = (() => {
+    try {
+      return parseDiagnosticsStateFile(
+        FS.readFileSync(Path.join(options.stateDir, STATE_FILE), "utf8"),
+      );
+    } catch {
+      return null;
+    }
+  })();
+  const state = persistedState ?? readDiagnosticsState(options.stateDir);
   const stateRef = {
     enabled: state.enabled,
     installId: state.installId,
   };
   const loadedQueue = readDiagnosticsQueue(options.stateDir);
-  const reconciledQueue = reconcileInstallIds(loadedQueue, stateRef.installId);
+  // A queue that outlived a persisted opt-out (its delete hit a disk error at
+  // withdrawal) is consent-revoked data: never load or send it. A missing
+  // state file proves nothing about consent, so its queue is reconciled to
+  // the regenerated install id instead.
+  const reconciledQueue =
+    persistedState !== null && persistedState.enabled === false
+      ? []
+      : reconcileInstallIds(loadedQueue, stateRef.installId);
   let queue: readonly DiagnosticsEvent[] = reconciledQueue;
-  if (reconciledQueue !== loadedQueue) {
-    // The queue was re-stamped to the current install id. Persist the
-    // reconciled queue so the on-disk copy stays valid.
+  if (reconciledQueue !== loadedQueue && loadedQueue.length > 0) {
+    // The queue was dropped as orphaned or re-stamped to the current install
+    // id. Persist the result so the on-disk copy stays valid. Best-effort:
+    // persistence failures must never crash the app; the in-memory queue is
+    // already correct.
     try {
       writeDiagnosticsQueue(options.stateDir, reconciledQueue);
     } catch {
-      // Persistence failures must never crash the app; the in-memory queue is
-      // already correct.
+      // The in-memory queue is already correct.
     }
   }
   let lastSentAt: string | null = null;
@@ -244,25 +263,48 @@ export function createDiagnosticsClient(options: DiagnosticsOptions): Diagnostic
       // flushes ignore stale completions after consent is toggled.
       consentGeneration += 1;
       if (!enabled) {
-        // Consent withdrawn: drop everything queued, immediately, and reset
-        // the failure counter so a stale streak cannot drop the next backlog.
-        // Persist the cleared queue before writing the disabled state so a
-        // crash between the two writes can never leave revoked events on disk.
+        // Consent withdrawn: disable recording and sending first, drop the
+        // queue, and reset the failure counter so a stale streak cannot drop
+        // the next backlog. Opt-out must hold even when the filesystem cannot
+        // persist anything, so neither write may abort the disable.
+        stateRef.enabled = false;
         queue = [];
         consecutiveFailures = 0;
         lastError = null;
         try {
           writeDiagnosticsQueue(options.stateDir, queue);
         } catch {
-          // If the empty queue cannot be persisted, do not write the disabled
-          // state. A later opt-in must not find old events with consent off.
-          return buildState();
+          // A full or read-only disk can still allow a delete; a missing queue
+          // file is the next best way to keep revoked events off disk.
+          try {
+            FS.rmSync(Path.join(options.stateDir, QUEUE_FILE), { force: true });
+          } catch {
+            // Nothing persisted. Startup drops any queue that outlives a
+            // persisted opt-out, and events are never sent while disabled.
+          }
         }
+        try {
+          writeDiagnosticsState(options.stateDir, {
+            version: 1,
+            enabled: false,
+            installId: stateRef.installId,
+          });
+        } catch {
+          // A missing state file reads back as consent-off on the next start,
+          // so deleting it is safer than leaving a stale enabled:true behind.
+          try {
+            FS.rmSync(Path.join(options.stateDir, STATE_FILE), { force: true });
+          } catch {
+            // In-memory consent still holds for this session; a fully
+            // unwritable disk cannot record an opt-out at all.
+          }
+        }
+        return buildState();
       }
-      stateRef.enabled = enabled;
+      stateRef.enabled = true;
       writeDiagnosticsState(options.stateDir, {
         version: 1,
-        enabled,
+        enabled: true,
         installId: stateRef.installId,
       });
       return buildState();
