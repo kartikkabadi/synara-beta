@@ -75,6 +75,27 @@ const OPTIONAL_FIELDS = [
   "errorSurface",
 ] as const;
 
+// Every present optional must match its own allowlist or pattern, whatever the
+// kind — a valid-looking kind must never ferry free text in an unused field.
+const OPTIONAL_FIELD_RULES: Readonly<Record<string, (value: string) => boolean>> = {
+  provider: (value) => PROVIDERS.has(value),
+  durationBucket: (value) => DURATION_BUCKETS.has(value),
+  outcome: (value) => OUTCOMES.has(value),
+  feature: (value) => FEATURE_PATTERN.test(value),
+  errorCode: (value) => ERROR_CODE_PATTERN.test(value),
+  errorSurface: (value) => ERROR_SURFACES.has(value),
+};
+
+// Fields each kind requires. An optional field is only allowed on kinds that
+// require it — the same rule the desktop sanitizer enforces via excess-property
+// rejection, so both sides accept exactly the same events.
+const REQUIRED_FIELDS_BY_KIND: Readonly<Record<string, ReadonlyArray<string>>> = {
+  session_started: ["provider"],
+  session_ended: ["provider", "durationBucket", "outcome"],
+  feature_used: ["feature"],
+  error: ["errorCode", "errorSurface"],
+};
+
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -118,33 +139,15 @@ export function validateEvent(value: unknown): boolean {
   ) {
     return false;
   }
-  for (const key of OPTIONAL_FIELDS) {
-    const optional = value[key];
-    if (optional !== undefined && typeof optional !== "string") return false;
+  const required = REQUIRED_FIELDS_BY_KIND[value.kind] ?? [];
+  for (const [field, isValidValue] of Object.entries(OPTIONAL_FIELD_RULES)) {
+    const present = value[field];
+    if (present === undefined) {
+      if (required.includes(field)) return false;
+      continue;
+    }
+    if (typeof present !== "string" || !isValidValue(present)) return false;
+    if (!required.includes(field)) return false;
   }
-  if (value.kind === "session_started") {
-    return typeof value.provider === "string" && PROVIDERS.has(value.provider);
-  }
-  if (value.kind === "session_ended") {
-    return (
-      typeof value.provider === "string" &&
-      PROVIDERS.has(value.provider) &&
-      typeof value.durationBucket === "string" &&
-      DURATION_BUCKETS.has(value.durationBucket) &&
-      typeof value.outcome === "string" &&
-      OUTCOMES.has(value.outcome)
-    );
-  }
-  if (value.kind === "feature_used") {
-    return typeof value.feature === "string" && FEATURE_PATTERN.test(value.feature);
-  }
-  if (value.kind === "error") {
-    return (
-      typeof value.errorCode === "string" &&
-      ERROR_CODE_PATTERN.test(value.errorCode) &&
-      typeof value.errorSurface === "string" &&
-      ERROR_SURFACES.has(value.errorSurface)
-    );
-  }
-  return OPTIONAL_FIELDS.every((key) => value[key] === undefined);
+  return true;
 }

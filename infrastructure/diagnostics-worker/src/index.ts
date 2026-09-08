@@ -57,7 +57,19 @@ async function handleIngest(request: Request, env: Env): Promise<Response> {
   if (!UUID_PATTERN.test(installId)) {
     return Response.json({ error: "invalid install id" }, { status: 422 });
   }
+  // A batch may only carry one install's events; otherwise a caller could
+  // smuggle another install's events past that install's hourly quota.
+  if (validEvents.some((event) => event.installId !== installId)) {
+    return Response.json({ error: "mixed install ids" }, { status: 422 });
+  }
   if (!(await withinRateLimit(env, installId, validEvents.length))) {
+    return Response.json({ error: "rate limited" }, { status: 429 });
+  }
+  // Best-effort sender-level limit (per isolate; no IP is ever stored). It
+  // blunts floods of fresh-UUID batches that would otherwise bypass the
+  // per-install quota; the D1 per-install check stays the durable limit.
+  const senderIp = request.headers.get("cf-connecting-ip") ?? "unknown";
+  if (!withinSenderRateLimit(senderIp, validEvents.length)) {
     return Response.json({ error: "rate limited" }, { status: 429 });
   }
   const receivedAt = new Date().toISOString();
@@ -90,6 +102,28 @@ async function handleIngest(request: Request, env: Env): Promise<Response> {
 }
 
 const PER_INSTALL_HOURLY_LIMIT = 600;
+const PER_SENDER_HOURLY_LIMIT = 2400;
+const SENDER_WINDOW_MS = 60 * 60 * 1000;
+const MAX_TRACKED_SENDERS = 10_000;
+const senderHits = new Map<string, { count: number; resetAt: number }>();
+
+function withinSenderRateLimit(senderIp: string, incoming: number): boolean {
+  const now = Date.now();
+  if (senderIp === "unknown") return true;
+  if (senderHits.size > MAX_TRACKED_SENDERS) {
+    for (const [key, entry] of senderHits) {
+      if (entry.resetAt <= now) senderHits.delete(key);
+    }
+    if (senderHits.size > MAX_TRACKED_SENDERS) senderHits.clear();
+  }
+  const entry = senderHits.get(senderIp);
+  if (!entry || entry.resetAt <= now) {
+    senderHits.set(senderIp, { count: incoming, resetAt: now + SENDER_WINDOW_MS });
+    return true;
+  }
+  entry.count += incoming;
+  return entry.count <= PER_SENDER_HOURLY_LIMIT;
+}
 
 async function withinRateLimit(env: Env, installId: string, incoming: number): Promise<boolean> {
   const windowStart = new Date(Date.now() - 60 * 60 * 1000).toISOString();

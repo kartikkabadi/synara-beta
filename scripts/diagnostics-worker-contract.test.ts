@@ -48,6 +48,10 @@ const HOSTILE_INPUTS = [
   // Missing required per-kind fields.
   { kind: "session_started" },
   { kind: "error", errorCode: "backend.exit-nonzero" },
+  // Fields that only make sense on another kind are out of contract, not data.
+  { kind: "session_started", provider: "codex", errorCode: "backend.exit-nonzero" },
+  { kind: "app_start", provider: "codex" },
+  { kind: "test", feature: "worktree-reclaim" },
 ] as const;
 
 interface WorkerEventFixture {
