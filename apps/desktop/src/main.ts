@@ -2646,8 +2646,12 @@ function setUpdateState(patch: Partial<DesktopUpdateState>): void {
   if (updateState.status === "available") {
     recordDiagnosticsEvent({ kind: "update_available" });
   } else if (updateState.status === "downloaded") {
-    recordDiagnosticsEvent({ kind: "update_installed" });
-  } else if (updateState.status === "error" && previousStatus === "downloading") {
+    // "downloaded" is not "installed": counting it as an install would credit
+    // users who never restart into the new build.
+    recordDiagnosticsEvent({ kind: "update_downloaded" });
+  } else if (updateState.status === "error" && previousStatus !== "idle") {
+    // Download and install-handoff failures both surface to the user; both
+    // are update failures worth counting.
     recordDiagnosticsEvent({ kind: "update_failed" });
   }
 }
@@ -4663,8 +4667,9 @@ function registerIpcHandlers(): void {
   ipcMain.removeHandler(IPC.diagnosticsSendTestEvent);
   ipcMain.handle(IPC.diagnosticsSendTestEvent, async () => {
     const recorded = recordDiagnosticsEvent({ kind: "test" });
-    if (recorded) void diagnosticsClient.flush();
-    return recorded;
+    // Report real delivery, not just queueing: the settings panel presents
+    // this result as "the collector received a test event".
+    return recorded && (await diagnosticsClient.flush());
   });
 
   ipcMain.removeHandler(IPC.updateGetState);

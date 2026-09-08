@@ -33,6 +33,7 @@ export const KINDS: ReadonlySet<string> = new Set([
   "session_started",
   "session_ended",
   "update_available",
+  "update_downloaded",
   "update_installed",
   "update_failed",
   "feature_used",
@@ -63,7 +64,10 @@ export const EVENT_ID_PATTERN = /^[0-9a-f]{32}$/u;
 const APP_VERSION_PATTERN = /^\d{1,3}\.\d{1,3}\.\d{1,3}(?:-beta\.\d{1,3})?$/u;
 const MINUTE_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00Z$/u;
 const FEATURE_PATTERN = /^[a-z][a-z0-9-]{0,47}$/u;
-const ERROR_CODE_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,63}$/u;
+// Mirrors the sanitizer: a known domain prefix keeps caller-supplied free text
+// (tokens, model names, raw messages) out of the code field.
+const ERROR_CODE_PATTERN =
+  /^(?:desktop|backend|updater|migration|provider)\.[a-z0-9][a-z0-9.-]{0,58}$/u;
 export const MAX_BATCH = 50;
 
 const OPTIONAL_FIELDS = [

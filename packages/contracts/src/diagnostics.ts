@@ -17,6 +17,7 @@ export const DIAGNOSTICS_EVENT_KINDS = [
   "session_started",
   "session_ended",
   "update_available",
+  "update_downloaded",
   "update_installed",
   "update_failed",
   "feature_used",

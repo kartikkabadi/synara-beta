@@ -3,6 +3,10 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-08-01",
   "workers_dev": true,
+  // Daily retention sweep; the scheduled handler deletes events older than 90 days.
+  "triggers": {
+    "crons": ["0 3 * * *"],
+  },
   "d1_databases": [
     {
       "binding": "DB",

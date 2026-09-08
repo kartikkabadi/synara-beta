@@ -13,8 +13,15 @@ import { Switch } from "~/components/ui/switch";
 
 const FIELD_ROWS: ReadonlyArray<{ field: string; purpose: string; example: string }> = [
   { field: "kind", purpose: "Which event happened", example: "session_started" },
+  { field: "schemaVersion", purpose: "Payload schema version", example: "1" },
   { field: "appVersion", purpose: "Which beta build you run", example: "0.8.3-beta.1" },
   { field: "platform / arch", purpose: "OS and CPU family", example: "darwin / arm64" },
+  { field: "flavor", purpose: "Build channel", example: "beta" },
+  {
+    field: "eventId",
+    purpose: "Random per-event id, for deduplication",
+    example: "32 hex chars",
+  },
   {
     field: "installId",
     purpose: "Random per-install UUID; counts installs, not people",
@@ -99,7 +106,14 @@ export function DiagnosticsSettingsPanel(props: { active: boolean }) {
           </div>
           <Switch
             checked={state.enabled}
-            onCheckedChange={(enabled) => void bridge.setEnabled(enabled).then(setState)}
+            onCheckedChange={(enabled) => {
+              void bridge.setEnabled(enabled).then((next) => {
+                setState(next);
+                // Disabling deletes the queue; the sample payload must not
+                // keep showing events that no longer exist.
+                refresh();
+              });
+            }}
             aria-label="Share anonymous diagnostics"
           />
         </div>

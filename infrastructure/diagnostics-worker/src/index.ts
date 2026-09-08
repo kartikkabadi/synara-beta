@@ -26,7 +26,14 @@ export default {
     }
     return new Response("Not found", { status: 404 });
   },
+  // Enforces the documented 90-day retention without an operator-run job.
+  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+    const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    await env.DB.prepare("DELETE FROM events WHERE received_at < ?").bind(cutoff).run();
+  },
 } satisfies ExportedHandler<Env>;
+
+const RETENTION_DAYS = 90;
 
 async function handleIngest(request: Request, env: Env): Promise<Response> {
   let body: unknown;
@@ -75,7 +82,7 @@ async function handleIngest(request: Request, env: Env): Promise<Response> {
   const receivedAt = new Date().toISOString();
   const statements = validEvents.map((event) =>
     env.DB.prepare(
-      `INSERT INTO events (
+      `INSERT OR IGNORE INTO events (
          event_id, install_id, kind, app_version, platform, arch, flavor,
          occurred_at, provider, duration_bucket, outcome, feature, error_code, error_surface, received_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

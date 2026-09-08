@@ -420,6 +420,7 @@ export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
     id: "diagnostics:overview",
     section: "diagnostics",
     title: "Diagnostics",
+    target: null,
     keywords:
       "Opt in to anonymous usage diagnostics. See exactly which fields get sent, why, and turn collection off. privacy telemetry",
   },
