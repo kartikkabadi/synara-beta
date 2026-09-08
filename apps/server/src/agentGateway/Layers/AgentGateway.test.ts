@@ -870,15 +870,13 @@ function makeHarnessLayer(
   ];
   let providerStatuses =
     options.providerStatuses ??
-    providerKinds.map(
-      (provider): ServerProviderStatus => ({
-        provider,
-        status: "ready",
-        available: true,
-        authStatus: "authenticated",
-        checkedAt: NOW,
-      }),
-    );
+    providerKinds.map((provider): ServerProviderStatus => ({
+      provider,
+      status: "ready",
+      available: true,
+      authStatus: "authenticated",
+      checkedAt: NOW,
+    }));
   const providerHealthLayer = Layer.succeed(ProviderHealth, {
     getStatuses: Effect.sync(() => providerStatuses),
     refresh: Effect.sync(() => providerStatuses),
