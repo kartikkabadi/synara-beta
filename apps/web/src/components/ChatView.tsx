@@ -345,6 +345,7 @@ import { ComposerLiveChangesHeader } from "./chat/ComposerLiveChangesHeader";
 import { ComposerGoalHeader } from "./chat/ComposerGoalHeader";
 import { ComposerPickerMenuPopup } from "./chat/ComposerPickerMenuPopup";
 import { Button } from "./ui/button";
+import { DisclosureRegion } from "./ui/DisclosureRegion";
 import { Skeleton } from "./ui/skeleton";
 import { Menu, MenuItem, MenuTrigger } from "./ui/menu";
 import { randomTerminalId } from "./terminal/terminalIds";
@@ -495,6 +496,8 @@ import {
 } from "../routes/-automations.shared";
 import { ChatTranscriptPane } from "./chat/ChatTranscriptPane";
 import { ChatThreadFindHost } from "./chat/ThreadFindBar";
+import { ThreadErrorCard } from "./chat/ThreadErrorCard";
+import { useTransientPresentation } from "./chat/useTransientPresentation";
 import {
   createThreadFindHighlightStore,
   eventTargetsInAppBrowser,
@@ -581,7 +584,6 @@ import { resolveRuntimeModelDescriptor } from "./chat/runtimeModelCapabilities";
 import { ProjectPicker } from "./chat/ProjectPicker";
 import { FolderClosed } from "./FolderClosed";
 import { ProviderHealthBanner } from "./chat/ProviderHealthBanner";
-import { useThreadErrorToast } from "./chat/useThreadErrorToast";
 import {
   RateLimitBanner,
   deriveLatestRateLimitStatus,
@@ -11314,13 +11316,79 @@ export default function ChatView({
       threadId: activeThread?.id ?? null,
       onUnblocked: clearThreadErrorAfterUnblock,
     });
-  useThreadErrorToast({
-    threadId: activeThread?.id ?? null,
-    error: activeThread?.error ?? null,
-    onDismiss: dismissActiveThreadError,
-    onUnblock: unblockActiveThread,
-    unblocking: unblockingActiveThread,
+  // Keeps the card mounted through the disclosure animation in both directions:
+  // it opens on a frame flip when the error appears and closes out when the
+  // stored error clears (dismiss, unblock, or a send that wipes it).
+  const presentedThreadError = useTransientPresentation(activeThread?.error ?? null, {
+    animateOpen: true,
   });
+  // The error card's "Try again": a send-path failure already restored the failed
+  // prompt into the composer draft, so retry sends whatever the composer holds.
+  // When the turn failed server-side instead (the prompt lives in the transcript
+  // and the composer is empty), resend the last user message through the same
+  // pre-built-turn dispatch a queued turn takes — it never touches a live draft.
+  const retryActiveThreadError = useCallback(async () => {
+    const lateSendHandlers = lateComposerSendHandlersRef.current;
+    if (!lateSendHandlers || !activeThread) return;
+    const liveComposerText = (
+      composerEditorRef.current?.readSnapshot()?.value ?? promptRef.current
+    ).trim();
+    if (liveComposerText.length > 0) {
+      void lateSendHandlers.send(undefined);
+      return;
+    }
+    const lastUserMessage = activeThread.messages.findLast(
+      (message) => message.role === "user",
+    );
+    const prompt = lastUserMessage?.text.trim() ?? "";
+    if (!prompt) return;
+    const retryTurn: QueuedComposerChatTurn = {
+      id: randomUUID(),
+      kind: "chat",
+      createdAt: new Date().toISOString(),
+      previewText: prompt,
+      prompt,
+      images: [],
+      files: [],
+      assistantSelections: [],
+      browserAnnotations: [],
+      terminalContexts: [],
+      fileComments: [],
+      pastedTexts: [],
+      skills: [],
+      mentions: [],
+      selectedProvider,
+      selectedModel,
+      selectedPromptEffort,
+      modelSelection: selectedModelSelection,
+      ...(providerOptionsForDispatch ? { providerOptionsForDispatch } : {}),
+      runtimeMode,
+      interactionMode,
+      envMode,
+    };
+    if (hasQueueableLiveTurn) {
+      // A turn is still running — a direct resend would hit the same "already
+      // processing" rejection, so enqueue and let the queued-turn drain
+      // dispatch it when the turn finishes.
+      setThreadError(activeThread.id, null);
+      enqueueQueuedComposerTurn(activeThread.id, retryTurn);
+      return;
+    }
+    void lateSendHandlers.send(undefined, "queue", retryTurn);
+  }, [
+    activeThread,
+    enqueueQueuedComposerTurn,
+    envMode,
+    hasQueueableLiveTurn,
+    interactionMode,
+    providerOptionsForDispatch,
+    runtimeMode,
+    selectedModel,
+    selectedModelSelection,
+    selectedPromptEffort,
+    selectedProvider,
+    setThreadError,
+  ]);
   const dismissActiveProviderHealthBanner = useCallback(() => {
     if (!activeProviderHealthBannerDismissalKey) return;
     setDismissedProviderHealthBannerKeys((current) => {
@@ -12477,8 +12545,9 @@ export default function ChatView({
         />
       ) : null}
 
-      {/* Thread-level errors render as a toast (see `useThreadErrorToast`) so they
-          never displace the transcript. */}
+      {/* Thread-level errors render as an ephemeral card floating at the top of
+          the chat column — the position the old toast occupied — with the shared
+          disclosure open/close animation instead of a raw toast. */}
       <ProviderHealthBanner
         status={shouldShowProviderHealthBanner ? visibleActiveProviderStatus : null}
         onDismiss={dismissActiveProviderHealthBanner}
@@ -12501,6 +12570,25 @@ export default function ChatView({
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {/* Chat column */}
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          {/* Thread errors float at the top-center of the chat pane — where the
+              old toast appeared — so a failure reads where the user is already
+              looking and never shifts transcript content. */}
+          {presentedThreadError ? (
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-40 flex justify-center pt-3">
+              <DisclosureRegion open={presentedThreadError.open}>
+                <div className="pointer-events-auto pb-1">
+                  <ThreadErrorCard
+                    error={presentedThreadError.snapshot}
+                    unblocking={unblockingActiveThread}
+                    onDismiss={dismissActiveThreadError}
+                    onRetry={retryActiveThreadError}
+                    onUnblock={unblockActiveThread}
+                    rateLimitStatus={visibleActiveRateLimitStatus}
+                  />
+                </div>
+              </DisclosureRegion>
+            </div>
+          ) : null}
           <div
             aria-hidden={terminalWorkspaceTerminalTabActive}
             className={cn(
