@@ -12,10 +12,6 @@ import { defineConfig } from "tsdown";
 
 const sourcemapEnv = process.env.SYNARA_DESKTOP_SOURCEMAP?.trim().toLowerCase();
 const buildSourcemap = sourcemapEnv === "1" || sourcemapEnv === "true";
-// Embed the updater publisher pin only when the packaging script has explicitly
-// marked this build as signed (SYNARA_DESKTOP_SIGNED=1). An unsigned beta build
-// must ship without a pin, or the updater would verify an unsigned installer
-// against it and block every one-click update.
 const windowsSigningConfigured =
   process.env.SYNARA_DESKTOP_SIGNED?.trim() === "1" ||
   process.env.SYNARA_DESKTOP_SIGNED?.trim().toLowerCase() === "true";

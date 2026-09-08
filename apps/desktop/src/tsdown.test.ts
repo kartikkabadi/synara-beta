@@ -13,7 +13,6 @@ interface TsdownUserConfig {
 
 async function loadTsdownConfig(): Promise<TsdownUserConfig | undefined> {
   vi.resetModules();
-  // tsdown.config is a build-time .mts module; Vitest resolves it at runtime.
   // @ts-expect-error -- native tsc does not resolve .mts without allowImportingTsExtensions.
   // SAFETY: tsdown.config.mts always exports `defineConfig([...])`, so `default` is an array of user configs.
   const mod = (await import("../tsdown.config")) as { default: TsdownUserConfig[] };
@@ -45,7 +44,6 @@ describe("tsdown Windows updater publisher pin", () => {
     process.env.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME = "profile";
     process.env.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME = "Synara";
     process.env.AZURE_TRUSTED_SIGNING_SUBJECT_DN = "CN=Synara, O=Acme";
-    // SYNARA_DESKTOP_SIGNED is missing: this must be treated as an unsigned build.
 
     const mainConfig = await loadTsdownConfig();
     expect(mainConfig?.define?.__SYNARA_WINDOWS_UPDATER_PUBLISHER__).toBe(JSON.stringify(""));
