@@ -182,10 +182,34 @@ export function createDiagnosticsClient(options: DiagnosticsOptions): Diagnostic
     ...options.sanitizeContext,
   };
 
+  function isAllowedEndpoint(url: string): boolean {
+    try {
+      const parsed = new URL(url);
+      if (parsed.username !== "" || parsed.password !== "") return false;
+      if (parsed.hostname === "") return false;
+      const isLocalhost = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+      // The production endpoint must be HTTPS with a real multi-label domain.
+      // http://localhost and http://127.0.0.1 are allowed for local Wrangler
+      // dev so the beta build can be exercised against a local worker.
+      if (parsed.protocol !== "https:" && !(isLocalhost && parsed.protocol === "http:")) {
+        return false;
+      }
+      if (parsed.hostname.includes(":")) return false;
+      if (!isLocalhost && /^\d+\.\d+\.\d+\.\d+$/u.test(parsed.hostname)) return false;
+      if (!isLocalhost && !parsed.hostname.includes(".")) return false;
+      const defaultPort = parsed.protocol === "https:" ? 443 : 80;
+      const port = parsed.port === "" ? defaultPort : Number(parsed.port);
+      if (Number.isNaN(port) || port < 1 || port > 65_535) return false;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function isSendable(): boolean {
     if (!stateRef.enabled) return false;
     if (process.env.SYNARA_DIAGNOSTICS_DISABLED === "1") return false;
-    if (!endpointUrl.startsWith("https://")) return false;
+    if (!isAllowedEndpoint(endpointUrl)) return false;
     return true;
   }
 
@@ -212,10 +236,11 @@ export function createDiagnosticsClient(options: DiagnosticsOptions): Diagnostic
   async function flush(): Promise<boolean> {
     if (flushing || !isSendable() || queue.length === 0) return false;
     const startConsent = consentGeneration;
-    const startQueue = queue;
+    const batch = queue.slice(0, FLUSH_BATCH_LIMIT);
+    const batchEventIds = new Set(batch.map((event) => event.eventId));
+    const batchHeadId = batch[0]?.eventId ?? null;
     flushing = true;
     try {
-      const batch = queue.slice(0, FLUSH_BATCH_LIMIT);
       const response = await fetchImpl(`${endpointUrl}/v1/events`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -228,8 +253,7 @@ export function createDiagnosticsClient(options: DiagnosticsOptions): Diagnostic
       if (consentGeneration !== startConsent) return false;
       // Remove exactly the submitted events by id, since the live queue may
       // have grown or been capped while the request was in flight.
-      const sentIds = new Set(batch.map((event) => event.eventId));
-      queue = queue.filter((event) => !sentIds.has(event.eventId));
+      queue = queue.filter((event) => !batchEventIds.has(event.eventId));
       consecutiveFailures = 0;
       lastError = null;
       lastSentAt = new Date().toISOString();
@@ -239,17 +263,22 @@ export function createDiagnosticsClient(options: DiagnosticsOptions): Diagnostic
       // Stale completions must not restore a failure streak or drop a queue
       // that was cleared/re-enabled while the request was in flight.
       if (consentGeneration !== startConsent) return false;
-      // If events were recorded or dropped during the request, this failure
-      // belongs to the old batch. Do not count it against a new backlog.
-      if (queue !== startQueue) return false;
+      // If the queue head changed, the failed batch is no longer the head
+      // (e.g., it was dropped by the cap or the queue was cleared). Reset the
+      // failure streak so a new backlog starts fresh.
+      if (queue[0]?.eventId !== batchHeadId) {
+        consecutiveFailures = 0;
+        return false;
+      }
       consecutiveFailures += 1;
       lastError = error instanceof Error ? error.message : "flush failed";
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        // Give up on this backlog: diagnostics must never pile up or retry forever.
-        queue = [];
+        // Drop only the failed batch; events that arrived while it was failing
+        // survive and become the new head of the queue.
+        queue = queue.filter((event) => !batchEventIds.has(event.eventId));
         consecutiveFailures = 0;
-        persistQueue();
       }
+      persistQueue();
       return false;
     } finally {
       flushing = false;
@@ -301,12 +330,19 @@ export function createDiagnosticsClient(options: DiagnosticsOptions): Diagnostic
         }
         return buildState();
       }
+      try {
+        writeDiagnosticsState(options.stateDir, {
+          version: 1,
+          enabled: true,
+          installId: stateRef.installId,
+        });
+      } catch {
+        // If the opt-in cannot be persisted, do not enable collection for this
+        // session. The panel will show off, and nothing is queued.
+        stateRef.enabled = false;
+        return buildState();
+      }
       stateRef.enabled = true;
-      writeDiagnosticsState(options.stateDir, {
-        version: 1,
-        enabled: true,
-        installId: stateRef.installId,
-      });
       return buildState();
     },
     record: (input) => {
@@ -331,7 +367,7 @@ export function createDiagnosticsClient(options: DiagnosticsOptions): Diagnostic
 export interface DiagnosticsOptions {
   readonly stateDir: string;
   readonly sanitizeContext: SanitizeContext;
-  readonly endpointUrl?: string;
+  readonly endpointUrl?: string | undefined;
   readonly fetchImpl?: typeof fetch;
   readonly flushIntervalMs?: number;
 }

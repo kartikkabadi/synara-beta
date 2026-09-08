@@ -8216,10 +8216,9 @@
     }
   },
   "anti-slop(no-runtime-typeof):apps/desktop/src/main.ts": {
-    "total": 27,
+    "total": 25,
     "messages": {
       "27921208": 1,
-      "01a901ca": 1,
       "05fca334": 1,
       "0d75f8f2": 1,
       "234a62bb": 1,
@@ -8229,7 +8228,6 @@
       "3fab21bc": 1,
       "4787d5a9": 1,
       "4c17fa86": 2,
-      "5a717cbf": 1,
       "69f86a34": 1,
       "6c65a0da": 1,
       "8f8e8eba": 1,
@@ -13005,7 +13003,7 @@
     }
   },
   "anti-slop(no-unknown-parameters):apps/desktop/src/main.ts": {
-    "total": 21,
+    "total": 19,
     "messages": {
       "0e1fa950": 1,
       "182da899": 1,
@@ -13023,9 +13021,7 @@
       "77f542f2": 1,
       "83febe5f": 1,
       "8877e065": 1,
-      "b46e3d84": 1,
       "bdfa6e9b": 1,
-      "c074fab4": 1,
       "dbccf810": 1,
       "de5b7527": 1
     }
@@ -18879,11 +18875,10 @@
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/desktop/src/main.ts": {
-    "total": 9,
+    "total": 8,
     "messages": {
       "039a5f2b": 1,
       "2ee61371": 1,
-      "48a79394": 1,
       "8bfd2ac3": 2,
       "9e82450b": 1,
       "ab62c3b0": 1,

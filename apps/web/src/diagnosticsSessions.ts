@@ -38,13 +38,18 @@ export function createProviderSessionStartTracker(
   sessionById: Record<string, ThreadSession | null> | undefined;
 }) => void {
   const liveByThreadId = new Map<string, boolean>();
+  let initialized = false;
   return ({ threadIds, sessionById }) => {
     const seen = new Set<string>(threadIds);
     for (const threadId of Object.keys(sessionById ?? {})) seen.add(threadId);
     for (const threadId of seen) {
       const session = sessionById?.[threadId] ?? null;
       const live = isLiveProviderSession(session);
-      if (liveByThreadId.get(threadId) === false && live && session !== null) {
+      const wasLive = liveByThreadId.get(threadId) ?? false;
+      // The first call is snapshot hydration: already-live sessions must not
+      // count. After that, every dead→live edge counts, including a brand new
+      // thread that appears with a live session in the same coalesced update.
+      if (initialized && live && !wasLive && session !== null) {
         onSessionStart(session.provider);
       }
       liveByThreadId.set(threadId, live);
@@ -52,5 +57,6 @@ export function createProviderSessionStartTracker(
     for (const threadId of [...liveByThreadId.keys()]) {
       if (!seen.has(threadId)) liveByThreadId.delete(threadId);
     }
+    initialized = true;
   };
 }

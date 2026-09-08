@@ -83,4 +83,19 @@ describe("createProviderSessionStartTracker", () => {
     });
     expect(onSessionStart).toHaveBeenCalledTimes(2);
   });
+
+  it("reports a brand new thread that appears with a live session after hydration", () => {
+    const onSessionStart = vi.fn();
+    const track = createProviderSessionStartTracker(onSessionStart);
+    // Initial hydration: one known thread with no live session.
+    track({ threadIds: ["t1"], sessionById: {} });
+    // A coalesced update introduces a new thread already live while the known
+    // thread stays idle.
+    track({
+      threadIds: ["t1", "t2"],
+      sessionById: { t1: null, t2: makeSession("starting") },
+    });
+    expect(onSessionStart).toHaveBeenCalledTimes(1);
+    expect(onSessionStart).toHaveBeenCalledWith("codex");
+  });
 });

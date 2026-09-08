@@ -8,28 +8,31 @@
 import { describe, expect, it } from "vitest";
 
 import worker, {
+  type D1BatchResult,
   type D1Database,
   type D1PreparedStatement,
+  type D1RunResult,
+  type D1Value,
   type Env,
 } from "../infrastructure/diagnostics-worker/src/index";
 
 interface CapturingEnv extends Env {
-  batches: unknown[][];
+  batches: D1PreparedStatement[][];
   counters: Map<string, number>;
 }
 
 function makeEnv(options?: { counters?: Map<string, number>; failQuota?: boolean }): CapturingEnv {
-  const batches: unknown[][] = [];
+  const batches: D1PreparedStatement[][] = [];
   const counters = options?.counters ?? new Map<string, number>();
   const db: D1Database = {
     prepare: (sql: string) => {
-      let bound: unknown[] = [];
+      let bound: D1Value[] = [];
       const statement: D1PreparedStatement = {
-        bind: (...values: unknown[]) => {
+        bind: (...values: D1Value[]) => {
           bound = values;
           return statement;
         },
-        first: async <T = unknown>(): Promise<T | null> => {
+        first: async <T>(): Promise<T | null> => {
           if (sql.startsWith("SELECT event_count FROM rate_counters")) {
             const count = counters.get(`${String(bound[0])}|${String(bound[1])}`);
             // SAFETY: this fake only serves the one row shape the counter
@@ -38,7 +41,7 @@ function makeEnv(options?: { counters?: Map<string, number>; failQuota?: boolean
           }
           return null;
         },
-        run: async () => {
+        run: async (): Promise<D1RunResult> => {
           if (options?.failQuota === true) throw new Error("no such table: rate_counters");
           if (sql.startsWith("INSERT INTO rate_counters")) {
             const key = `${String(bound[0])}|${String(bound[1])}`;
@@ -51,7 +54,7 @@ function makeEnv(options?: { counters?: Map<string, number>; failQuota?: boolean
     },
     batch: async (statements) => {
       batches.push(statements);
-      return statements.map(() => ({}));
+      return statements.map((): D1BatchResult => ({}));
     },
   };
   return { DB: db, batches, counters };
@@ -274,7 +277,7 @@ describe("diagnostics worker fetch handler", () => {
 
   it("scheduled deletes old events and stale rate counters", async () => {
     const env = makeEnv();
-    await worker.scheduled({}, env);
+    await worker.scheduled({ scheduledAt: Date.now() }, env);
     expect(env.batches).toHaveLength(1);
     expect(env.batches[0]).toHaveLength(2);
   });

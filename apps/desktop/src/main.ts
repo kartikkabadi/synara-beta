@@ -36,6 +36,7 @@ import type {
   MenuItemConstructorOptions,
 } from "electron";
 import * as Effect from "effect/Effect";
+import { Schema } from "effect";
 import type {
   DesktopAppIcon,
   DesktopTheme,
@@ -552,6 +553,7 @@ const initialUpdateState = (): DesktopUpdateState =>
   );
 const diagnosticsClient = createDiagnosticsClient({
   stateDir: DIAGNOSTICS_STATE_DIR,
+  endpointUrl: process.env.SYNARA_DIAGNOSTICS_ENDPOINT,
   sanitizeContext: {
     appVersion: app.getVersion(),
     platform: process.platform,
@@ -4656,9 +4658,14 @@ function registerIpcHandlers(): void {
   ipcMain.removeHandler(IPC.diagnosticsGetState);
   ipcMain.handle(IPC.diagnosticsGetState, async () => diagnosticsClient.getState());
 
+  const RendererDiagnosticsRecordSchema = Schema.Struct({
+    kind: Schema.Literal("session_started"),
+    provider: Schema.String,
+  });
+
   ipcMain.removeHandler(IPC.diagnosticsSetEnabled);
-  ipcMain.handle(IPC.diagnosticsSetEnabled, async (_event, rawEnabled: unknown) => {
-    if (typeof rawEnabled !== "boolean") return diagnosticsClient.getState();
+  ipcMain.handle(IPC.diagnosticsSetEnabled, async (_event, rawEnabled) => {
+    if (rawEnabled !== true && rawEnabled !== false) return diagnosticsClient.getState();
     return diagnosticsClient.setEnabled(rawEnabled);
   });
 
@@ -4666,9 +4673,16 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.diagnosticsGetSamplePayload, async () => diagnosticsClient.getSamplePayload());
 
   ipcMain.removeHandler(IPC.diagnosticsRecordEvent);
-  ipcMain.handle(IPC.diagnosticsRecordEvent, async (_event, rawInput: unknown) => {
-    if (!rawInput || typeof rawInput !== "object") return false;
-    return recordDiagnosticsEvent(rawInput as DiagnosticsEventInput);
+  ipcMain.handle(IPC.diagnosticsRecordEvent, async (_event, rawInput) => {
+    try {
+      const input = Schema.decodeUnknownSync(RendererDiagnosticsRecordSchema)(rawInput);
+      // The renderer is only trusted to report a provider session start. Every
+      // other diagnostics kind is recorded by the main process itself, so a
+      // compromised renderer cannot forge usage data or exhaust quotas.
+      return recordDiagnosticsEvent(input);
+    } catch {
+      return false;
+    }
   });
 
   ipcMain.removeHandler(IPC.diagnosticsSendTestEvent);
