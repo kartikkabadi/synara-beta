@@ -70,6 +70,33 @@ describe("presentThreadError", () => {
     });
   });
 
+  it("classifies a Claude overload as a retryable transient failure", () => {
+    const presentation = presentThreadError("Claude is temporarily overloaded. Retry in a moment.");
+
+    expect(presentation).toMatchObject({
+      kind: "transient",
+      tone: "warning",
+      title: "Temporary provider error",
+      retryable: true,
+      canUnblock: false,
+    });
+  });
+
+  it("classifies provider server errors as transient", () => {
+    const presentation = presentThreadError("Claude returned a server error. Retry in a moment.");
+
+    expect(presentation.kind).toBe("transient");
+    expect(presentation.retryable).toBe(true);
+  });
+
+  it("does not treat account failures ending in 'retry' as transient", () => {
+    const presentation = presentThreadError(
+      "Claude billing or subscription access failed. Check the active Claude account, then retry.",
+    );
+
+    expect(presentation.kind).not.toBe("transient");
+  });
+
   it("classifies client-side action hints as guidance, not failures", () => {
     const presentation = presentThreadError(
       "Interrupt the current turn before reverting checkpoints.",

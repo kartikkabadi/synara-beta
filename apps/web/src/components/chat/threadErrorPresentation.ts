@@ -17,6 +17,7 @@ export type ThreadErrorKind =
   | "rate-limit"
   | "connection"
   | "agent-busy"
+  | "transient"
   | "guidance"
   | "generic";
 
@@ -41,11 +42,18 @@ const CONNECTION_PATTERN =
 const AGENT_BUSY_PATTERN =
   /already (?:processing|running|busy)|streamingbehavior|still processing/i;
 
+// Provider-side transient failures — overloads and 5xx responses the adapter
+// itself tells the user to retry ("Claude is temporarily overloaded. Retry in a
+// moment.", "Claude returned a server error. Retry in a moment."). Deliberately
+// does not match a bare "retry": account/billing failures end with the same
+// instruction but need user action first.
+const TRANSIENT_PATTERN =
+  /overload|(?:internal )?server error|service unavailable|bad gateway|temporarily unavailable|\b50[0-9]\b/i;
+
 // Client-side guidance errors ("Interrupt the current turn before reverting
 // checkpoints", "Only the latest rollbackable user message can be edited.") are
 // action hints, not failures — warning tone, no retry.
-const GUIDANCE_PATTERN =
-  /^(interrupt the current turn|only the latest|wait for the current send)/i;
+const GUIDANCE_PATTERN = /^(interrupt the current turn|only the latest|wait for the current send)/i;
 
 const PROVIDER_NAME_PATTERN = /error from provider \(([^)]+)\)/i;
 
@@ -114,8 +122,18 @@ export function presentThreadError(raw: string): ThreadErrorPresentation {
     };
   }
   const firstLine = condensedFirstLine(raw);
-  const title =
-    firstLine.length > 0 && !firstLine.startsWith("{") ? firstLine : "Provider error";
+  const title = firstLine.length > 0 && !firstLine.startsWith("{") ? firstLine : "Provider error";
+  if (TRANSIENT_PATTERN.test(raw)) {
+    return {
+      kind: "transient",
+      tone: "warning",
+      title: "Temporary provider error",
+      detail: "The provider hit a temporary error. Wait a moment, then try again.",
+      retryable: true,
+      canUnblock: false,
+      raw,
+    };
+  }
   if (GUIDANCE_PATTERN.test(firstLine)) {
     return {
       kind: "guidance",
