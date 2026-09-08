@@ -118,7 +118,7 @@ export function createScopeIndex(program: ESTree.Program, visitorKeys: VisitorKe
   const nodeScopes = new Map<ESTree.Node, Scope>();
   const shadowedBuiltInWrappers = collectShadowedTypeWrappers(program);
   for (const statement of program.body) {
-    indexScopes(statement, rootScope, nodeScopes, visitorKeys);
+    indexScopes(statement, scopeForChild(statement, rootScope), nodeScopes, visitorKeys);
   }
   const lookupAlias = (
     name: string,
