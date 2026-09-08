@@ -1928,9 +1928,7 @@ export function failedSendSnapshotOwnsCurrentError(
   snapshot: FailedSendErrorIdentity,
   current: CurrentThreadError,
 ): boolean {
-  return (
-    current.error === snapshot.errorMessage && current.errorVersion === snapshot.errorVersion
-  );
+  return current.error === snapshot.errorMessage && current.errorVersion === snapshot.errorVersion;
 }
 
 // Evicts the oldest snapshot once the map hits the bound. Returns the evicted
@@ -1979,4 +1977,19 @@ export function bumpLocalDraftErrorVersion(
   }
   versions.set(threadId, nextVersion);
   return nextVersion;
+}
+
+// A failed-send snapshot should be released only once the resend is accepted
+// by the send path. Returns the same acceptance boolean so callers can fall
+// through or return after the cleanup.
+export async function releaseFailedSendSnapshotAfterSend<S extends FailedSendErrorIdentity>(
+  acceptedPromise: Promise<boolean>,
+  failedSends: Map<ThreadId, S>,
+  threadId: ThreadId,
+): Promise<boolean> {
+  const accepted = await acceptedPromise;
+  if (accepted) {
+    failedSends.delete(threadId);
+  }
+  return accepted;
 }

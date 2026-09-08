@@ -75,6 +75,7 @@ import {
   failedSendSnapshotOwnsCurrentError,
   MAX_FAILED_THREAD_SEND_SNAPSHOTS,
   MAX_LOCAL_DRAFT_ERROR_VERSIONS,
+  releaseFailedSendSnapshotAfterSend,
   worktreeSetupHasError,
 } from "./ChatView.logic";
 
@@ -2967,9 +2968,9 @@ describe("failed thread send snapshot identity", () => {
         errorVersion: 3,
       }),
     ).toBe(false);
-    expect(
-      failedSendSnapshotOwnsCurrentError(snapshot, { error: null, errorVersion: 3 }),
-    ).toBe(false);
+    expect(failedSendSnapshotOwnsCurrentError(snapshot, { error: null, errorVersion: 3 })).toBe(
+      false,
+    );
   });
 });
 
@@ -3053,8 +3054,36 @@ describe("bumpLocalDraftErrorVersion", () => {
     expect(versions.has(pinnedId)).toBe(true);
     // The oldest unpinned entries were evicted first.
     expect(versions.has(ThreadId.makeUnsafe("thread-0"))).toBe(false);
-    expect(
-      versions.has(ThreadId.makeUnsafe(`thread-${MAX_LOCAL_DRAFT_ERROR_VERSIONS + 9}`)),
-    ).toBe(true);
+    expect(versions.has(ThreadId.makeUnsafe(`thread-${MAX_LOCAL_DRAFT_ERROR_VERSIONS + 9}`))).toBe(
+      true,
+    );
+  });
+});
+
+describe("releaseFailedSendSnapshotAfterSend", () => {
+  const snapshot = { errorMessage: "rate limited", errorVersion: 1 };
+
+  it("deletes the snapshot when the resend is accepted", async () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, snapshot]]);
+    const accepted = await releaseFailedSendSnapshotAfterSend(
+      Promise.resolve(true),
+      failedSends,
+      threadId,
+    );
+    expect(accepted).toBe(true);
+    expect(failedSends.has(threadId)).toBe(false);
+  });
+
+  it("retains the snapshot when the resend is rejected", async () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, snapshot]]);
+    const accepted = await releaseFailedSendSnapshotAfterSend(
+      Promise.resolve(false),
+      failedSends,
+      threadId,
+    );
+    expect(accepted).toBe(false);
+    expect(failedSends.get(threadId)).toBe(snapshot);
   });
 });

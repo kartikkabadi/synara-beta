@@ -606,6 +606,7 @@ import {
   deriveComposerSendState,
   evictOverflowFailedThreadSend,
   failedSendSnapshotOwnsCurrentError,
+  releaseFailedSendSnapshotAfterSend,
   failWorktreeSetupSnapshot,
   filterSidechatTranscriptMessages,
   hasLiveTurnTakenOver,
@@ -8410,10 +8411,7 @@ export default function ChatView({
     const shouldCreateWorktree =
       isFirstMessage && nextThreadEnvMode === "worktree" && !nextThreadWorktreePath;
     if (shouldCreateWorktree && !nextThreadBranch) {
-      setThreadError(
-        threadIdForSend,
-        "Select a base branch before sending in New worktree mode.",
-      );
+      setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
       return false;
     }
 
@@ -11514,7 +11512,9 @@ export default function ChatView({
       // An owned snapshot stays in the map until its resend is accepted: the
       // send path clears it on dispatch and overwrites it on failure, so a
       // rejected retry cannot strand the card without its payload.
-      if (!failedSendSnapshotOwnsCurrentError(failedSend, getCurrentThreadErrorAndVersion(threadId))) {
+      if (
+        !failedSendSnapshotOwnsCurrentError(failedSend, getCurrentThreadErrorAndVersion(threadId))
+      ) {
         failedThreadSendsRef.current.delete(threadId);
         failedSend = null;
       }
@@ -11549,9 +11549,19 @@ export default function ChatView({
         if (hasQueueableLiveTurn) {
           // A live turn would reject a direct resend — queue the restored draft.
           setThreadError(threadId, null);
-          void lateSendHandlers.send(undefined, "queue");
+          // The snapshot is only consumed once the queue accepts the resend;
+          // a rejected send keeps the payload so the user can retry again.
+          void releaseFailedSendSnapshotAfterSend(
+            lateSendHandlers.send(undefined, "queue"),
+            failedThreadSendsRef.current,
+            threadId,
+          );
         } else {
-          void lateSendHandlers.send(undefined);
+          void releaseFailedSendSnapshotAfterSend(
+            lateSendHandlers.send(undefined),
+            failedThreadSendsRef.current,
+            threadId,
+          );
         }
         return;
       }
