@@ -14,7 +14,7 @@ import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
-import { desktopIconAssetPaths } from "./lib/brand-assets.ts";
+import { desktopIconAssetPaths, publishIconOverrides } from "./lib/brand-assets.ts";
 import {
   createDesktopPlatformBuildConfig,
   MAC_APPSNAP_HELPER_STAGE_PATH,
@@ -462,6 +462,29 @@ function stageLinuxIcons(stageResourcesDir: string, flavor: typeof BuildFlavor.T
 
     const iconPath = path.join(stageResourcesDir, "icon.png");
     yield* fs.copyFile(iconSource, iconPath);
+  });
+}
+
+// The web build emits production favicons; a beta package must ship the beta
+// set inside its bundled client, so swap them after the server dist is staged.
+function stageClientFavicons(stageAppDir: string, flavor: typeof BuildFlavor.Type) {
+  return Effect.gen(function* () {
+    if (flavor !== "beta") return;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const clientDir = path.join(stageAppDir, "apps/server/dist/client");
+
+    for (const override of publishIconOverrides(flavor)) {
+      const sourcePath = yield* iconSourceFor(override.sourceRelativePath);
+      const targetPath = path.join(stageAppDir, override.targetRelativePath);
+      if (!(yield* fs.exists(targetPath))) {
+        return yield* new BuildScriptError({
+          message: `Missing staged client favicon target: ${targetPath}`,
+        });
+      }
+      yield* fs.copyFile(sourcePath, targetPath);
+    }
+    yield* Effect.log(`[desktop-artifact] Applied beta favicon overrides in ${clientDir}`);
   });
 }
 
@@ -1041,6 +1064,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* fs.copy(distDirs.desktopDist, path.join(stageAppDir, "apps/desktop/dist-electron"));
   yield* fs.copy(distDirs.desktopResources, stageResourcesDir);
   yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
+  yield* stageClientFavicons(stageAppDir, options.flavor ?? "production");
 
   yield* assertPlatformBuildResources(
     options.platform,
