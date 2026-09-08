@@ -111,11 +111,11 @@ export function reconcileTransientPresentation<T>(params: {
       if (current.snapshot === value) return current;
       // A replacement value while open swaps the card content in place instead of
       // bouncing a close+open; a mid-entrance snapshot stays closed until the flip.
-      return current.open
-        ? { snapshot: value, open: true }
-        : { snapshot: value, open: false };
+      return current.open ? { snapshot: value, open: true } : { snapshot: value, open: false };
     });
-    if (openFrameRef.current === null) {
+    // Only schedule the entrance flip while the snapshot is still closed — once
+    // it is open, a pending frame would just rerender on every pass.
+    if (!presented?.open && openFrameRef.current === null) {
       openFrameRef.current = window.requestAnimationFrame(() => {
         openFrameRef.current = null;
         setPresented((current) => (current ? { ...current, open: true } : current));
@@ -132,6 +132,11 @@ export function reconcileTransientPresentation<T>(params: {
     openFrameRef.current = null;
   }
   if (!presented.open) {
+    if (cleanupTimeoutRef.current !== null) {
+      // The close flip already ran and the cleanup timer owns the unmount —
+      // keep the presentation mounted so the close animation can finish.
+      return;
+    }
     // Never became visible — drop it without a close animation.
     setPresented(null);
     return;
