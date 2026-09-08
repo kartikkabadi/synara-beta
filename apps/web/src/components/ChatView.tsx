@@ -1044,6 +1044,12 @@ type FailedThreadSendSnapshot = Pick<
 // Abandoned error cards would otherwise pin attachment File blobs in the map
 // forever; evict the oldest entry past this bound.
 const MAX_FAILED_THREAD_SEND_SNAPSHOTS = 8;
+// Error epochs are only compared while a failed-send snapshot lives, but
+// setThreadError also runs for errors that never capture one — cap the map so
+// long-lived sessions do not accumulate stale thread identifiers. An evicted
+// epoch makes the eviction check fail closed (the card stays), never wrongly
+// clears.
+const MAX_THREAD_ERROR_VERSIONS = 64;
 
 const EMPTY_COMPOSER_PLUGIN_SUGGESTIONS: ComposerPluginSuggestion[] = [];
 
@@ -4391,10 +4397,15 @@ export default function ChatView({
   const setThreadError = useCallback(
     (targetThreadId: ThreadId | null, error: string | null) => {
       if (!targetThreadId) return;
-      threadErrorVersionRef.current.set(
-        targetThreadId,
-        (threadErrorVersionRef.current.get(targetThreadId) ?? 0) + 1,
-      );
+      const errorVersions = threadErrorVersionRef.current;
+      const nextErrorVersion = (errorVersions.get(targetThreadId) ?? 0) + 1;
+      // Re-insert at the tail so the bound evicts the least recently touched.
+      errorVersions.delete(targetThreadId);
+      if (errorVersions.size >= MAX_THREAD_ERROR_VERSIONS) {
+        const oldestVersion = errorVersions.keys().next().value;
+        if (oldestVersion !== undefined) errorVersions.delete(oldestVersion);
+      }
+      errorVersions.set(targetThreadId, nextErrorVersion);
       if (getThreadFromState(useStore.getState(), targetThreadId)) {
         setStoreThreadError(targetThreadId, error);
         return;
@@ -8533,6 +8544,7 @@ export default function ChatView({
     // A new dispatch supersedes any payload captured by an earlier failure —
     // only for this thread; another thread's failed send stays retryable.
     failedThreadSendsRef.current.delete(threadIdForSend);
+    threadErrorVersionRef.current.delete(threadIdForSend);
     setThreadError(threadIdForSend, null);
     if (expiredTerminalContextCount > 0) {
       const toastCopy = buildExpiredTerminalContextToastCopy(
@@ -11396,6 +11408,7 @@ export default function ChatView({
   const dismissActiveThreadError = useCallback(() => {
     if (!activeThread) return;
     failedThreadSendsRef.current.delete(activeThread.id);
+    threadErrorVersionRef.current.delete(activeThread.id);
     setThreadError(activeThread.id, null);
   }, [activeThread, setThreadError]);
   const clearThreadErrorAfterUnblock = useCallback(
@@ -11491,6 +11504,7 @@ export default function ChatView({
     const failedSend = failedThreadSendsRef.current.get(threadId) ?? null;
     if (failedSend) {
       failedThreadSendsRef.current.delete(threadId);
+      threadErrorVersionRef.current.delete(threadId);
       const attachmentIdsMatch = (
         live: ReadonlyArray<{ id: string }>,
         saved: ReadonlyArray<{ id: string }>,
