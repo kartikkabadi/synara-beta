@@ -7,7 +7,8 @@ import "server-only";
 
 import storedInstallerDownloads from "@/data/installer-downloads.json";
 
-const RELEASES_API_URL = "https://api.github.com/repos/Emanuele-web04/synara/releases?per_page=100";
+const RELEASES_API_URL =
+  "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100";
 
 const INSTALLER_FILE_PATTERN = /\.(dmg|exe|AppImage)$/i;
 

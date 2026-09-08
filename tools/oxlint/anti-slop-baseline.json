@@ -19025,13 +19025,6 @@
       "e2a043f5": 1
     }
   },
-  "anti-slop(require-safety-comment-for-type-assertion):apps/marketing/src/lib/releases.ts": {
-    "total": 2,
-    "messages": {
-      "8451b79a": 1,
-      "a0ba4ceb": 1
-    }
-  },
   "anti-slop(require-safety-comment-for-type-assertion):apps/marketing/tests/e2e/docs-media.spec.ts": {
     "total": 3,
     "messages": {

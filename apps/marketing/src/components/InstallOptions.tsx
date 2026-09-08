@@ -9,7 +9,7 @@
 
 import { useState, useSyncExternalStore, type ReactNode } from "react";
 import { FaApple, FaWindows, FaLinux } from "react-icons/fa";
-import { LuArrowDownToLine, LuCheck } from "react-icons/lu";
+import { LuArrowDownToLine, LuCheck, LuTerminal } from "react-icons/lu";
 import InstallerCount from "@/components/InstallerCount";
 import { detectCurrentOS, detectMacArch, type MacArch, type OS } from "@/lib/platform";
 import type { ReleaseDownloads } from "@/lib/releases";
@@ -52,7 +52,13 @@ export default function InstallOptions({
   const [archOverride, setArchOverride] = useState<MacArch | null>(null);
   const arch = archOverride ?? detectedArch;
 
+  // Linux AppImages ship for x86_64 and arm64; default to x86_64 (the
+  // overwhelming majority of Linux desktops) and let the toggle switch.
+  const [linuxArchOverride, setLinuxArchOverride] = useState<MacArch | null>(null);
+  const linuxArch = linuxArchOverride ?? "x64";
+
   const macHref = arch === "arm64" ? downloads.mac.arm64 : downloads.mac.x64;
+  const linuxHref = linuxArch === "arm64" ? downloads.linux.arm64 : downloads.linux.x64;
 
   return (
     <div className="flex flex-col items-center text-center">
@@ -76,7 +82,12 @@ export default function InstallOptions({
           href={macHref}
           recommended={os === "mac"}
         >
-          <ArchToggle arch={arch} onChange={setArchOverride} />
+          <ArchToggle
+            ariaLabel="macOS chip"
+            options={ARCH_OPTIONS}
+            value={arch}
+            onChange={setArchOverride}
+          />
         </PlatformCard>
 
         <PlatformCard
@@ -92,11 +103,20 @@ export default function InstallOptions({
           index={2}
           icon={<FaLinux className="size-6" aria-hidden="true" />}
           name="Linux"
-          subtitle=".AppImage · x86_64"
-          href={downloads.linux}
+          subtitle=".AppImage · x86_64 & arm64"
+          href={linuxHref}
           recommended={os === "linux"}
-        />
+        >
+          <ArchToggle
+            ariaLabel="Linux architecture"
+            options={LINUX_ARCH_OPTIONS}
+            value={linuxArch}
+            onChange={setLinuxArchOverride}
+          />
+        </PlatformCard>
       </div>
+
+      <TerminalInstall />
 
       <p className="mt-8 text-[12px] text-[var(--text-tertiary)]">
         <InstallerCount initialCount={installerCount} />
@@ -115,6 +135,74 @@ export default function InstallOptions({
         </a>
         .
       </p>
+    </div>
+  );
+}
+
+const TERMINAL_INSTALL_COMMANDS: ReadonlyArray<{ os: string; command: string }> = [
+  {
+    os: "macOS",
+    command:
+      't=$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep \'"tag_name"\' | sed -n \'s/.*"tag_name":[[:space:]]*"\\([^"]*\\)".*/\\1/p\' | grep -E \'^v[0-9]+\\.[0-9]+\\.[0-9]+-beta\\.[0-9]+$\' | head -1); if [ -z "$t" ]; then echo "Could not resolve the latest Synara Beta release." >&2; (exit 1); else f=$(mktemp /tmp/synara-beta-install.XXXXXX) && curl -fsSL -o "$f" "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-macos.sh" && bash "$f" --tag "$t"; rc=$?; rm -f "${f:-/tmp/synara-beta-install-none}"; (exit $rc); fi',
+  },
+  {
+    os: "Linux",
+    command:
+      't=$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep \'"tag_name"\' | sed -n \'s/.*"tag_name":[[:space:]]*"\\([^"]*\\)".*/\\1/p\' | grep -E \'^v[0-9]+\\.[0-9]+\\.[0-9]+-beta\\.[0-9]+$\' | head -1); if [ -z "$t" ]; then echo "Could not resolve the latest Synara Beta release." >&2; (exit 1); else f=$(mktemp /tmp/synara-beta-install.XXXXXX) && curl -fsSL -o "$f" "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-linux.sh" && bash "$f" --tag "$t"; rc=$?; rm -f "${f:-/tmp/synara-beta-install-none}"; (exit $rc); fi',
+  },
+  {
+    os: "Windows (PowerShell)",
+    command:
+      '$t = ((Invoke-RestMethod "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" -UseBasicParsing -ErrorAction Stop) | Where-Object { $_.tag_name -match \'^v\\d+\\.\\d+\\.\\d+-beta\\.\\d+$\' } | Select-Object -First 1).tag_name; if ($t) { $f = Join-Path $env:TEMP $("synara-beta-install-$([Guid]::NewGuid()).ps1"); Invoke-WebRequest "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-windows.ps1" -UseBasicParsing -OutFile $f -ErrorAction Stop; Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; Unblock-File -Path $f; try { & $f -Tag $t } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue } } else { throw "Could not resolve the latest Synara Beta release." }',
+  },
+];
+
+function TerminalInstall() {
+  const [copiedOs, setCopiedOs] = useState<string | null>(null);
+
+  const copy = (os: string, command: string) => {
+    void navigator.clipboard.writeText(command).then(() => {
+      setCopiedOs(os);
+      window.setTimeout(() => setCopiedOs(null), 2500);
+    });
+  };
+
+  return (
+    <div className="mt-10 w-full rounded-2xl border border-[var(--divide)] bg-[var(--page-bg)] p-5 text-left">
+      <p className="flex items-center gap-2 text-[13px] font-medium text-[var(--text-primary)]">
+        <LuTerminal className="size-4" aria-hidden="true" />
+        Or install from your terminal
+      </p>
+      <p className="mt-1 text-[12px] leading-[1.6] text-[var(--text-tertiary)]">
+        One release-pinned command. Downloads are checksum-verified against a signed manifest.
+      </p>
+      <div className="mt-4 flex flex-col gap-2">
+        {TERMINAL_INSTALL_COMMANDS.map(({ os, command }) => (
+          <button
+            key={os}
+            type="button"
+            onClick={() => copy(os, command)}
+            className="group flex w-full items-center gap-3 rounded-xl border border-[var(--divide)] px-3 py-2.5 text-left transition-colors hover:bg-[var(--mock-row)]"
+            aria-label={`Copy the ${os} install command`}
+          >
+            <span className="w-36 shrink-0 text-[12px] font-medium text-[var(--text-secondary)]">
+              {os}
+            </span>
+            <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--text-tertiary)]">
+              {command}
+            </span>
+            <span className="flex shrink-0 items-center gap-1 text-[11px] font-medium text-[var(--accent-link)]">
+              {copiedOs === os ? (
+                <>
+                  <LuCheck className="size-3.5" aria-hidden="true" /> Copied
+                </>
+              ) : (
+                "Copy"
+              )}
+            </span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -181,26 +269,42 @@ const ARCH_OPTIONS = [
   { value: "x64", label: "Intel" },
 ] as const;
 
-function ArchToggle({ arch, onChange }: { arch: MacArch; onChange: (arch: MacArch) => void }) {
-  const activeIndex = arch === "arm64" ? 0 : 1;
+const LINUX_ARCH_OPTIONS = [
+  { value: "x64", label: "x86_64" },
+  { value: "arm64", label: "ARM64" },
+] as const;
+
+function ArchToggle({
+  ariaLabel,
+  options,
+  value,
+  onChange,
+}: {
+  ariaLabel: string;
+  options: ReadonlyArray<{ value: MacArch; label: string }>;
+  value: MacArch;
+  onChange: (arch: MacArch) => void;
+}) {
+  const activeIndex = options.findIndex((option) => option.value === value);
 
   return (
     <div
-      className="relative inline-grid grid-cols-2 rounded-full border border-[var(--divide)] p-0.5 text-[12px]"
+      className="relative inline-grid rounded-full border border-[var(--divide)] p-0.5 text-[12px]"
+      style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
       role="group"
-      aria-label="macOS chip"
+      aria-label={ariaLabel}
     >
       {/* Dark indicator that slides to the selected segment. */}
       <span
         aria-hidden="true"
         className="pointer-events-none absolute inset-y-0.5 left-0.5 rounded-full bg-[var(--btn-primary-bg)] transition-transform duration-300 ease-out"
         style={{
-          width: "calc((100% - 0.25rem) / 2)",
-          transform: `translateX(${activeIndex * 100}%)`,
+          width: `calc((100% - 0.25rem) / ${options.length})`,
+          transform: `translateX(${Math.max(activeIndex, 0) * 100}%)`,
         }}
       />
-      {ARCH_OPTIONS.map((option) => {
-        const active = arch === option.value;
+      {options.map((option) => {
+        const active = value === option.value;
         return (
           <button
             key={option.value}
