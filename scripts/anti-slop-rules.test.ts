@@ -253,6 +253,17 @@ describe("no-unknown-parameters", () => {
     expect(byFile.get("promise-alias.ts")).toBeUndefined();
     expect(byFile.get("built-in.ts")).toEqual(["anti-slop(no-unknown-parameters)"]);
   });
+
+  it("resolves generic defaults that reference earlier type parameters", () => {
+    const byFile = runRules(
+      {
+        "sibling-default.ts":
+          "type Defaulted<T = unknown, U = T> = U;\nexport function f(value: Defaulted) { return value; }\n",
+      },
+      { "anti-slop/no-unknown-parameters": "error" },
+    );
+    expect(byFile.get("sibling-default.ts")).toEqual(["anti-slop(no-unknown-parameters)"]);
+  });
 });
 
 describe("no-unsafe-dictionary-type", () => {
@@ -397,6 +408,20 @@ describe("no-widen-then-assert", () => {
       { "anti-slop/no-widen-then-assert": "error" },
     );
     expect(byFile.get("value-fn.ts")).toEqual(["anti-slop(no-widen-then-assert)"]);
+  });
+
+  it("does not treat nested Record aliases as the built-in Record", () => {
+    const byFile = runRules(
+      {
+        "nested-record.ts":
+          "export function f() {\n  type Record<K, V> = { id: string };\n  const r: Record<string, unknown> = { id: 'a' };\n  return r as { id: string };\n}\n",
+        "nested-key.ts":
+          'export function f() {\n  type PropertyKey = "id";\n  const r: Record<PropertyKey, unknown> = { id: 1 };\n  return r as { id: number };\n}\n',
+      },
+      { "anti-slop/no-widen-then-assert": "error" },
+    );
+    expect(byFile.get("nested-record.ts")).toBeUndefined();
+    expect(byFile.get("nested-key.ts")).toBeUndefined();
   });
 });
 
@@ -551,6 +576,17 @@ describe("no-object-parameters", () => {
     expect(byFile.get("generic-arg.ts")).toEqual(reported);
     expect(byFile.get("typed-arg.ts")).toBeUndefined();
   });
+
+  it("resolves generic defaults that reference earlier type parameters", () => {
+    const byFile = runRules(
+      {
+        "sibling-default.ts":
+          "type Broad<T = object, U = T> = U;\nexport function f(input: Broad) { return input; }\n",
+      },
+      { "anti-slop/no-object-parameters": "error" },
+    );
+    expect(byFile.get("sibling-default.ts")).toEqual(["anti-slop(no-object-parameters)"]);
+  });
 });
 
 describe("scope and substitution regression", () => {
@@ -568,8 +604,7 @@ describe("scope and substitution regression", () => {
   it("resolves mapped-type key aliases", () => {
     const byFile = runRules(
       {
-        "key-alias.ts":
-          "type Key = string;\nexport const x: { [K in Key]: unknown } = { a: 1 };\n",
+        "key-alias.ts": "type Key = string;\nexport const x: { [K in Key]: unknown } = { a: 1 };\n",
       },
       { "anti-slop/no-known-value-widening": "error" },
     );

@@ -1,6 +1,8 @@
 import { defineRule } from "@oxlint/plugins";
 import type { ESTree, Variable } from "@oxlint/plugins";
 
+import { createScopeIndex, type ScopeIndex } from "../shared/resolves-to-unknown.ts";
+
 type BroadTypeKind = "top" | "object" | "record";
 
 type KnownValueEvidence = {
@@ -16,38 +18,16 @@ const functionBoundaryTypes = new Set([
 ]);
 
 const recordBuiltInNames = new Set(["Record", "Readonly", "PropertyKey"]);
-let shadowedRecordBuiltIns: ReadonlySet<string> = new Set();
+let scopeIndex: ScopeIndex | null = null;
 
-function collectShadowedRecordBuiltIns(program: ESTree.Program): ReadonlySet<string> {
-  const shadowed = new Set<string>();
-  for (const statement of program.body) {
-    const declaration =
-      statement.type === "ExportNamedDeclaration" || statement.type === "ExportDefaultDeclaration"
-        ? statement.declaration
-        : statement;
-    if (declaration?.type === "ImportDeclaration") {
-      // Any import binding that reuses a record built-in name shadows it in
-      // type position, regardless of importKind: class and generic value
-      // imports are type-capable too.
-      for (const specifier of declaration.specifiers) {
-        if (recordBuiltInNames.has(specifier.local.name)) shadowed.add(specifier.local.name);
-      }
-      continue;
-    }
-    if (
-      declaration !== null &&
-      declaration !== undefined &&
-      declaration.type !== "FunctionDeclaration" &&
-      "id" in declaration &&
-      declaration.id !== null &&
-      declaration.id !== undefined &&
-      declaration.id.type === "Identifier" &&
-      recordBuiltInNames.has(declaration.id.name)
-    ) {
-      shadowed.add(declaration.id.name);
-    }
-  }
-  return shadowed;
+function isRecordBuiltInName(name: string, at: ESTree.TSType): boolean {
+  if (!recordBuiltInNames.has(name)) return false;
+  if (scopeIndex === null) return true;
+  const scope = scopeIndex.scopeOf(at);
+  const alias = scopeIndex.lookupAlias(name, scope);
+  if (alias !== null) return false;
+  const interfaces = scopeIndex.lookupInterface(name, scope);
+  return interfaces === null || interfaces.length === 0;
 }
 
 function unwrapExpressionParentheses(expression: ESTree.Expression): ESTree.Expression {
@@ -84,7 +64,7 @@ function isBroadRecordKeyType(type: ESTree.TSType): boolean {
   return (
     unwrapped.type === "TSTypeReference" &&
     typeReferenceName(unwrapped) === "PropertyKey" &&
-    !shadowedRecordBuiltIns.has("PropertyKey")
+    isRecordBuiltInName("PropertyKey", unwrapped)
   );
 }
 
@@ -92,12 +72,12 @@ function isBroadRecordType(type: ESTree.TSType): boolean {
   const unwrapped = unwrapTypeParentheses(type);
 
   if (unwrapped.type === "TSTypeReference") {
-    if (typeReferenceName(unwrapped) === "Readonly" && !shadowedRecordBuiltIns.has("Readonly")) {
+    if (typeReferenceName(unwrapped) === "Readonly" && isRecordBuiltInName("Readonly", unwrapped)) {
       const [inner] = unwrapped.typeArguments?.params ?? [];
       return inner !== undefined && isBroadRecordType(inner);
     }
 
-    if (typeReferenceName(unwrapped) !== "Record" || shadowedRecordBuiltIns.has("Record")) {
+    if (typeReferenceName(unwrapped) !== "Record" || !isRecordBuiltInName("Record", unwrapped)) {
       return false;
     }
     const parameters = unwrapped.typeArguments?.params ?? [];
@@ -188,11 +168,12 @@ function isDefinitelyNarrowerRecordType(type: ESTree.TSType): boolean {
   }
 
   if (unwrapped.type !== "TSTypeReference") return false;
-  if (typeReferenceName(unwrapped) === "Readonly") {
+  if (typeReferenceName(unwrapped) === "Readonly" && isRecordBuiltInName("Readonly", unwrapped)) {
     const [inner] = unwrapped.typeArguments?.params ?? [];
     return inner !== undefined && isDefinitelyNarrowerRecordType(inner);
   }
-  if (typeReferenceName(unwrapped) !== "Record") return false;
+  if (typeReferenceName(unwrapped) !== "Record" || !isRecordBuiltInName("Record", unwrapped))
+    return false;
 
   const parameters = unwrapped.typeArguments?.params ?? [];
   return (
@@ -399,7 +380,7 @@ export const noWidenThenAssertRule = defineRule({
     return {
       Program(node) {
         scopes = context.sourceCode.scopeManager.scopes;
-        shadowedRecordBuiltIns = collectShadowedRecordBuiltIns(node);
+        scopeIndex = createScopeIndex(node, context.sourceCode.visitorKeys);
       },
       TSAsExpression: checkAssertion,
       TSTypeAssertion: checkAssertion,

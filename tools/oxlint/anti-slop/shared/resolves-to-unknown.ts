@@ -181,13 +181,7 @@ export function createScopedResolvesToUnknown(index: ScopeIndex): ScopedResolves
       if (visited.has(visitKey)) return false;
       const nextVisited = new Set(visited);
       nextVisited.add(visitKey);
-      return resolvesToUnknownAt(
-        substitution,
-        scope,
-        shadowedAliases,
-        nextVisited,
-        substitutions,
-      );
+      return resolvesToUnknownAt(substitution, scope, shadowedAliases, nextVisited, substitutions);
     }
     if (shadowedAliases.has(name) || visited.has(visitKey)) return false;
     const found = index.lookupAlias(name, scope);
@@ -210,11 +204,20 @@ export function createScopedResolvesToUnknown(index: ScopeIndex): ScopedResolves
     for (const [parameterIndex, parameter] of parameters.entries()) {
       const argument = arguments_[parameterIndex] ?? parameter.default;
       if (argument === null || argument === undefined) return false;
+      const isDefault = arguments_[parameterIndex] === undefined;
+      const argumentScope = isDefault ? (index.scopeOf(parameter.default) ?? aliasScope) : scope;
+      const argumentSubstitutions = isDefault ? nextSubstitutions : substitutions;
       const nextVisited = new Set(visited);
       nextVisited.add(visitKey);
       nextSubstitutions.set(
         parameter.name.name,
-        resolvesToUnknownAt(argument, scope, shadowedAliases, nextVisited, substitutions),
+        resolvesToUnknownAt(
+          argument,
+          argumentScope,
+          shadowedAliases,
+          nextVisited,
+          argumentSubstitutions,
+        ),
       );
     }
     const nextVisited = new Set(visited);
