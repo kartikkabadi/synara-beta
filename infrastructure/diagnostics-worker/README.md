@@ -37,10 +37,8 @@ moves.
 ## Endpoints
 
 - `POST /v1/events` — batch ingest `{ events: [...] }` (max 50). Rejects the
-  whole batch when any event fails validation (422) or exceeds the
-  per-install hourly limit (429).
-- `GET /v1/stats` — 30-day aggregate counts by kind, app version, and
-  platform. Intentionally coarse: counts only, no per-install rows.
+  whole batch when any event fails validation (422), exceeds the
+  per-install hourly limit (429), or carries a body larger than 1 MB (413).
 - `GET /health` — liveness.
 
 ## Retention

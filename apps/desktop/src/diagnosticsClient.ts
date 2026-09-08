@@ -18,18 +18,17 @@ import * as Path from "node:path";
 import { Schema } from "effect";
 
 import {
-  DIAGNOSTICS_ARCHES,
-  DIAGNOSTICS_EVENT_KINDS,
-  DIAGNOSTICS_FLAVORS,
-  DIAGNOSTICS_PLATFORMS,
-  DIAGNOSTICS_SCHEMA_VERSION,
   type DiagnosticsEvent,
   type DiagnosticsEventInput,
   type DiagnosticsSamplePayload,
   type DiagnosticsState,
 } from "@synara/contracts";
 
-import { sanitizeDiagnosticsEvent, type SanitizeContext } from "./diagnosticsSanitizer";
+import {
+  SanitizedEventSchema,
+  sanitizeDiagnosticsEvent,
+  type SanitizeContext,
+} from "./diagnosticsSanitizer";
 
 const STATE_FILE = "state.json";
 const QUEUE_FILE = "queue.json";
@@ -103,21 +102,9 @@ export function writeDiagnosticsState(stateDir: string, state: DiagnosticsStateF
   FS.writeFileSync(Path.join(stateDir, STATE_FILE), `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
 
-const QueuedEventSchema = Schema.Struct({
-  schemaVersion: Schema.Literal(DIAGNOSTICS_SCHEMA_VERSION),
-  kind: Schema.Literals([...DIAGNOSTICS_EVENT_KINDS]),
-  eventId: Schema.String,
-  occurredAt: Schema.String,
-  appVersion: Schema.String,
-  platform: Schema.Literals([...DIAGNOSTICS_PLATFORMS]),
-  arch: Schema.Literals([...DIAGNOSTICS_ARCHES]),
-  flavor: Schema.Literals([...DIAGNOSTICS_FLAVORS]),
-  installId: Schema.String,
-});
-
 export function readDiagnosticsQueue(stateDir: string): readonly DiagnosticsEvent[] {
   try {
-    const parsed = Schema.decodeUnknownSync(Schema.Array(QueuedEventSchema))(
+    const parsed = Schema.decodeUnknownSync(Schema.Array(SanitizedEventSchema))(
       JSON.parse(FS.readFileSync(Path.join(stateDir, QUEUE_FILE), "utf8")),
     );
     return parsed;
@@ -131,13 +118,15 @@ export function writeDiagnosticsQueue(stateDir: string, events: readonly Diagnos
   FS.writeFileSync(Path.join(stateDir, QUEUE_FILE), `${JSON.stringify(events, null, 2)}\n`, "utf8");
 }
 
-export interface DiagnosticsClient {
-  getState: () => DiagnosticsState;
-  setEnabled: (enabled: boolean) => DiagnosticsState;
-  record: (input: DiagnosticsEventInput) => boolean;
-  getSamplePayload: () => DiagnosticsSamplePayload;
-  flush: () => Promise<boolean>;
-  dispose: () => void;
+function reconcileInstallIds(
+  events: readonly DiagnosticsEvent[],
+  installId: string,
+): readonly DiagnosticsEvent[] {
+  if (events.length === 0) return events;
+  if (events.every((event) => event.installId === installId)) return events;
+  // State was regenerated (missing/corrupt) while an old queue survived. Stamp
+  // every queued event with the current install id so batches remain valid.
+  return events.map((event) => ({ ...event, installId }));
 }
 
 export function createDiagnosticsClient(options: DiagnosticsOptions): DiagnosticsClient {
@@ -147,11 +136,24 @@ export function createDiagnosticsClient(options: DiagnosticsOptions): Diagnostic
     enabled: state.enabled,
     installId: state.installId,
   };
-  let queue: readonly DiagnosticsEvent[] = readDiagnosticsQueue(options.stateDir);
+  const loadedQueue = readDiagnosticsQueue(options.stateDir);
+  const reconciledQueue = reconcileInstallIds(loadedQueue, stateRef.installId);
+  let queue: readonly DiagnosticsEvent[] = reconciledQueue;
+  if (reconciledQueue !== loadedQueue) {
+    // The queue was re-stamped to the current install id. Persist the
+    // reconciled queue so the on-disk copy stays valid.
+    try {
+      writeDiagnosticsQueue(options.stateDir, reconciledQueue);
+    } catch {
+      // Persistence failures must never crash the app; the in-memory queue is
+      // already correct.
+    }
+  }
   let lastSentAt: string | null = null;
   let lastError: string | null = null;
   let consecutiveFailures = 0;
   let flushing = false;
+  let consentGeneration = 0;
   const fetchImpl = options.fetchImpl ?? fetch;
   const flushIntervalMs = options.flushIntervalMs ?? FLUSH_INTERVAL_MS;
   const timer = flushIntervalMs > 0 ? setInterval(() => void flush(), flushIntervalMs) : null;
@@ -190,6 +192,8 @@ export function createDiagnosticsClient(options: DiagnosticsOptions): Diagnostic
 
   async function flush(): Promise<boolean> {
     if (flushing || !isSendable() || queue.length === 0) return false;
+    const startConsent = consentGeneration;
+    const startQueue = queue;
     flushing = true;
     try {
       const batch = queue.slice(0, FLUSH_BATCH_LIMIT);
@@ -200,8 +204,11 @@ export function createDiagnosticsClient(options: DiagnosticsOptions): Diagnostic
         signal: AbortSignal.timeout(10_000),
       });
       if (!response.ok) throw new Error(`status ${response.status}`);
-      // Remove exactly the submitted events: the live queue may have grown or
-      // been capped while the request was in flight.
+      // If consent or the queue changed while the request was in flight, this
+      // completion is stale. Do not mutate state or the queue.
+      if (consentGeneration !== startConsent) return false;
+      // Remove exactly the submitted events by id, since the live queue may
+      // have grown or been capped while the request was in flight.
       const sentIds = new Set(batch.map((event) => event.eventId));
       queue = queue.filter((event) => !sentIds.has(event.eventId));
       consecutiveFailures = 0;
@@ -210,6 +217,12 @@ export function createDiagnosticsClient(options: DiagnosticsOptions): Diagnostic
       persistQueue();
       return true;
     } catch (error) {
+      // Stale completions must not restore a failure streak or drop a queue
+      // that was cleared/re-enabled while the request was in flight.
+      if (consentGeneration !== startConsent) return false;
+      // If events were recorded or dropped during the request, this failure
+      // belongs to the old batch. Do not count it against a new backlog.
+      if (queue !== startQueue) return false;
       consecutiveFailures += 1;
       lastError = error instanceof Error ? error.message : "flush failed";
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
@@ -227,20 +240,31 @@ export function createDiagnosticsClient(options: DiagnosticsOptions): Diagnostic
   return {
     getState: () => buildState(),
     setEnabled: (enabled) => {
+      // Bumping the consent generation before any mutation makes in-flight
+      // flushes ignore stale completions after consent is toggled.
+      consentGeneration += 1;
+      if (!enabled) {
+        // Consent withdrawn: drop everything queued, immediately, and reset
+        // the failure counter so a stale streak cannot drop the next backlog.
+        // Persist the cleared queue before writing the disabled state so a
+        // crash between the two writes can never leave revoked events on disk.
+        queue = [];
+        consecutiveFailures = 0;
+        lastError = null;
+        try {
+          writeDiagnosticsQueue(options.stateDir, queue);
+        } catch {
+          // If the empty queue cannot be persisted, do not write the disabled
+          // state. A later opt-in must not find old events with consent off.
+          return buildState();
+        }
+      }
       stateRef.enabled = enabled;
       writeDiagnosticsState(options.stateDir, {
         version: 1,
         enabled,
         installId: stateRef.installId,
       });
-      if (!enabled) {
-        // Consent withdrawn: drop everything queued, immediately, and reset
-        // the failure counter so a stale streak cannot drop the next backlog.
-        queue = [];
-        consecutiveFailures = 0;
-        lastError = null;
-        persistQueue();
-      }
       return buildState();
     },
     record: (input) => {

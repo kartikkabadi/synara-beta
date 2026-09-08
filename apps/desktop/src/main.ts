@@ -1043,6 +1043,7 @@ function armInstallWatchdog(): void {
     const failedHandoff = activeUpdateInstallHandoff;
     clearUpdaterInstallInFlightAfterError();
     const consecutiveFailures = recordInstallMarkerFailure(new Date().toISOString(), failedHandoff);
+    recordDiagnosticsEvent({ kind: "update_failed" });
     setUpdateState({
       ...reduceDesktopUpdateStateOnInstallFailure(
         updateState,
@@ -2649,10 +2650,6 @@ function setUpdateState(patch: Partial<DesktopUpdateState>): void {
     // "downloaded" is not "installed": counting it as an install would credit
     // users who never restart into the new build.
     recordDiagnosticsEvent({ kind: "update_downloaded" });
-  } else if (updateState.status === "error" && previousStatus !== "idle") {
-    // Download and install-handoff failures both surface to the user; both
-    // are update failures worth counting.
-    recordDiagnosticsEvent({ kind: "update_failed" });
   }
 }
 
@@ -2728,6 +2725,7 @@ function processInstallMarkerOnStartup(): void {
     console.info(
       `[desktop-updater] Update to ${marker.toVersion} installed successfully (from ${marker.fromVersion})`,
     );
+    recordDiagnosticsEvent({ kind: "update_installed" });
     try {
       clearInstallMarker(filePath);
     } catch (error) {
@@ -2762,6 +2760,7 @@ function processInstallMarkerOnStartup(): void {
   }
 
   automaticUpdateActivitySuppressed = true;
+  recordDiagnosticsEvent({ kind: "update_failed" });
   const message = `Synara restarted, but update ${marker.toVersion} was not installed. Try again.`;
   setUpdateState(
     reduceDesktopUpdateStateOnInstallRestartFailure(
@@ -3088,6 +3087,7 @@ async function downloadAvailableUpdate(): Promise<{
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
+    recordDiagnosticsEvent({ kind: "update_failed" });
     setUpdateState(reduceDesktopUpdateStateOnDownloadFailure(updateState, message));
     console.error(`[desktop-updater] Failed to download update: ${message}`);
     return { accepted: true, completed: false };
@@ -3247,6 +3247,7 @@ async function runDownloadedUpdateInstall(
     downloadedUpdateArtifact = null;
     await clearPendingUpdateCache("downloaded artifact identity is missing or changed");
     const message = "The downloaded update could not be reverified. Download it again.";
+    recordDiagnosticsEvent({ kind: "update_failed" });
     setUpdateState(reduceDesktopUpdateStateOnDownloadFailure(updateState, message));
     console.error(`[desktop-updater] Refusing install handoff: ${message}`);
     return { accepted: false, completed: false };
@@ -3307,6 +3308,7 @@ async function runDownloadedUpdateInstall(
     const consecutiveFailures = markerWritten
       ? recordInstallMarkerFailure(new Date().toISOString(), handoffExpectation)
       : updateState.installFailureCount;
+    recordDiagnosticsEvent({ kind: "update_failed" });
     setUpdateState({
       ...(artifactInvalidated
         ? reduceDesktopUpdateStateOnDownloadFailure(updateState, message)
@@ -3375,6 +3377,7 @@ async function recordDownloadedUpdateIdentity(info: UpdateDownloadedEvent): Prom
     downloadedUpdateArtifact = null;
     clearPendingUpdateCacheWhenSafe("downloaded artifact fingerprint failed");
     const message = `The downloaded update could not be verified: ${formatErrorMessage(error)}`;
+    recordDiagnosticsEvent({ kind: "update_failed" });
     setUpdateState(reduceDesktopUpdateStateOnDownloadFailure(updateState, message));
     console.error(`[desktop-updater] ${message}`);
   }
@@ -5269,8 +5272,6 @@ async function bootstrap(): Promise<void> {
 
 app.on("before-quit", (event) => {
   writeDesktopLogHeader("before-quit received");
-  recordDiagnosticsEvent({ kind: "app_quit" });
-  void diagnosticsClient.flush();
   if (desktopShutdownComplete) {
     return;
   }
@@ -5292,6 +5293,7 @@ app.on("before-quit", (event) => {
         new Date().toISOString(),
         failedHandoff,
       );
+      recordDiagnosticsEvent({ kind: "update_failed" });
       setUpdateState({
         ...reduceDesktopUpdateStateOnInstallFailure(
           updateState,
@@ -5324,6 +5326,14 @@ app.on("before-quit", (event) => {
 
   event.preventDefault();
   void confirmRunningChatsThenQuit("before-quit");
+});
+
+app.on("will-quit", () => {
+  // `will-quit` is the committed quit signal: it does not fire when a quit is
+  // cancelled, and it fires exactly once for a successful exit, including the
+  // second `app.quit()` call from the graceful shutdown path.
+  recordDiagnosticsEvent({ kind: "app_quit" });
+  void diagnosticsClient.flush();
 });
 
 if (hasSingleInstanceLock) {
