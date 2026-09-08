@@ -2021,3 +2021,26 @@ export function releaseSupersededFailedSend<S extends FailedSendErrorIdentity>(
   failedSends.delete(threadId);
   clearError(threadId);
 }
+
+// A retry replays one specific captured payload — unlike a fresh send, it may
+// release only the snapshot it was initiated with and clear only the card that
+// snapshot raised. Retrying can take real time (transcript attachment rebuilds
+// await network fetches before the queued retry commits), so a newer failure
+// may have landed in between: its snapshot and its card both stay intact.
+// expectedSnapshot is null for the transcript fallback, which has no payload.
+export function releaseRetriedFailedSend<S extends FailedSendErrorIdentity>(
+  failedSends: Map<ThreadId, S>,
+  threadId: ThreadId,
+  expectedSnapshot: S | null,
+  retriedError: CurrentThreadError,
+  getCurrentError: (threadId: ThreadId) => CurrentThreadError,
+  clearError: (threadId: ThreadId) => void,
+): void {
+  if (expectedSnapshot !== null && failedSends.get(threadId) === expectedSnapshot) {
+    failedSends.delete(threadId);
+  }
+  const current = getCurrentError(threadId);
+  if (current.error === retriedError.error && current.errorVersion === retriedError.errorVersion) {
+    clearError(threadId);
+  }
+}

@@ -607,6 +607,7 @@ import {
   evictOverflowFailedThreadSend,
   failedSendSnapshotOwnsCurrentError,
   releaseFailedSendSnapshotAfterSend,
+  releaseRetriedFailedSend,
   releaseSupersededFailedSend,
   failWorktreeSetupSnapshot,
   filterSidechatTranscriptMessages,
@@ -11460,13 +11461,24 @@ export default function ChatView({
     const lateSendHandlers = lateComposerSendHandlersRef.current;
     if (!lateSendHandlers || !activeThread) return;
     const threadId = activeThread.id;
+    // The transcript fallback below awaits attachment rebuilds, so capture the
+    // error identity this retry was initiated for — a newer failure landing in
+    // between must keep both its card and its captured payload.
+    const retriedError = getCurrentThreadErrorAndVersion(threadId);
     const dispatchRetryTurn = (retryTurn: QueuedComposerChatTurn) => {
       if (hasQueueableLiveTurn) {
         enqueueQueuedComposerTurn(threadId, retryTurn);
-        // The queued turn now durably owns the payload — release the snapshot
-        // and the card together, the same cleanup an accepted send runs.
-        releaseSupersededFailedSend(failedThreadSendsRef.current, threadId, (targetThreadId) =>
-          setThreadError(targetThreadId, null),
+        // The queued turn now durably owns the retried payload. Release only the
+        // exact snapshot this retry captured and clear the card only while it
+        // still shows the error that snapshot raised — an enqueue replays a
+        // specific payload, it does not supersede a newer failure.
+        releaseRetriedFailedSend(
+          failedThreadSendsRef.current,
+          threadId,
+          failedSend,
+          retriedError,
+          getCurrentThreadErrorAndVersion,
+          (targetThreadId) => setThreadError(targetThreadId, null),
         );
         return;
       }

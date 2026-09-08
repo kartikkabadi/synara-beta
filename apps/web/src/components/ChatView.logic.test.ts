@@ -76,6 +76,7 @@ import {
   MAX_FAILED_THREAD_SEND_SNAPSHOTS,
   MAX_LOCAL_DRAFT_ERROR_VERSIONS,
   releaseFailedSendSnapshotAfterSend,
+  releaseRetriedFailedSend,
   releaseSupersededFailedSend,
   worktreeSetupHasError,
 } from "./ChatView.logic";
@@ -3166,5 +3167,90 @@ describe("releaseSupersededFailedSend", () => {
     const failedSends = new Map<ThreadId, typeof snapshot>([[otherThreadId, snapshot]]);
     releaseSupersededFailedSend(failedSends, threadId, () => {});
     expect(failedSends.get(otherThreadId)).toBe(snapshot);
+  });
+});
+
+describe("releaseRetriedFailedSend", () => {
+  const snapshot = { errorMessage: "rate limited", errorVersion: 1 };
+  const retriedError = { error: "rate limited", errorVersion: 1 };
+
+  it("releases the captured snapshot and clears its card when the state is unchanged", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, snapshot]]);
+    const cleared: ThreadId[] = [];
+    releaseRetriedFailedSend(
+      failedSends,
+      threadId,
+      snapshot,
+      retriedError,
+      () => retriedError,
+      (id) => {
+        cleared.push(id);
+      },
+    );
+    expect(failedSends.has(threadId)).toBe(false);
+    expect(cleared).toEqual([threadId]);
+  });
+
+  it("leaves a newer snapshot and its card intact when a failure lands during the retry's attachment rebuild", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const newer = { errorMessage: "network error", errorVersion: 2 };
+    const newerError = { error: newer.errorMessage, errorVersion: newer.errorVersion };
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, newer]]);
+    const cleared: ThreadId[] = [];
+    releaseRetriedFailedSend(
+      failedSends,
+      threadId,
+      snapshot,
+      retriedError,
+      () => newerError,
+      (id) => {
+        cleared.push(id);
+      },
+    );
+    expect(failedSends.get(threadId)).toBe(newer);
+    expect(cleared).toEqual([]);
+  });
+
+  it("clears a card with no captured payload (transcript retry) only while the same error is still showing", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const failedSends = new Map<ThreadId, typeof snapshot>();
+    const cleared: ThreadId[] = [];
+    const getCurrentError = () => retriedError;
+    releaseRetriedFailedSend(failedSends, threadId, null, retriedError, getCurrentError, (id) => {
+      cleared.push(id);
+    });
+    expect(cleared).toEqual([threadId]);
+    // A newer error that replaced the retried one survives the commit.
+    cleared.length = 0;
+    releaseRetriedFailedSend(
+      failedSends,
+      threadId,
+      null,
+      retriedError,
+      () => ({ error: "different failure", errorVersion: 2 }),
+      (id) => {
+        cleared.push(id);
+      },
+    );
+    expect(cleared).toEqual([]);
+  });
+
+  it("releases the retried snapshot even when a newer card without a payload is showing — its payload is already queued", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, snapshot]]);
+    const cleared: ThreadId[] = [];
+    releaseRetriedFailedSend(
+      failedSends,
+      threadId,
+      snapshot,
+      retriedError,
+      () => ({ error: "different failure", errorVersion: 2 }),
+      (id) => {
+        cleared.push(id);
+      },
+    );
+    expect(failedSends.has(threadId)).toBe(false);
+    expect(cleared).toEqual([]);
   });
 });
