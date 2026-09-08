@@ -29,6 +29,7 @@ const VALID_INPUTS = [
   { kind: "app_quit" },
   { kind: "test" },
   { kind: "update_available" },
+  { kind: "update_downloaded" },
   { kind: "update_installed" },
   { kind: "update_failed" },
   { kind: "session_started", provider: "codex" },
@@ -45,6 +46,9 @@ const HOSTILE_INPUTS = [
   { kind: "session_ended", provider: "codex", durationBucket: "exactly 4m32s", outcome: "ok" },
   { kind: "feature_used", feature: "../etc/passwd" },
   { kind: "error", errorCode: "Unexpected token in /Users/x/secret", errorSurface: "desktop" },
+  // A token- or model-shaped value without a known domain prefix is still free text.
+  { kind: "error", errorCode: "sk-proj-abc123def456", errorSurface: "backend" },
+  { kind: "error", errorCode: "ghp_aaaabbbbccccdddd", errorSurface: "updater" },
   // Missing required per-kind fields.
   { kind: "session_started" },
   { kind: "error", errorCode: "backend.exit-nonzero" },

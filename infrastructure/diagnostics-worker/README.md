@@ -45,8 +45,9 @@ moves.
 
 ## Retention
 
-Delete events older than 90 days on a schedule (Cloudflare cron trigger or a
-manual run):
+The worker enforces 90-day retention itself: a daily cron trigger (`0 3 * * *`,
+declared in `wrangler.jsonc`) runs the `scheduled` handler, which deletes every
+event older than 90 days. The same cleanup can be run manually:
 
 ```console
 wrangler d1 execute synara-beta-diagnostics --remote \

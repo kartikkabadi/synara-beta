@@ -89,7 +89,12 @@ export function readDiagnosticsState(stateDir: string): DiagnosticsStateFile {
     enabled: false,
     installId: crypto.randomUUID(),
   };
-  writeDiagnosticsState(stateDir, fresh);
+  try {
+    writeDiagnosticsState(stateDir, fresh);
+  } catch {
+    // A read-only or full disk must never block desktop startup; the client
+    // then runs in-memory only and simply does not persist consent.
+  }
   return fresh;
 }
 
@@ -195,7 +200,10 @@ export function createDiagnosticsClient(options: DiagnosticsOptions): Diagnostic
         signal: AbortSignal.timeout(10_000),
       });
       if (!response.ok) throw new Error(`status ${response.status}`);
-      queue = queue.slice(batch.length);
+      // Remove exactly the submitted events: the live queue may have grown or
+      // been capped while the request was in flight.
+      const sentIds = new Set(batch.map((event) => event.eventId));
+      queue = queue.filter((event) => !sentIds.has(event.eventId));
       consecutiveFailures = 0;
       lastError = null;
       lastSentAt = new Date().toISOString();
@@ -226,8 +234,11 @@ export function createDiagnosticsClient(options: DiagnosticsOptions): Diagnostic
         installId: stateRef.installId,
       });
       if (!enabled) {
-        // Consent withdrawn: drop everything queued, immediately.
+        // Consent withdrawn: drop everything queued, immediately, and reset
+        // the failure counter so a stale streak cannot drop the next backlog.
         queue = [];
+        consecutiveFailures = 0;
+        lastError = null;
         persistQueue();
       }
       return buildState();

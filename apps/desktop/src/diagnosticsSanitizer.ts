@@ -33,7 +33,11 @@ const APP_VERSION_PATTERN = Schema.String.check(
 );
 const EVENT_ID_PATTERN = Schema.String.check(Schema.isPattern(/^[0-9a-f]{32}$/u));
 const FEATURE_PATTERN = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9-]{0,47}$/u));
-const ERROR_CODE_PATTERN = Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9_.-]{0,63}$/u));
+// A known domain prefix keeps caller-supplied free text (tokens, model names,
+// raw messages) out of the code field: only internally chosen slugs pass.
+const ERROR_CODE_PATTERN = Schema.String.check(
+  Schema.isPattern(/^(?:desktop|backend|updater|migration|provider)\.[a-z0-9][a-z0-9.-]{0,58}$/u),
+);
 
 const Provider = Schema.Literals([...DIAGNOSTICS_PROVIDERS]);
 const DurationBucket = Schema.Literals([...DIAGNOSTICS_DURATION_BUCKETS]);
@@ -84,6 +88,7 @@ const BareEventSchema = Schema.Struct({
     "app_start",
     "app_quit",
     "update_available",
+    "update_downloaded",
     "update_installed",
     "update_failed",
     "test",

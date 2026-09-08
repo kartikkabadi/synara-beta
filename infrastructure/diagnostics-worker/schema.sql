@@ -17,5 +17,5 @@ CREATE TABLE IF NOT EXISTS events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_install_received ON events (install_id, received_at);
-CREATE INDEX idx_events_kind_received ON events (kind, received_at);
-CREATE INDEX idx_events_received ON events(received_at);
+CREATE INDEX IF NOT EXISTS idx_events_kind_received ON events (kind, received_at);
+CREATE INDEX IF NOT EXISTS idx_events_received ON events(received_at);

@@ -166,7 +166,7 @@ export const SETTINGS_NAV_ITEMS: readonly SettingsNavItem[] = [
     group: "system",
     label: "Diagnostics",
     description: "Opt in to anonymous usage diagnostics and see exactly what gets sent.",
-    icon: "activity",
+    icon: "analytics",
     eyebrow: "Diagnostics",
   },
   {
