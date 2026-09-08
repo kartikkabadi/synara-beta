@@ -27,6 +27,7 @@ import {
   type ComposerImageAttachment,
   type PersistedComposerImageAttachment,
 } from "../composerDraftDomain";
+import type { ChatAttachment } from "../types";
 import { readComposerImageBlob } from "./composerImageBlobStore";
 import {
   ComposerImagePreparationError,
@@ -411,4 +412,74 @@ export async function hydratePendingBlobComposerAttachments(
     }),
   );
   return hydrated.filter((image): image is ComposerImageAttachment => image !== null);
+}
+
+export interface RebuiltMessageAttachments {
+  images: ComposerImageAttachment[];
+  files: ComposerFileAttachment[];
+  assistantSelections: ComposerAssistantSelectionAttachment[];
+}
+
+// Fetches a managed attachment blob back from the attachments route by its
+// stored id. The blob stays addressable while the server keeps it alive; an
+// expired or evicted blob 404s and the caller drops that attachment.
+async function fetchAttachmentAsFile(
+  attachment: ChatImageAttachment | ChatFileAttachment,
+): Promise<File | null> {
+  try {
+    const response = await fetch(
+      resolveWsHttpUrl(`/attachments/${encodeURIComponent(attachment.id)}`),
+      { credentials: "include" },
+    );
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    return new File([blob], attachment.name, { type: attachment.mimeType });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Rebuilds composer attachment drafts from a stored transcript message so an
+ * error retry can resend the original payload instead of text alone. Blobs
+ * that no longer exist server-side are skipped — the retry proceeds with
+ * whatever survived rather than failing wholesale.
+ */
+export async function rebuildComposerAttachmentsFromMessage(
+  attachments: ReadonlyArray<ChatAttachment>,
+): Promise<RebuiltMessageAttachments> {
+  const result: RebuiltMessageAttachments = {
+    images: [],
+    files: [],
+    assistantSelections: [],
+  };
+  for (const attachment of attachments) {
+    if (attachment.type === "assistant-selection") {
+      result.assistantSelections.push(attachment);
+      continue;
+    }
+    const file = await fetchAttachmentAsFile(attachment);
+    if (!file) continue;
+    if (attachment.type === "image") {
+      result.images.push({
+        type: "image",
+        id: attachment.id,
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        sizeBytes: attachment.sizeBytes,
+        previewUrl: URL.createObjectURL(file),
+        file,
+      });
+    } else {
+      result.files.push({
+        type: "file",
+        id: attachment.id,
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        sizeBytes: attachment.sizeBytes,
+        file,
+      });
+    }
+  }
+  return result;
 }
