@@ -1035,6 +1035,10 @@ type FailedThreadSendSnapshot = Pick<
   | "mentions"
 > & { restoredToComposer: boolean };
 
+// Abandoned error cards would otherwise pin attachment File blobs in the map
+// forever; evict the oldest entry past this bound.
+const MAX_FAILED_THREAD_SEND_SNAPSHOTS = 8;
+
 const EMPTY_COMPOSER_PLUGIN_SUGGESTIONS: ComposerPluginSuggestion[] = [];
 
 function buildQueuedComposerPreviewText(input: {
@@ -9038,7 +9042,13 @@ export default function ChatView({
         // The failed send never reached the transcript, so capture its full
         // payload: the error card's retry replays this exact content instead of
         // whatever draft the composer happens to hold later.
-        failedThreadSendsRef.current.set(threadIdForSend, {
+        const failedSends = failedThreadSendsRef.current;
+        failedSends.delete(threadIdForSend);
+        if (failedSends.size >= MAX_FAILED_THREAD_SEND_SNAPSHOTS) {
+          const oldest = failedSends.keys().next().value;
+          if (oldest !== undefined) failedSends.delete(oldest);
+        }
+        failedSends.set(threadIdForSend, {
           restoredToComposer: composerDraftWasEmpty,
           prompt: promptForSend,
           images: composerImagesSnapshot,
@@ -11450,9 +11460,12 @@ export default function ChatView({
       const liveComposerText = (
         composerEditorRef.current?.readSnapshot()?.value ?? promptRef.current
       ).trim();
+      const draftsMatch = (live: unknown, saved: unknown) =>
+        JSON.stringify(live) === JSON.stringify(saved);
       // Send through the live composer only while it still holds the restored
-      // failed draft — an edited or replaced draft means the user moved on, so
-      // retry replays the captured payload and leaves their draft untouched.
+      // failed draft — an edited or replaced draft (including a same-count
+      // swap of any structured item) means the user moved on, so retry replays
+      // the captured payload and leaves their draft untouched.
       const draftMatchesRestored =
         liveComposerText === failedSend.prompt.trim() &&
         attachmentIdsMatch(composerImagesRef.current, failedSend.images) &&
@@ -11461,10 +11474,10 @@ export default function ChatView({
           composerAssistantSelectionsRef.current,
           failedSend.assistantSelections,
         ) &&
-        composerBrowserAnnotationsRef.current.length === failedSend.browserAnnotations.length &&
-        composerFileCommentsRef.current.length === failedSend.fileComments.length &&
-        composerTerminalContextsRef.current.length === failedSend.terminalContexts.length &&
-        composerPastedTextsRef.current.length === failedSend.pastedTexts.length;
+        draftsMatch(composerBrowserAnnotationsRef.current, failedSend.browserAnnotations) &&
+        draftsMatch(composerFileCommentsRef.current, failedSend.fileComments) &&
+        draftsMatch(composerTerminalContextsRef.current, failedSend.terminalContexts) &&
+        draftsMatch(composerPastedTextsRef.current, failedSend.pastedTexts);
       if (failedSend.restoredToComposer && draftMatchesRestored) {
         if (hasQueueableLiveTurn) {
           // A live turn would reject a direct resend — queue the restored draft.
