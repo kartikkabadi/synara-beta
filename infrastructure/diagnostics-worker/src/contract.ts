@@ -9,6 +9,14 @@
 // bucket. Batches containing any invalid event are rejected whole (fail
 // closed). The worker never stores IP addresses, user agents, or free text.
 
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | { readonly [key: string]: JsonValue }
+  | readonly JsonValue[];
+
 export interface DiagnosticsEvent {
   schemaVersion: number;
   kind: string;
@@ -81,27 +89,50 @@ const OPTIONAL_FIELDS = [
 
 // Every present optional must match its own allowlist or pattern, whatever the
 // kind — a valid-looking kind must never ferry free text in an unused field.
-const OPTIONAL_FIELD_RULES: Readonly<Record<string, (value: string) => boolean>> = {
-  provider: (value) => PROVIDERS.has(value),
-  durationBucket: (value) => DURATION_BUCKETS.has(value),
-  outcome: (value) => OUTCOMES.has(value),
-  feature: (value) => FEATURE_PATTERN.test(value),
-  errorCode: (value) => ERROR_CODE_PATTERN.test(value),
-  errorSurface: (value) => ERROR_SURFACES.has(value),
-};
+const OPTIONAL_FIELD_RULES = {
+  provider: (value: string) => PROVIDERS.has(value),
+  durationBucket: (value: string) => DURATION_BUCKETS.has(value),
+  outcome: (value: string) => OUTCOMES.has(value),
+  feature: (value: string) => FEATURE_PATTERN.test(value),
+  errorCode: (value: string) => ERROR_CODE_PATTERN.test(value),
+  errorSurface: (value: string) => ERROR_SURFACES.has(value),
+} as const satisfies Record<string, (value: string) => boolean>;
 
 // Fields each kind requires. An optional field is only allowed on kinds that
 // require it — the same rule the desktop sanitizer enforces via excess-property
 // rejection, so both sides accept exactly the same events.
-const REQUIRED_FIELDS_BY_KIND: Readonly<Record<string, ReadonlyArray<string>>> = {
+const REQUIRED_FIELDS_BY_KIND = {
   session_started: ["provider"],
   session_ended: ["provider", "durationBucket", "outcome"],
   feature_used: ["feature"],
   error: ["errorCode", "errorSurface"],
-};
+} as const satisfies Record<string, ReadonlyArray<string>>;
 
-export function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+const ALLOWED_KEYS: Set<string> = new Set([
+  "schemaVersion",
+  "kind",
+  "eventId",
+  "occurredAt",
+  "appVersion",
+  "platform",
+  "arch",
+  "flavor",
+  "installId",
+  ...OPTIONAL_FIELDS,
+]);
+
+function isString(value: JsonValue | undefined): value is string {
+  return Object.prototype.toString.call(value) === "[object String]";
+}
+
+function isNumber(value: JsonValue | undefined): value is number {
+  return (
+    Object.prototype.toString.call(value) === "[object Number]" && Number.isFinite(Number(value))
+  );
+}
+
+export function isPlainObject(value: JsonValue | undefined): value is Record<string, JsonValue> {
+  return !Array.isArray(value) && Object.prototype.toString.call(value) === "[object Object]";
 }
 
 /**
@@ -109,36 +140,24 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
  * outside the contract or a value outside its enum/pattern. The batch is
  * rejected whole when any event fails — no partial writes, no silent repair.
  */
-export function validateEvent(value: unknown): boolean {
+export function validateEvent(value: JsonValue | undefined): value is DiagnosticsEvent {
   if (!isPlainObject(value)) return false;
-  const allowed = [
-    "schemaVersion",
-    "kind",
-    "eventId",
-    "occurredAt",
-    "appVersion",
-    "platform",
-    "arch",
-    "flavor",
-    "installId",
-    ...OPTIONAL_FIELDS,
-  ];
-  if (!Object.keys(value).every((key) => allowed.includes(key))) return false;
-  if (value.schemaVersion !== 1) return false;
-  if (typeof value.kind !== "string" || !KINDS.has(value.kind)) return false;
-  if (typeof value.eventId !== "string" || !EVENT_ID_PATTERN.test(value.eventId)) return false;
-  if (typeof value.occurredAt !== "string" || !MINUTE_PATTERN.test(value.occurredAt)) return false;
-  if (typeof value.appVersion !== "string" || !APP_VERSION_PATTERN.test(value.appVersion)) {
+  if (!Object.keys(value).every((key) => ALLOWED_KEYS.has(key))) return false;
+  if (!isNumber(value.schemaVersion) || value.schemaVersion !== 1) return false;
+  if (!isString(value.kind) || !KINDS.has(value.kind)) return false;
+  if (!isString(value.eventId) || !EVENT_ID_PATTERN.test(value.eventId)) return false;
+  if (!isString(value.occurredAt) || !MINUTE_PATTERN.test(value.occurredAt)) return false;
+  if (!isString(value.appVersion) || !APP_VERSION_PATTERN.test(value.appVersion)) {
     return false;
   }
   if (
-    typeof value.platform !== "string" ||
+    !isString(value.platform) ||
     !PLATFORMS.has(value.platform) ||
-    typeof value.arch !== "string" ||
+    !isString(value.arch) ||
     !ARCHES.has(value.arch) ||
-    typeof value.flavor !== "string" ||
+    !isString(value.flavor) ||
     !FLAVORS.has(value.flavor) ||
-    typeof value.installId !== "string" ||
+    !isString(value.installId) ||
     !UUID_PATTERN.test(value.installId)
   ) {
     return false;
@@ -150,7 +169,7 @@ export function validateEvent(value: unknown): boolean {
       if (required.includes(field)) return false;
       continue;
     }
-    if (typeof present !== "string" || !isValidValue(present)) return false;
+    if (!isString(present) || !isValidValue(present)) return false;
     if (!required.includes(field)) return false;
   }
   return true;

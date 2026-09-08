@@ -307,7 +307,7 @@ describe("diagnosticsClient", () => {
     resolve(new Response(null, { status: 503 }));
     await flushPromise;
     expect(client.getState().queuedEventCount).toBeGreaterThanOrEqual(1);
-    expect(client.getState().lastError).toBeNull();
+    expect(client.getState().lastError).not.toBeNull();
   });
 
   it("refuses non-https endpoints", async () => {
@@ -340,6 +340,71 @@ describe("diagnosticsClient", () => {
     const sample = client.getSamplePayload();
     expect(sample.events[0]?.kind).toBe("app_quit");
     expect(Object.keys(sample.events[0] ?? {})).not.toContain("provider");
+  });
+  it("drops the failed backlog after repeated failures while recording new events", async () => {
+    let resolve: (response: Response) => void = () => {};
+    const client = createDiagnosticsClient({
+      stateDir,
+      sanitizeContext,
+      flushIntervalMs: 0,
+      // SAFETY: the test stub immediately returns a pending promise; the signature
+      // cast only adapts the arrow to the fetch type.
+      fetchImpl: (async () =>
+        new Promise((res) => {
+          resolve = res;
+        })) as typeof fetch,
+    });
+    client.setEnabled(true);
+    client.record({ kind: "app_start" });
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const flushPromise = client.flush();
+      client.record({ kind: "test" });
+      resolve(new Response(null, { status: 503 }));
+      await flushPromise;
+      resolve = () => {};
+    }
+    // The original app_start backlog is gone. The most recent event recorded
+    // during the final failing flush was not part of that backlog, so it
+    // survives.
+    expect(client.getState().queuedEventCount).toBe(1);
+    const sample = client.getSamplePayload();
+    expect(sample.events.some((event) => event.kind === "app_start")).toBe(false);
+    expect(sample.events[0]?.kind).toBe("test");
+  });
+
+  it("does not enable collection when the state cannot be persisted", () => {
+    chmodSync(stateDir, 0o555);
+    const client = createDiagnosticsClient({ stateDir, sanitizeContext, flushIntervalMs: 0 });
+    try {
+      const state = client.setEnabled(true);
+      expect(state.enabled).toBe(false);
+      expect(client.record({ kind: "app_start" })).toBe(false);
+    } finally {
+      chmodSync(stateDir, 0o755);
+    }
+  });
+
+  it("rejects endpoints with credentials, missing hosts, or bad structure", () => {
+    const cases = [
+      { endpointUrl: "http://insecure.example", expected: false },
+      { endpointUrl: "https://user:pass@example.com", expected: false },
+      { endpointUrl: "https:///no-host", expected: false },
+      { endpointUrl: "https://example.com:999999", expected: false },
+      { endpointUrl: "https://example.com/v1/events", expected: true },
+      { endpointUrl: "http://localhost:58091", expected: true },
+      { endpointUrl: "http://127.0.0.1:58091", expected: true },
+    ];
+    for (const { endpointUrl, expected } of cases) {
+      const client = createDiagnosticsClient({
+        stateDir,
+        sanitizeContext,
+        endpointUrl,
+        flushIntervalMs: 0,
+      });
+      client.setEnabled(true);
+      const queued = client.record({ kind: "app_start" });
+      expect(queued).toBe(expected);
+    }
   });
 });
 

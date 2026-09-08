@@ -14,7 +14,7 @@
     ".plans/**",
     ".playwright-mcp/**",
     "tools/oxlint/anti-slop/**",
-    "infrastructure/**"
+    "**/.wrangler/**"
   ],
   "plugins": ["eslint", "oxc", "react", "unicorn", "typescript"],
   "jsPlugins": [

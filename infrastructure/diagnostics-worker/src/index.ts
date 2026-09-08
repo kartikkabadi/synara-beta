@@ -6,23 +6,45 @@
 // The validation contract lives in ./contract.ts so the desktop test suite
 // can prove the sanitizer and this collector stay in sync.
 
-import { MAX_BATCH, UUID_PATTERN, validateEvent, type DiagnosticsEvent } from "./contract";
+import {
+  MAX_BATCH,
+  UUID_PATTERN,
+  isPlainObject,
+  validateEvent,
+  type DiagnosticsEvent,
+  type JsonValue,
+} from "./contract";
 
 // Minimal structural stand-ins for the Cloudflare D1 API. These keep the
 // worker dependency-free while the desktop/scripts test suite imports it.
+export type D1Value = string | number | boolean | null;
+
+export interface D1RunResult {
+  readonly changes?: number;
+  readonly duration?: number;
+}
+
+export interface D1BatchResult {
+  readonly duration?: number;
+}
+
 export interface D1PreparedStatement {
-  bind(...values: unknown[]): D1PreparedStatement;
-  first<T = unknown>(): Promise<T | null>;
-  run(): Promise<unknown>;
+  bind(...values: D1Value[]): D1PreparedStatement;
+  first<T>(): Promise<T | null>;
+  run(): Promise<D1RunResult>;
 }
 
 export interface D1Database {
   prepare(sql: string): D1PreparedStatement;
-  batch(statements: D1PreparedStatement[]): Promise<unknown[]>;
+  batch(statements: D1PreparedStatement[]): Promise<ReadonlyArray<D1BatchResult>>;
 }
 
 export interface Env {
   DB: D1Database;
+}
+
+export interface ScheduledController {
+  readonly scheduledAt: number;
 }
 
 export default {
@@ -38,7 +60,7 @@ export default {
   },
   // Enforces the documented 90-day retention without an operator-run job, and
   // reclaims dead rate-limit counter rows from past hourly windows.
-  async scheduled(_controller: unknown, env: Env): Promise<void> {
+  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
     const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
     const counterCutoff = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
     await env.DB.batch([
@@ -63,6 +85,7 @@ async function readBodyText(request: Request, maxBytes: number): Promise<string 
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
+    if (value === undefined) continue;
     total += value.byteLength;
     if (total > maxBytes) {
       await reader.cancel();
@@ -89,32 +112,28 @@ async function handleIngest(request: Request, env: Env): Promise<Response> {
   if (bodyText === null) {
     return Response.json({ error: "body too large" }, { status: 413 });
   }
-  let body: unknown;
+  let body: JsonValue;
   try {
     body = JSON.parse(bodyText);
   } catch {
     return Response.json({ error: "invalid json" }, { status: 400 });
   }
-  if (
-    typeof body !== "object" ||
-    body === null ||
-    !Array.isArray((body as { events?: unknown }).events) ||
-    (body as { events: unknown[] }).events.length === 0
-  ) {
+  if (!isPlainObject(body)) {
     return Response.json({ error: "expected { events: [...] }" }, { status: 400 });
   }
-  const events = (body as { events: unknown[] }).events;
-  if (events.length > MAX_BATCH) {
+  const eventsValue = body.events;
+  if (!Array.isArray(eventsValue) || eventsValue.length === 0) {
+    return Response.json({ error: "expected { events: [...] }" }, { status: 400 });
+  }
+  if (eventsValue.length > MAX_BATCH) {
     return Response.json({ error: "batch too large" }, { status: 413 });
   }
-  for (const event of events) {
-    if (!validateEvent(event)) {
-      return Response.json({ error: "invalid event" }, { status: 422 });
-    }
+  const validEvents = eventsValue.filter(validateEvent);
+  if (validEvents.length !== eventsValue.length) {
+    return Response.json({ error: "invalid event" }, { status: 422 });
   }
-  const validEvents = events as DiagnosticsEvent[];
-  const installId = validEvents[0]?.installId ?? "";
-  if (!UUID_PATTERN.test(installId)) {
+  const installId = validEvents[0]?.installId;
+  if (installId === undefined || !UUID_PATTERN.test(installId)) {
     return Response.json({ error: "invalid install id" }, { status: 422 });
   }
   // A batch may only carry one install's events; otherwise a caller could
