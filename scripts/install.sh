@@ -13,12 +13,15 @@
 set -euo pipefail
 
 tag=""
+tag_provided=0
 args=("$@")
 for ((i=0; i<${#args[@]}; i++)); do
   if [[ "${args[i]}" == "--tag" && $((i+1)) -lt ${#args[@]} ]]; then
     tag="${args[i+1]}"
+    tag_provided=1
   elif [[ "${args[i]}" == --tag=* ]]; then
     tag="${args[i]#--tag=}"
+    tag_provided=1
   fi
 done
 
@@ -72,6 +75,17 @@ fi
 
 script_url="https://raw.githubusercontent.com/kartikkabadi/synara-beta/${tag}/scripts/install-${platform}.sh"
 
+# Forward the resolved tag to the platform installer so it installs exactly
+# the release the bootstrap already selected and verified. If the caller
+# already passed --tag, do not override it.
+pass_args=()
+if [ "${#args[@]}" -gt 0 ]; then
+  pass_args=("${args[@]}")
+fi
+if [ "$tag_provided" -ne 1 ]; then
+  pass_args+=("--tag" "$tag")
+fi
+
 tmp_file="$(mktemp "/tmp/synara-beta-install-${platform}.XXXXXX")"
 trap 'rm -f "$tmp_file"' EXIT
 
@@ -80,4 +94,4 @@ if ! curl -fsSL -o "$tmp_file" "$script_url"; then
   exit 1
 fi
 
-bash "$tmp_file" ${args[@]+"${args[@]}"}
+bash "$tmp_file" ${pass_args[@]+"${pass_args[@]}"}

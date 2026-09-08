@@ -118,6 +118,8 @@ describe("install.sh", () => {
           ),
         );
         NodeAssert.equal(NodeFS.existsSync(recordPath), true);
+        const invocation = NodeFS.readFileSync(recordPath, "utf8");
+        NodeAssert.match(invocation, /--tag v9\.9\.9-beta\.9/);
       } finally {
         NodeFS.rmSync(sandbox, { recursive: true, force: true });
       }
@@ -134,6 +136,19 @@ describe("install.sh", () => {
       NodeAssert.match(fetched, /synara-beta\/v9\.9\.9-beta\.9\//);
       NodeAssert.doesNotMatch(fetched, /synara-beta\/nightly-beta\//);
       NodeAssert.doesNotMatch(fetched, /synara-beta\/v1\.2\.3\//);
+    } finally {
+      NodeFS.rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it("appends the resolved tag when --force is passed without --tag", () => {
+    const { sandbox, recordPath } = makeSandbox({ uname: "Linux", releases: RELEASES });
+    try {
+      const result = tryBash(scriptPath, ["--force"], sandboxEnv(sandbox));
+      NodeAssert.equal(result.status, 0);
+      const invocation = NodeFS.readFileSync(recordPath, "utf8");
+      NodeAssert.match(invocation, /--tag v9\.9\.9-beta\.9/);
+      NodeAssert.match(invocation, /--force/);
     } finally {
       NodeFS.rmSync(sandbox, { recursive: true, force: true });
     }
