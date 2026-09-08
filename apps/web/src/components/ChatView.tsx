@@ -601,6 +601,7 @@ import {
   resolveDraftFallbackModelSelection,
   DISMISSED_PROVIDER_HEALTH_BANNERS_KEY,
   DismissedProviderHealthBannersSchema,
+  bumpLocalDraftErrorVersion,
   collectUserMessageBlobPreviewUrls,
   deriveComposerSendState,
   evictOverflowFailedThreadSend,
@@ -4416,8 +4417,11 @@ export default function ChatView({
       if (previousError === error) {
         return localDraftErrorVersionsRef.current.get(targetThreadId) ?? 0;
       }
-      const nextVersion = (localDraftErrorVersionsRef.current.get(targetThreadId) ?? 0) + 1;
-      localDraftErrorVersionsRef.current.set(targetThreadId, nextVersion);
+      const nextVersion = bumpLocalDraftErrorVersion(
+        localDraftErrorVersionsRef.current,
+        (pinnedThreadId) => failedThreadSendsRef.current.has(pinnedThreadId),
+        targetThreadId,
+      );
       const nextErrors = {
         ...localDraftErrorsByThreadIdRef.current,
         [targetThreadId]: error,

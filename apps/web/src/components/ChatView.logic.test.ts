@@ -70,9 +70,11 @@ import {
   shouldShowComposerModelBootstrapSkeleton,
   shouldStartActiveTurnLayoutGrace,
   shouldRenderTerminalWorkspace,
+  bumpLocalDraftErrorVersion,
   evictOverflowFailedThreadSend,
   failedSendSnapshotOwnsCurrentError,
   MAX_FAILED_THREAD_SEND_SNAPSHOTS,
+  MAX_LOCAL_DRAFT_ERROR_VERSIONS,
   worktreeSetupHasError,
 } from "./ChatView.logic";
 
@@ -3023,5 +3025,36 @@ describe("evictOverflowFailedThreadSend", () => {
       })),
     ).toBeNull();
     expect(sends.has(oldest)).toBe(false);
+  });
+});
+
+describe("bumpLocalDraftErrorVersion", () => {
+  const noPins = () => false;
+
+  it("bumps monotonically per thread", () => {
+    const versions = new Map<ThreadId, number>();
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    expect(bumpLocalDraftErrorVersion(versions, noPins, threadId)).toBe(1);
+    expect(bumpLocalDraftErrorVersion(versions, noPins, threadId)).toBe(2);
+    expect(bumpLocalDraftErrorVersion(versions, noPins, ThreadId.makeUnsafe("other"))).toBe(1);
+  });
+
+  it("bounds the map by evicting the oldest entry no live snapshot references", () => {
+    const versions = new Map<ThreadId, number>();
+    // A pinned entry — the one a failed-send snapshot still references — must
+    // survive pressure so the snapshot's identity check can never go blind.
+    const pinnedId = ThreadId.makeUnsafe("thread-pinned");
+    bumpLocalDraftErrorVersion(versions, noPins, pinnedId);
+    const isPinned = (id: ThreadId) => id === pinnedId;
+    for (let index = 0; index < MAX_LOCAL_DRAFT_ERROR_VERSIONS + 10; index += 1) {
+      bumpLocalDraftErrorVersion(versions, isPinned, ThreadId.makeUnsafe(`thread-${index}`));
+    }
+    expect(versions.size).toBeLessThanOrEqual(MAX_LOCAL_DRAFT_ERROR_VERSIONS);
+    expect(versions.has(pinnedId)).toBe(true);
+    // The oldest unpinned entries were evicted first.
+    expect(versions.has(ThreadId.makeUnsafe("thread-0"))).toBe(false);
+    expect(
+      versions.has(ThreadId.makeUnsafe(`thread-${MAX_LOCAL_DRAFT_ERROR_VERSIONS + 9}`)),
+    ).toBe(true);
   });
 });

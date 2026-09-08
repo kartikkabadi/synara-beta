@@ -1956,3 +1956,27 @@ export function evictOverflowFailedThreadSend<S extends FailedSendErrorIdentity>
   }
   return failedSendSnapshotOwnsCurrentError(evicted, currentError(oldest)) ? oldest : null;
 }
+
+// Draft threads have no store entry, so their error generations live in a
+// component-local map keyed by thread id. A generation is only ever compared
+// against a live failed-send snapshot, so past this bound the oldest entry no
+// snapshot references can be evicted safely; pinned entries always survive.
+export const MAX_LOCAL_DRAFT_ERROR_VERSIONS = 64;
+
+export function bumpLocalDraftErrorVersion(
+  versions: Map<ThreadId, number>,
+  isPinned: (threadId: ThreadId) => boolean,
+  threadId: ThreadId,
+): number {
+  const nextVersion = (versions.get(threadId) ?? 0) + 1;
+  // Re-insert at the tail so the bound evicts the least recently touched.
+  versions.delete(threadId);
+  if (versions.size >= MAX_LOCAL_DRAFT_ERROR_VERSIONS) {
+    const evictable = [...versions.keys()].find((id) => !isPinned(id));
+    if (evictable !== undefined) {
+      versions.delete(evictable);
+    }
+  }
+  versions.set(threadId, nextVersion);
+  return nextVersion;
+}
