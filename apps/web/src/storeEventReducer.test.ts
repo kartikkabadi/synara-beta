@@ -2346,9 +2346,7 @@ describe("thread error generation", () => {
 
     // A session event rewrites the error — a path that must bump the
     // generation, or an evicted snapshot could clear a card it does not own.
-    state = applyOrchestrationEvents(state, [
-      sessionSetError(threadId, "provider crashed"),
-    ]);
+    state = applyOrchestrationEvents(state, [sessionSetError(threadId, "provider crashed")]);
     expect(threadsOf(state)[0]?.error).toBe("provider crashed");
     expect(threadsOf(state)[0]?.errorVersion).toBe(2);
 
