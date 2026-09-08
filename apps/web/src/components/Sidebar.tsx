@@ -5867,18 +5867,20 @@ export default function Sidebar() {
 
   const headerControls = <SidebarLeadingControls className="ml-auto hidden md:flex" />;
 
+  const betaBadge = isBetaDesktopFlavor ? (
+    <span
+      aria-label="Synara Beta"
+      className="inline-flex shrink-0 items-center rounded-full bg-[image:var(--beta-gradient)] px-1.5 py-0.5 text-[9px] font-semibold uppercase leading-none tracking-wide text-white"
+    >
+      Beta
+    </span>
+  ) : null;
+
   const wordmark = (
     <div className="flex w-full items-center gap-1.5">
       <SidebarTrigger className="shrink-0 text-muted-foreground/75 hover:text-foreground md:hidden" />
       {headerControls}
-      {isBetaDesktopFlavor ? (
-        <span
-          aria-label="Synara Beta"
-          className="inline-flex items-center rounded-full bg-[image:var(--beta-gradient)] px-1.5 py-0.5 text-[9px] font-semibold uppercase leading-none tracking-wide text-white"
-        >
-          Beta
-        </span>
-      ) : null}
+      {betaBadge}
     </div>
   );
   const renameProjectDialogProject = renameProjectDialogId
@@ -5929,6 +5931,7 @@ export default function Sidebar() {
             )}
           >
             {titlebarControls}
+            {betaBadge}
           </SidebarHeader>
         </>
       ) : (
