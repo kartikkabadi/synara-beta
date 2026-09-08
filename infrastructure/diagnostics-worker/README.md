@@ -17,6 +17,12 @@ events and stores them in D1. No VPS, no third-party analytics service.
   a random per-install UUID generated on first run — it is not derived from
   hardware, accounts, or network identifiers.
 - Events are kept for 90 days and then deleted (see Retention below).
+- Rate limits are enforced durably in D1: an atomic counter row per install
+  per hour (600 events) plus a global hourly cap (20,000 events) bounds total
+  ingest even when a caller rotates fresh install ids. A best-effort
+  per-sender isolate limit sits on top; no client credential exists, so the
+  counters are the abuse boundary — poisoning can only corrupt counters, not
+  stored rows, because every stored event is schema-validated first.
 
 ## Deploy
 
@@ -29,6 +35,10 @@ wrangler d1 execute synara-beta-diagnostics --remote --file schema.sql
 wrangler deploy
 ```
 
+`schema.sql` is idempotent (`IF NOT EXISTS`): re-run the same execute command
+on an existing deployment whenever the schema changes, e.g. to pick up the
+`rate_counters` table the durable rate limits need.
+
 The deployed workers.dev URL is the diagnostics endpoint the desktop client
 posts to (`DEFAULT_DIAGNOSTICS_ENDPOINT_URL` in
 `apps/desktop/src/diagnosticsClient.ts`). Update that constant if the worker
@@ -37,8 +47,10 @@ moves.
 ## Endpoints
 
 - `POST /v1/events` — batch ingest `{ events: [...] }` (max 50). Rejects the
-  whole batch when any event fails validation (422), exceeds the
-  per-install hourly limit (429), or carries a body larger than 1 MB (413).
+  whole batch when any event fails validation (422), exceeds a durable hourly
+  quota — per-install or global (429), or carries a body larger than 1 MB
+  (413). The body is read with a hard byte cap, so a missing or forged
+  `Content-Length` cannot make the worker buffer an oversized payload.
 - `GET /health` — liveness.
 
 ## Retention

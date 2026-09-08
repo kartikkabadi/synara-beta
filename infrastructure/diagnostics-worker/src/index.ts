@@ -36,15 +36,48 @@ export default {
     }
     return new Response("Not found", { status: 404 });
   },
-  // Enforces the documented 90-day retention without an operator-run job.
+  // Enforces the documented 90-day retention without an operator-run job, and
+  // reclaims dead rate-limit counter rows from past hourly windows.
   async scheduled(_controller: unknown, env: Env): Promise<void> {
     const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
-    await env.DB.prepare("DELETE FROM events WHERE received_at < ?").bind(cutoff).run();
+    const counterCutoff = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM events WHERE received_at < ?").bind(cutoff),
+      env.DB.prepare("DELETE FROM rate_counters WHERE window_start < ?").bind(counterCutoff),
+    ]);
   },
 };
 
 const RETENTION_DAYS = 90;
 const MAX_BODY_BYTES = 1024 * 1024;
+
+// Reads the request body as text and stops as soon as it exceeds maxBytes.
+// The Content-Length header is only a fast path: a missing or forged header
+// cannot make the worker buffer an unbounded body before validation.
+async function readBodyText(request: Request, maxBytes: number): Promise<string | null> {
+  const body = request.body;
+  if (body === null) return "";
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
 
 async function handleIngest(request: Request, env: Env): Promise<Response> {
   const contentLength = request.headers.get("content-length");
@@ -52,9 +85,13 @@ async function handleIngest(request: Request, env: Env): Promise<Response> {
     return Response.json({ error: "body too large" }, { status: 413 });
   }
 
+  const bodyText = await readBodyText(request, MAX_BODY_BYTES);
+  if (bodyText === null) {
+    return Response.json({ error: "body too large" }, { status: 413 });
+  }
   let body: unknown;
   try {
-    body = await request.json();
+    body = JSON.parse(bodyText);
   } catch {
     return Response.json({ error: "invalid json" }, { status: 400 });
   }
@@ -85,12 +122,30 @@ async function handleIngest(request: Request, env: Env): Promise<Response> {
   if (validEvents.some((event) => event.installId !== installId)) {
     return Response.json({ error: "mixed install ids" }, { status: 422 });
   }
-  if (!(await withinRateLimit(env, installId, validEvents.length))) {
+  // Durable quota: atomic D1 counter reservations. A single upsert statement
+  // serializes concurrent batches on the (scope, window_start) row, so two
+  // requests cannot both pass on a stale pre-insert count. The global scope
+  // bounds total ingest even when a caller rotates fresh install ids. A
+  // rejected batch still spends its reservation — failing closed is intended.
+  const windowStart = hourlyWindowStart();
+  let installCount: number;
+  let globalCount: number;
+  try {
+    [installCount, globalCount] = await Promise.all([
+      reserveHourlyQuota(env, `install:${installId}`, windowStart, validEvents.length),
+      reserveHourlyQuota(env, "global", windowStart, validEvents.length),
+    ]);
+  } catch {
+    // A missing rate_counters table (schema not re-applied) must not surface
+    // as an opaque worker exception.
+    return Response.json({ error: "quota store unavailable" }, { status: 503 });
+  }
+  if (installCount > PER_INSTALL_HOURLY_LIMIT || globalCount > GLOBAL_HOURLY_LIMIT) {
     return Response.json({ error: "rate limited" }, { status: 429 });
   }
   // Best-effort sender-level limit (per isolate; no IP is ever stored). It
-  // blunts floods of fresh-UUID batches that would otherwise bypass the
-  // per-install quota; the D1 per-install check stays the durable limit.
+  // blunts floods inside one isolate before the durable counters are read;
+  // the D1 reservations above stay the enforced limits.
   const senderIp = request.headers.get("cf-connecting-ip") ?? "unknown";
   if (!withinSenderRateLimit(senderIp, validEvents.length)) {
     return Response.json({ error: "rate limited" }, { status: 429 });
@@ -125,6 +180,7 @@ async function handleIngest(request: Request, env: Env): Promise<Response> {
 }
 
 const PER_INSTALL_HOURLY_LIMIT = 600;
+const GLOBAL_HOURLY_LIMIT = 20_000;
 const PER_SENDER_HOURLY_LIMIT = 2400;
 const SENDER_WINDOW_MS = 60 * 60 * 1000;
 const MAX_TRACKED_SENDERS = 10_000;
@@ -148,12 +204,32 @@ function withinSenderRateLimit(senderIp: string, incoming: number): boolean {
   return entry.count <= PER_SENDER_HOURLY_LIMIT;
 }
 
-async function withinRateLimit(env: Env, installId: string, incoming: number): Promise<boolean> {
-  const windowStart = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-  const row = await env.DB.prepare(
-    "SELECT COUNT(*) AS count FROM events WHERE install_id = ? AND received_at >= ?",
+// Fixed hourly buckets keep the counter a single upsertable row per scope.
+function hourlyWindowStart(now = Date.now()): string {
+  return new Date(now - (now % 3_600_000)).toISOString();
+}
+
+// Reserves `count` against the scope's hourly window and returns the
+// post-reservation total. The upsert is one statement, so increments serialize
+// on the row and cannot interleave with a concurrent check.
+async function reserveHourlyQuota(
+  env: Env,
+  scope: string,
+  windowStart: string,
+  count: number,
+): Promise<number> {
+  await env.DB.prepare(
+    `INSERT INTO rate_counters (scope, window_start, event_count)
+     VALUES (?, ?, ?)
+     ON CONFLICT (scope, window_start)
+     DO UPDATE SET event_count = event_count + excluded.event_count`,
   )
-    .bind(installId, windowStart)
-    .first<{ count: number }>();
-  return (row?.count ?? 0) + incoming <= PER_INSTALL_HOURLY_LIMIT;
+    .bind(scope, windowStart, count)
+    .run();
+  const row = await env.DB.prepare(
+    "SELECT event_count FROM rate_counters WHERE scope = ? AND window_start = ?",
+  )
+    .bind(scope, windowStart)
+    .first<{ event_count: number }>();
+  return row?.event_count ?? count;
 }
