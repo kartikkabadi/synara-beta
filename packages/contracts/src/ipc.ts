@@ -91,6 +91,11 @@ import type {
   GitHubProjectProvisionResult,
 } from "./githubProjectProvisioning";
 import type {
+  DiagnosticsEventInput,
+  DiagnosticsSamplePayload,
+  DiagnosticsState,
+} from "./diagnostics";
+import type {
   PullRequestActionInput,
   PullRequestActionResult,
   PullRequestCommentInput,
@@ -627,6 +632,13 @@ export interface DesktopBridge {
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
+  diagnostics: {
+    getState: () => Promise<DiagnosticsState>;
+    setEnabled: (enabled: boolean) => Promise<DiagnosticsState>;
+    getSamplePayload: () => Promise<DiagnosticsSamplePayload>;
+    recordEvent: (input: DiagnosticsEventInput) => Promise<boolean>;
+    sendTestEvent: () => Promise<boolean>;
+  };
   notifications: {
     isSupported: () => Promise<boolean>;
     show: (input: DesktopNotificationInput) => Promise<boolean>;

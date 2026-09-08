@@ -28,6 +28,7 @@ import {
 } from "../appSettings";
 import { APP_VERSION } from "../branding";
 import { AdvancedSettingsPanel } from "~/components/settings/AdvancedSettingsPanel";
+import { DiagnosticsSettingsPanel } from "~/components/settings/DiagnosticsSettingsPanel";
 import { AppIconPicker } from "~/components/settings/AppIconPicker";
 import {
   ArchivedSettingsPanel,
@@ -1333,6 +1334,7 @@ function SettingsRouteView() {
                   resetEpoch={resetEpoch}
                 />
                 <ExternalMcpSettingsPanel active={activeSection === "integrations"} />
+                <DiagnosticsSettingsPanel active={activeSection === "diagnostics"} />
                 <AdvancedSettingsPanel
                   active={activeSection === "advanced"}
                   onOpenReleaseHistory={() => setReleaseHistoryOpen(true)}

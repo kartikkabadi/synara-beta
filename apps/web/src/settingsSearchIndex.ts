@@ -415,6 +415,15 @@ export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
     target: null,
   },
 
+  // ── Diagnostics ───────────────────────────────────────────────────────────────
+  {
+    id: "diagnostics:overview",
+    section: "diagnostics",
+    title: "Diagnostics",
+    keywords:
+      "Opt in to anonymous usage diagnostics. See exactly which fields get sent, why, and turn collection off. privacy telemetry",
+  },
+
   // ── Advanced ──────────────────────────────────────────────────────────────────
   {
     id: "advanced:keybindings",
