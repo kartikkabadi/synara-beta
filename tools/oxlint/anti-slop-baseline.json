@@ -306,9 +306,9 @@
     }
   },
   "anti-slop(no-chained-type-assertions):apps/server/src/managedWorktrees.test.ts": {
-    "total": 9,
+    "total": 25,
     "messages": {
-      "8ca7537a": 9
+      "8ca7537a": 25
     }
   },
   "anti-slop(no-chained-type-assertions):apps/server/src/orchestration/Layers/CheckpointReactor.test.ts": {
@@ -546,9 +546,9 @@
     }
   },
   "anti-slop(no-chained-type-assertions):apps/server/src/threadRetention.test.ts": {
-    "total": 4,
+    "total": 8,
     "messages": {
-      "8ca7537a": 4
+      "8ca7537a": 8
     }
   },
   "anti-slop(no-chained-type-assertions):apps/web/e2e/fixtures/mcpBrowserHarness.ts": {
@@ -600,9 +600,9 @@
     }
   },
   "anti-slop(no-chained-type-assertions):apps/web/src/components/Sidebar.logic.test.ts": {
-    "total": 3,
+    "total": 4,
     "messages": {
-      "8ca7537a": 3
+      "8ca7537a": 4
     }
   },
   "anti-slop(no-chained-type-assertions):apps/web/src/components/WorkspaceFilePreview.capacity.browser.tsx": {
@@ -1338,9 +1338,9 @@
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/server/src/git/Layers/GitHubCli.ts": {
-    "total": 11,
+    "total": 12,
     "messages": {
-      "302b7321": 11
+      "302b7321": 12
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/server/src/git/Layers/GitManager.test.ts": {
@@ -1389,6 +1389,12 @@
     "total": 2,
     "messages": {
       "302b7321": 2
+    }
+  },
+  "anti-slop(no-conditional-empty-object-spread):apps/server/src/managedWorktrees.ts": {
+    "total": 6,
+    "messages": {
+      "302b7321": 6
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/server/src/orchestration/Layers/CheckpointReactor.test.ts": {
@@ -2988,6 +2994,12 @@
     }
   },
   "anti-slop(no-conditional-empty-object-spread):scripts/lib/desktop-platform-build-config.ts": {
+    "total": 1,
+    "messages": {
+      "302b7321": 1
+    }
+  },
+  "anti-slop(no-conditional-empty-object-spread):scripts/merge-mac-update-manifests.ts": {
     "total": 1,
     "messages": {
       "302b7321": 1
@@ -12825,6 +12837,12 @@
       "f804648b": 6
     }
   },
+  "anti-slop(no-unsafe-dictionary-type):apps/server/src/serverSettings.test.ts": {
+    "total": 1,
+    "messages": {
+      "f804648b": 1
+    }
+  },
   "anti-slop(no-unsafe-dictionary-type):apps/server/src/serverSettings.ts": {
     "total": 6,
     "messages": {
@@ -14602,9 +14620,9 @@
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/managedWorktrees.test.ts": {
-    "total": 18,
+    "total": 54,
     "messages": {
-      "64a9ab3d": 18
+      "64a9ab3d": 54
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/managedWorktrees.ts": {
@@ -14704,9 +14722,9 @@
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/orchestration/Layers/ThreadDeletionReactor.test.ts": {
-    "total": 1,
+    "total": 2,
     "messages": {
-      "64a9ab3d": 1
+      "64a9ab3d": 2
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/orchestration/Layers/ThreadGitMetadataReactor.test.ts": {
@@ -15550,9 +15568,9 @@
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/serverSettings.test.ts": {
-    "total": 3,
+    "total": 4,
     "messages": {
-      "64a9ab3d": 3
+      "64a9ab3d": 4
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/serverSettings.ts": {
@@ -15628,9 +15646,9 @@
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/threadRetention.test.ts": {
-    "total": 9,
+    "total": 17,
     "messages": {
-      "64a9ab3d": 9
+      "64a9ab3d": 17
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/trustedOrigins.duplicateOrigin.test.ts": {
@@ -15928,9 +15946,9 @@
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/components/Sidebar.logic.test.ts": {
-    "total": 41,
+    "total": 43,
     "messages": {
-      "64a9ab3d": 41
+      "64a9ab3d": 43
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/components/Sidebar.logic.ts": {
