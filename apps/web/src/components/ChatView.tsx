@@ -9046,7 +9046,13 @@ export default function ChatView({
         failedSends.delete(threadIdForSend);
         if (failedSends.size >= MAX_FAILED_THREAD_SEND_SNAPSHOTS) {
           const oldest = failedSends.keys().next().value;
-          if (oldest !== undefined) failedSends.delete(oldest);
+          if (oldest !== undefined) {
+            failedSends.delete(oldest);
+            // The evicted thread's error card can no longer replay its payload
+            // — clear it rather than leave a retry that resends the wrong
+            // transcript message.
+            setThreadError(oldest, null);
+          }
         }
         failedSends.set(threadIdForSend, {
           restoredToComposer: composerDraftWasEmpty,
