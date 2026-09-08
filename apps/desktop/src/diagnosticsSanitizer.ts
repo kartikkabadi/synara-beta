@@ -95,7 +95,7 @@ const BareEventSchema = Schema.Struct({
   ]),
 });
 
-const SanitizedEventSchema = Schema.Union([
+export const SanitizedEventSchema = Schema.Union([
   SessionStartedSchema,
   SessionEndedSchema,
   FeatureUsedSchema,

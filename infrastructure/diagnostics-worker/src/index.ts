@@ -18,9 +18,6 @@ export default {
     if (request.method === "GET" && url.pathname === "/health") {
       return Response.json({ ok: true });
     }
-    if (request.method === "GET" && url.pathname === "/v1/stats") {
-      return handleStats(env);
-    }
     if (request.method === "POST" && url.pathname === "/v1/events") {
       return handleIngest(request, env);
     }
@@ -34,8 +31,14 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 const RETENTION_DAYS = 90;
+const MAX_BODY_BYTES = 1024 * 1024;
 
 async function handleIngest(request: Request, env: Env): Promise<Response> {
+  const contentLength = request.headers.get("content-length");
+  if (contentLength !== null && Number(contentLength) > MAX_BODY_BYTES) {
+    return Response.json({ error: "body too large" }, { status: 413 });
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -140,41 +143,4 @@ async function withinRateLimit(env: Env, installId: string, incoming: number): P
     .bind(installId, windowStart)
     .first<{ count: number }>();
   return (row?.count ?? 0) + incoming <= PER_INSTALL_HOURLY_LIMIT;
-}
-
-async function handleStats(env: Env): Promise<Response> {
-  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-  const byKind = await env.DB.prepare(
-    "SELECT kind AS bucket, COUNT(*) AS count FROM events WHERE received_at >= ? GROUP BY kind",
-  )
-    .bind(since)
-    .all<{ bucket: string; count: number }>();
-  const byVersion = await env.DB.prepare(
-    "SELECT app_version AS bucket, COUNT(*) AS count FROM events WHERE received_at >= ? GROUP BY app_version",
-  )
-    .bind(since)
-    .all<{ bucket: string; count: number }>();
-  const byPlatform = await env.DB.prepare(
-    "SELECT platform AS bucket, COUNT(*) AS count FROM events WHERE received_at >= ? GROUP BY platform",
-  )
-    .bind(since)
-    .all<{ bucket: string; count: number }>();
-  const total = await env.DB.prepare("SELECT COUNT(*) AS count FROM events").first<{
-    count: number;
-  }>();
-  return Response.json({
-    window: "30d",
-    total: total?.count ?? 0,
-    byKind: toCounts(byKind.results),
-    byVersion: toCounts(byVersion.results),
-    byPlatform: toCounts(byPlatform.results),
-  });
-}
-
-function toCounts(rows: Array<{ bucket: string; count: number }>): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const row of rows) {
-    counts[row.bucket] = Number(row.count ?? 0);
-  }
-  return counts;
 }

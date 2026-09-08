@@ -11,47 +11,59 @@ import type { DiagnosticsSamplePayload, DiagnosticsState } from "@synara/contrac
 import { Button } from "~/components/ui/button";
 import { Switch } from "~/components/ui/switch";
 
-const FIELD_ROWS: ReadonlyArray<{ field: string; purpose: string; example: string }> = [
-  { field: "kind", purpose: "Which event happened", example: "session_started" },
-  { field: "schemaVersion", purpose: "Payload schema version", example: "1" },
-  { field: "appVersion", purpose: "Which beta build you run", example: "0.8.3-beta.1" },
-  { field: "platform / arch", purpose: "OS and CPU family", example: "darwin / arm64" },
-  { field: "flavor", purpose: "Build channel", example: "beta" },
+const FIELD_ROWS: ReadonlyArray<{
+  field: string;
+  purpose: string;
+  example: string;
+  collected: boolean;
+}> = [
+  { field: "kind", purpose: "Which event happened", example: "session_started", collected: true },
+  { field: "schemaVersion", purpose: "Payload schema version", example: "1", collected: true },
+  { field: "appVersion", purpose: "Which beta build you run", example: "0.8.3-beta.1", collected: true },
+  { field: "platform / arch", purpose: "OS and CPU family", example: "darwin / arm64", collected: true },
+  { field: "flavor", purpose: "Build channel", example: "beta", collected: true },
   {
     field: "eventId",
     purpose: "Random per-event id, for deduplication",
     example: "32 hex chars",
+    collected: true,
   },
   {
     field: "installId",
     purpose: "Random per-install UUID; counts installs, not people",
     example: "0f1a2b3c-…",
+    collected: true,
   },
   {
     field: "occurredAt",
     purpose: "Minute-precision time of the event",
     example: "2026-09-08T10:19:00Z",
+    collected: true,
   },
   {
     field: "provider",
     purpose: "Which coding agent ran (name only, no model names)",
     example: "codex",
+    collected: true,
   },
   {
     field: "durationBucket",
     purpose: "Session length bucket — never an exact duration",
     example: "1m_5m",
+    collected: false,
   },
-  { field: "outcome", purpose: "How a session ended", example: "ok" },
+  { field: "outcome", purpose: "How a session ended", example: "ok", collected: false },
   {
     field: "feature",
     purpose: "Which beta feature was used (slug only)",
     example: "worktree-reclaim",
+    collected: false,
   },
   {
     field: "errorCode / errorSurface",
     purpose: "Bounded error slug — never a message or stack",
     example: "backend.exit-nonzero",
+    collected: false,
   },
 ];
 
@@ -130,7 +142,7 @@ export function DiagnosticsSettingsPanel(props: { active: boolean }) {
       </section>
 
       <section className="flex flex-col gap-3">
-        <h3 className="text-sm font-medium">What gets sent</h3>
+        <h3 className="text-sm font-medium">What can be sent</h3>
         <div className="overflow-x-auto rounded-xl border border-border/60">
           <table className="w-full border-collapse text-sm">
             <thead>
@@ -138,6 +150,7 @@ export function DiagnosticsSettingsPanel(props: { active: boolean }) {
                 <th className="px-3 py-2 text-start font-medium">Field</th>
                 <th className="hidden px-3 py-2 text-start font-medium sm:table-cell">Purpose</th>
                 <th className="hidden px-3 py-2 text-start font-medium md:table-cell">Example</th>
+                <th className="px-3 py-2 text-start font-medium">Status</th>
               </tr>
             </thead>
             <tbody>
@@ -148,11 +161,18 @@ export function DiagnosticsSettingsPanel(props: { active: boolean }) {
                   <td className="hidden py-2 font-mono text-xs text-muted-foreground sm:table-cell">
                     {row.example}
                   </td>
+                  <td className="py-2 pe-3 text-sm text-muted-foreground">
+                    {row.collected ? "Collected now" : "Reserved"}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        <p className="max-w-prose text-sm text-muted-foreground">
+          Reserved fields are part of the schema but are not yet emitted by this build. Only
+          `session_started` currently sends a kind-specific field (`provider`).
+        </p>
       </section>
 
       <section className="flex flex-col gap-3">
