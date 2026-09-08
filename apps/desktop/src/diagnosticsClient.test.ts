@@ -4,7 +4,7 @@
 //          restart persistence.
 // Layer: Desktop main process
 
-import { mkdtempSync, readFileSync, rmSync, unlinkSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -137,6 +137,44 @@ describe("diagnosticsClient", () => {
     };
     expect(queueFile).toHaveLength(0);
     expect(stateFile.enabled).toBe(false);
+  });
+
+  it("keeps collection disabled when the filesystem cannot persist opt-out", () => {
+    const client = createDiagnosticsClient({ stateDir, sanitizeContext, flushIntervalMs: 0 });
+    client.setEnabled(true);
+    client.record({ kind: "app_start" });
+    chmodSync(stateDir, 0o555);
+    try {
+      const state = client.setEnabled(false);
+      expect(state.enabled).toBe(false);
+      expect(state.queuedEventCount).toBe(0);
+      expect(client.record({ kind: "app_start" })).toBe(false);
+    } finally {
+      chmodSync(stateDir, 0o755);
+    }
+  });
+
+  it("drops a queue that outlives a persisted opt-out", () => {
+    const first = createDiagnosticsClient({ stateDir, sanitizeContext, flushIntervalMs: 0 });
+    first.setEnabled(true);
+    first.record({ kind: "app_start" });
+    expect(first.getState().queuedEventCount).toBe(1);
+    first.dispose();
+    // Persist the opt-out but leave the pre-withdrawal queue on disk, as if
+    // the cleared-queue write had failed while the state write succeeded.
+    const installId = first.getState().installId;
+    writeFileSync(
+      join(stateDir, STATE_FILE),
+      `${JSON.stringify({ version: 1, enabled: false, installId })}\n`,
+      "utf8",
+    );
+    const second = createDiagnosticsClient({ stateDir, sanitizeContext, flushIntervalMs: 0 });
+    expect(second.getState().enabled).toBe(false);
+    expect(second.getState().queuedEventCount).toBe(0);
+    // Re-enabling starts with an empty queue: revoked events never send.
+    second.setEnabled(true);
+    expect(second.getState().queuedEventCount).toBe(0);
+    second.dispose();
   });
 
   it("persists state and queue across restarts", () => {
