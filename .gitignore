@@ -28,6 +28,8 @@ output/playwright/
 apps/web/src/components/__screenshots__
 .vitest-*
 __screenshots__/
+__shots__/
+__videos__/
 .tanstack
 /.pi/
 /.tmp/
