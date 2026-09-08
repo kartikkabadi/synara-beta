@@ -77,8 +77,30 @@ function isPlainAliasConsumerUse(node: ESTree.TSType, environment: TypeEnvironme
   );
 }
 
+function isGenericAliasWithUnsafeBody(node: ESTree.TSType, environment: TypeEnvironment): boolean {
+  if (node.type !== "TSTypeReference" || (node.typeArguments?.params.length ?? 0) > 0) return false;
+  const name = typeReferenceName(node);
+  if (name === null || isInsideTypeAliasDeclaration(node)) return false;
+  const scope = environment.scopeOf(node);
+  const found = environment.scopeIndex?.lookupAlias(name, scope) ?? null;
+  if (found === null || found.ambiguous) return false;
+  const alias = found.alias;
+  const params = alias.typeParameters?.params;
+  if (params === undefined || params.length === 0) return false;
+  if (!params.every((parameter) => parameter.default !== undefined)) return false;
+  const aliasScope = environment.scopeOf(alias);
+  if (aliasScope === null) return false;
+  const bodyEnvironment: TypeEnvironment = {
+    scopeIndex: environment.scopeIndex,
+    scopeOf: () => aliasScope,
+    shadowedBuiltIns: environment.shadowedBuiltIns,
+  };
+  return classifyUnsafeDictionary(alias.typeAnnotation, bodyEnvironment) !== null;
+}
+
 function shouldReportType(node: ESTree.TSType, environment: TypeEnvironment): boolean {
   if (isPlainAliasConsumerUse(node, environment)) return false;
+  if (isGenericAliasWithUnsafeBody(node, environment)) return false;
   if (classifyUnsafeDictionary(node, environment) === null) return false;
   let current: ESTree.Node | null = node.parent;
   while (current !== null && current.type !== "Program") {
