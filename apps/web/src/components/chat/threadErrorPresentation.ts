@@ -48,7 +48,7 @@ const AGENT_BUSY_PATTERN =
 // does not match a bare "retry": account/billing failures end with the same
 // instruction but need user action first.
 const TRANSIENT_PATTERN =
-  /overload|(?:internal )?server error|service unavailable|bad gateway|temporarily unavailable|\b50[0-9]\b/i;
+  /overload|(?:internal )?server error|service unavailable|bad gateway|temporarily unavailable|\b5[0-9]{2}\b/i;
 
 // Client-side guidance errors ("Interrupt the current turn before reverting
 // checkpoints", "Only the latest rollbackable user message can be edited.") are
