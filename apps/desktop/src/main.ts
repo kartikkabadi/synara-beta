@@ -52,6 +52,12 @@ import {
 import type { ContextMenuItem, DiagnosticsEventInput } from "@synara/contracts";
 
 import { createDiagnosticsClient } from "./diagnosticsClient";
+import {
+  performStableImport,
+  resolveStableImportCandidate,
+  writeDeclinedMarker,
+  STABLE_IMPORT_MARKER_FILE,
+} from "./desktopStableImport";
 import { isKeyboardShortcutsHelpChord } from "@synara/shared/browserShortcuts";
 import { getMacTrafficLightPosition } from "@synara/shared/desktopChrome";
 import { DEVICE_HELPER_SOURCE_DIR_ENV } from "@synara/shared/deviceHelperCache";
@@ -5203,12 +5209,66 @@ if (!hasSingleInstanceLock) {
   });
 }
 
+/**
+ * One-time offer to bring conversation history, settings, keybindings, secrets,
+ * and the environment id from an existing Synara Stable home into the beta
+ * home. Runs before the backend opens the beta database. The decision marker
+ * makes sure the question is asked exactly once.
+ */
+async function offerStableDataImport(): Promise<void> {
+  const candidate = resolveStableImportCandidate({
+    betaBaseDir: BASE_DIR,
+    stableBaseDir: Path.join(OS.homedir(), ".synara"),
+    isDevelopment: isDevelopment,
+  });
+  if (!candidate.available) {
+    writeDesktopLogHeader(`stable import not offered (${candidate.reason})`);
+    return;
+  }
+  const markerPath = Path.join(candidate.targetStateDir, "migrations", STABLE_IMPORT_MARKER_FILE);
+  const { response } = await dialog.showMessageBox({
+    type: "question",
+    title: "Import from Synara",
+    message: "Import your data from Synara?",
+    detail:
+      "Conversation history, settings, keybindings, secrets, and the environment id will be " +
+      "copied into the beta's separate data directory. Your Synara installation is not " +
+      "modified. Quit Synara first if it is running, so the copy is clean.",
+    buttons: ["Import data", "Start fresh"],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (response !== 0) {
+    try {
+      writeDeclinedMarker(
+        Path.join(candidate.targetStateDir, "migrations", STABLE_IMPORT_MARKER_FILE),
+        candidate.sourceStateDir,
+        candidate.targetStateDir,
+      );
+    } catch {
+      // A missing decline marker only means the offer may repeat; never crash boot.
+    }
+    return;
+  }
+  const result = performStableImport({
+    candidate,
+    markerPath,
+    now: () => new Date(),
+  });
+  if (result.ok) {
+    writeDesktopLogHeader(`stable import completed: ${result.importedArtifacts.join(", ")}`);
+  } else {
+    writeDesktopLogHeader(`stable import failed: ${result.error ?? "unknown error"}`);
+  }
+}
+
 async function bootstrap(): Promise<void> {
   writeDesktopLogHeader("bootstrap start");
   recordDiagnosticsEvent({ kind: "app_start" });
   if (!(await requireCurrentDesktopMigrationBundle())) {
     return;
   }
+  await offerStableDataImport();
   // Ahead of the recovery gate on purpose. A startup that blocks below returns
   // early, and every path that could ship the fix for whatever blocked it lives
   // after that return: an install wedged on a bad migration would be unable to

@@ -22,6 +22,36 @@ import type { WhatsNewEntry } from "./logic";
 
 export const WHATS_NEW_ENTRIES: readonly WhatsNewEntry[] = [
   {
+    version: "0.8.3-beta.1",
+    date: "Sep 8",
+    features: [
+      {
+        id: "beta-one-click-updates",
+        title: "One-click updates",
+        description:
+          "Beta builds check for new betas in the background, download them quietly, and install with one click from the sidebar.",
+      },
+      {
+        id: "beta-import-from-stable",
+        title: "Bring your data with you",
+        description:
+          "On first run, the beta offers to copy your conversation history, settings, and keys from Synara Stable. Stable stays untouched.",
+      },
+      {
+        id: "beta-diagnostics",
+        title: "Diagnostics you can read",
+        description:
+          "Fully optional, off by default, and fully transparent: the Diagnostics settings panel shows every field that gets sent, why, and the exact payload.",
+      },
+      {
+        id: "beta-one-line-install",
+        title: "One-line install and signed checksums",
+        description:
+          "Install from one command on macOS, Linux, and Windows. Every download is checksum-verified against a signed manifest.",
+      },
+    ],
+  },
+  {
     version: "0.8.3",
     date: "Sep 6",
     features: [

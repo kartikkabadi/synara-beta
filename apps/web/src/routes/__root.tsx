@@ -29,6 +29,7 @@ import { DesktopWindowControls } from "../components/DesktopWindowControls";
 import { RunningChatsQuitCoordinator } from "../components/RunningChatsQuitCoordinator";
 import { AppSnapCoordinator } from "../components/AppSnapCoordinator";
 import { AppSnapWelcomeDialog } from "../components/AppSnapWelcomeDialog";
+import { BetaWelcomeDialog } from "../components/BetaWelcomeDialog";
 import { QueuedComposerDrainCoordinator } from "../components/QueuedComposerDrainCoordinator";
 import { FeedbackDialog } from "../components/FeedbackDialog";
 import { SETTINGS_TARGETS } from "../settingsNavigation";
@@ -307,6 +308,7 @@ function RootRouteView() {
           <TaskCompletionNotifications />
           <QueuedComposerDrainCoordinator />
           <AppSnapWelcomeDialog />
+          <BetaWelcomeDialog />
           <AppSnapCoordinator />
           <DesktopProjectBootstrap />
           <Outlet />
