@@ -16,11 +16,20 @@ tag=""
 tag_provided=0
 args=("$@")
 for ((i=0; i<${#args[@]}; i++)); do
-  if [[ "${args[i]}" == "--tag" && $((i+1)) -lt ${#args[@]} ]]; then
+  if [[ "${args[i]}" == "--tag" ]]; then
+    if ((i+1 >= ${#args[@]})) || [[ "${args[i+1]}" == -* ]]; then
+      echo "install.sh: --tag requires a value." >&2
+      exit 1
+    fi
     tag="${args[i+1]}"
     tag_provided=1
+    i=$((i+1))
   elif [[ "${args[i]}" == --tag=* ]]; then
     tag="${args[i]#--tag=}"
+    if [ -z "$tag" ]; then
+      echo "install.sh: --tag requires a value." >&2
+      exit 1
+    fi
     tag_provided=1
   fi
 done

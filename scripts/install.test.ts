@@ -216,6 +216,21 @@ describe("install.sh", () => {
     }
   });
 
+  it("rejects --tag without a value before resolving anything", () => {
+    for (const args of [["--tag"], ["--tag="], ["--tag", "--force"]]) {
+      const { sandbox } = makeSandbox({ uname: "Linux", releases: RELEASES });
+      try {
+        const result = tryBash(scriptPath, [...args], sandboxEnv(sandbox));
+        NodeAssert.equal(result.status, 1);
+        NodeAssert.match(result.stderr, /--tag requires a value/);
+        // Nothing may be fetched: the missing value must stop the script early.
+        NodeAssert.equal(NodeFS.existsSync(NodePath.join(sandbox, "fetched-urls.txt")), false);
+      } finally {
+        NodeFS.rmSync(sandbox, { recursive: true, force: true });
+      }
+    }
+  });
+
   it("refuses non-release refs before building any download URL", () => {
     for (const args of [["--tag", "main"], ["--tag=main"]]) {
       const { sandbox } = makeSandbox({ uname: "Linux", releases: RELEASES });
