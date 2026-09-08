@@ -1178,7 +1178,10 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   }
 
   if (options.platform === "mac") {
-    yield* assertPackagedMacDeviceHelper(stageDistDir, desktopPackageJson.productName ?? "Synara");
+    yield* assertPackagedMacDeviceHelper(
+      stageDistDir,
+      String(resolvedBuildConfig.buildConfig.productName),
+    );
   }
 
   if (options.platform === "mac" && options.target === "dmg" && options.signed) {
