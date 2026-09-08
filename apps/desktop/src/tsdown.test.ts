@@ -15,6 +15,7 @@ async function loadTsdownConfig(): Promise<TsdownUserConfig | undefined> {
   vi.resetModules();
   // tsdown.config is a build-time .mts module; Vitest resolves it at runtime.
   // @ts-expect-error -- native tsc does not resolve .mts without allowImportingTsExtensions.
+  // SAFETY: tsdown.config.mts always exports `defineConfig([...])`, so `default` is an array of user configs.
   const mod = (await import("../tsdown.config")) as { default: TsdownUserConfig[] };
   return mod.default.find((c: TsdownUserConfig) => {
     if (Array.isArray(c.entry)) {
