@@ -56,6 +56,7 @@ function runRules(
     if (!result.stdout) {
       throw new Error(`oxlint produced no JSON output (status ${result.status})`);
     }
+    // SAFETY: test fixture parses well-formed oxlint JSON output and filters by requested rule codes.
     const output = JSON.parse(result.stdout) as { diagnostics?: OxlintDiagnostic[] };
     const requestedCodes = new Set(Object.keys(rules).map((rule) => `${rule.replace("/", "(")})`));
     const byFile = new Map<string, string[]>();
@@ -514,6 +515,76 @@ describe("no-object-parameters", () => {
     expect(byFile.get("generic-default.ts")).toEqual(reported);
     expect(byFile.get("generic-arg.ts")).toEqual(reported);
     expect(byFile.get("typed-arg.ts")).toBeUndefined();
+  });
+});
+
+describe("scope and substitution regression", () => {
+  it("resolves index signatures from extended generic interfaces", () => {
+    const byFile = runRules(
+      {
+        "extends.ts":
+          "interface Base<T> { [key: string]: T; }\ninterface Box<T> extends Base<T> {}\nexport let b: Box<unknown> = {};\n",
+      },
+      { "anti-slop/no-unsafe-dictionary-type": "error" },
+    );
+    expect(byFile.get("extends.ts")).toEqual(["anti-slop(no-unsafe-dictionary-type)"]);
+  });
+
+  it("resolves mapped-type key aliases", () => {
+    const byFile = runRules(
+      {
+        "key-alias.ts":
+          "type Key = string;\nexport const x: { [K in Key]: unknown } = { a: 1 };\n",
+      },
+      { "anti-slop/no-known-value-widening": "error" },
+    );
+    expect(byFile.get("key-alias.ts")).toEqual(["anti-slop(no-known-value-widening)"]);
+  });
+
+  it("flags local aliases used as widening targets", () => {
+    const byFile = runRules(
+      {
+        "local-alias.ts":
+          "export function f() {\n  type Broad = Record<string, unknown>;\n  const x: Broad = { a: 1 };\n  return x;\n}\n",
+      },
+      { "anti-slop/no-known-value-widening": "error" },
+    );
+    expect(byFile.get("local-alias.ts")).toEqual(["anti-slop(no-known-value-widening)"]);
+  });
+
+  it("resolves nested generic aliases through consumer references", () => {
+    const byFile = runRules(
+      {
+        "nested-consumer.ts":
+          "export function f() {\n  type Box<T> = Record<string, T>;\n  type Params = Box<unknown>;\n  let p: Params = {};\n  return p;\n}\n",
+      },
+      { "anti-slop/no-unsafe-dictionary-type": "error" },
+    );
+    const reported = byFile.get("nested-consumer.ts") ?? [];
+    expect(reported).toContain("anti-slop(no-unsafe-dictionary-type)");
+    expect(reported.length).toBeLessThanOrEqual(2);
+  });
+
+  it("resolves generic alias arguments from the caller scope", () => {
+    const byFile = runRules(
+      {
+        "caller-scope.ts":
+          "type Box<T> = T;\nexport function f() {\n  type Arg = unknown;\n  return function inner(value: Box<Arg>) { return value; };\n}\n",
+      },
+      { "anti-slop/no-unknown-parameters": "error" },
+    );
+    expect(byFile.get("caller-scope.ts")).toEqual(["anti-slop(no-unknown-parameters)"]);
+  });
+
+  it("does not treat a nested Record alias as the built-in Record", () => {
+    const byFile = runRules(
+      {
+        "nested-shadow.ts":
+          'export function f() {\n  type Record<T> = { id: string };\n  const r: Record<string> = { id: "a" };\n  return r as { id: string };\n}\n',
+      },
+      { "anti-slop/no-widen-then-assert": "error" },
+    );
+    expect(byFile.get("nested-shadow.ts")).toBeUndefined();
   });
 });
 

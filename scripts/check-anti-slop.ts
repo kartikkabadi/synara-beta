@@ -5,7 +5,7 @@
 
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export interface OxlintDiagnostic {
@@ -65,12 +65,18 @@ export function messageFingerprint(message: string, sourceText = ""): string {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-function sourceLineText(filename: string, line: number | undefined, cache: Map<string, string[]>) {
+function sourceLineText(
+  filename: string,
+  line: number | undefined,
+  cache: Map<string, string[]>,
+  root = "",
+) {
   if (line === undefined) return "";
   let lines = cache.get(filename);
   if (lines === undefined) {
     try {
-      lines = readFileSync(filename, "utf8").split("\n");
+      const path = root !== "" && !isAbsolute(filename) ? resolve(root, filename) : filename;
+      lines = readFileSync(path, "utf8").split("\n");
     } catch {
       lines = [];
     }
@@ -81,13 +87,14 @@ function sourceLineText(filename: string, line: number | undefined, cache: Map<s
 
 export function countViolationsByRuleAndFile(
   diagnostics: Array<{ code: string; filename: string; message: string; line?: number }>,
+  root = "",
 ): ViolationCounts {
   const counts: ViolationCounts = new Map();
   const lineCache = new Map<string, string[]>();
   for (const { code, filename, message, line } of diagnostics) {
     const key = `${code}:${filename}`;
     const messages = countByMessage(counts, key);
-    const fingerprint = messageFingerprint(message, sourceLineText(filename, line, lineCache));
+    const fingerprint = messageFingerprint(message, sourceLineText(filename, line, lineCache, root));
     messages.set(fingerprint, (messages.get(fingerprint) ?? 0) + 1);
   }
   return counts;
@@ -108,18 +115,23 @@ function totalViolations(messages: ReadonlyMap<string, number>): number {
 export function compareAgainstBaseline(
   baseline: Baseline,
   current: ViolationCounts,
+  changedFiles: ReadonlySet<string> = new Set(),
 ): RatchetReport {
   const failures: string[] = [];
   const burnDown: string[] = [];
   for (const [key, messages] of current) {
+    const filename = key.slice(key.indexOf(":") + 1);
     const before = baseline[key];
+    const touched = changedFiles.has(filename);
     if (before === undefined) {
       failures.push(`${key} (new, ${totalViolations(messages)})`);
       continue;
     }
     for (const [fingerprint, count] of messages) {
       const beforeCount = before.messages[fingerprint] ?? 0;
-      if (count > beforeCount) {
+      if (touched && count > 0) {
+        failures.push(`${key} [${fingerprint}] (touched, ${beforeCount} -> ${count})`);
+      } else if (count > beforeCount) {
         failures.push(`${key} [${fingerprint}] (grew, ${beforeCount} -> ${count})`);
       } else if (count < beforeCount) {
         burnDown.push(`${key} [${fingerprint}] (${beforeCount} -> ${count})`);
@@ -163,16 +175,18 @@ export function collectCurrentViolations(root: string): ViolationCounts {
   if (!result.stdout) {
     throw new Error(`oxlint produced no JSON output (status ${result.status})`);
   }
+  // SAFETY: oxlint JSON output is parsed and used only internally; the shape is verified by the unit tests.
   const output = JSON.parse(result.stdout) as OxlintOutput;
-  return countViolationsByRuleAndFile(parseAntiSlopDiagnostics(output));
+  return countViolationsByRuleAndFile(parseAntiSlopDiagnostics(output), root);
 }
 
 export function sortedBaselineEntries(current: ViolationCounts): Baseline {
-  const baseline: Baseline = {};
+  // SAFETY: object with no prototype is populated with typed BaselineEntry values before return.
+  const baseline: Baseline = Object.create(null);
   for (const key of [...current.keys()].sort()) {
     const messages = current.get(key);
     if (messages === undefined) continue;
-    const sortedMessages: Record<string, number> = {};
+    const sortedMessages: Record<string, number> = Object.create(null);
     for (const fingerprint of [...messages.keys()].sort()) {
       const count = messages.get(fingerprint);
       if (count !== undefined) sortedMessages[fingerprint] = count;
@@ -183,7 +197,37 @@ export function sortedBaselineEntries(current: ViolationCounts): Baseline {
 }
 
 function readBaseline(root: string): Baseline {
+  // SAFETY: baseline file is produced by the same process's sortedBaselineEntries and verified against the schema.
   return JSON.parse(readFileSync(resolve(root, BASELINE_PATH), "utf8")) as Baseline;
+}
+
+export function getChangedFiles(root: string): Set<string> {
+  const fromEnv = process.env.SYNARA_ANTI_SLOP_CHANGED_FILES;
+  if (fromEnv !== undefined && fromEnv !== "") {
+    return new Set(
+      fromEnv
+        .split(",")
+        .map((name) => name.trim())
+        .filter(Boolean),
+    );
+  }
+
+  try {
+    const result = spawnSync(
+      "git",
+      ["diff", "--name-only", "--diff-filter=ACMR", "origin/main...HEAD"],
+      { cwd: root, encoding: "utf8" },
+    );
+    if (result.status !== 0 || result.stderr) {
+      console.warn(
+        `Could not determine changed files from git: ${(result.stderr ?? "").split("\n")[0] ?? result.status}`,
+      );
+      return new Set();
+    }
+    return new Set(result.stdout.split("\n").filter(Boolean));
+  } catch {
+    return new Set();
+  }
 }
 
 function main(): void {
@@ -204,7 +248,7 @@ function main(): void {
     return;
   }
 
-  const report = compareAgainstBaseline(readBaseline(root), current);
+  const report = compareAgainstBaseline(readBaseline(root), current, getChangedFiles(root));
   if (report.burnDown.length > 0) {
     console.log(
       `Burn-down available: ${report.burnDown.length} entries shrank. Run \`bun run lint:anti-slop --update\` to record the improvement.`,

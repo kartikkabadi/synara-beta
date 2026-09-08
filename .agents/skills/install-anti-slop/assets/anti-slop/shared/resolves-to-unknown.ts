@@ -1,13 +1,13 @@
 import type { ESTree } from "@oxlint/plugins";
 
-type Substitutions = ReadonlyMap<string, ESTree.TSType>;
+type Substitutions = ReadonlyMap<string, ESTree.TSType | boolean>;
+
+export type VisitorKeys = Readonly<Record<string, readonly string[]>>;
 
 export type Scope = {
   readonly parent: Scope | null;
   readonly aliases: Map<string, ESTree.TSTypeAliasDeclaration[]>;
 };
-
-type VisitorKeys = Readonly<Record<string, readonly string[]>>;
 
 const SCOPE_STARTERS = new Set([
   "Program",
@@ -94,8 +94,6 @@ export function createScopeIndex(program: ESTree.Program, visitorKeys: VisitorKe
 
 export type ScopeIndex = ReturnType<typeof createScopeIndex>;
 
-export type VisitorKeys = Readonly<Record<string, readonly string[]>>;
-
 function typeSignature(type: ESTree.TSType): string {
   const unwrapped = type.type === "TSParenthesizedType" ? type.typeAnnotation : type;
   if (unwrapped.type !== "TSTypeReference" || unwrapped.typeName.type !== "Identifier") {
@@ -108,35 +106,6 @@ function typeSignature(type: ESTree.TSType): string {
 /** Visit key for an alias body's self-reference, blocking direct alias cycles. */
 export function selfAliasVisitKey(name: string): string {
   return `${name}#${name}<>`;
-}
-
-function resolveSubstitutionArgument(
-  type: ESTree.TSType,
-  base: Substitutions,
-  resolving: ReadonlySet<string> = new Set(),
-): ESTree.TSType {
-  const unwrapped = type.type === "TSParenthesizedType" ? type.typeAnnotation : type;
-  if (unwrapped.type !== "TSTypeReference" || unwrapped.typeName.type !== "Identifier") {
-    return type;
-  }
-  const name = unwrapped.typeName.name;
-  const substitution = resolving.has(name) ? undefined : base.get(name);
-  const resolved = substitution === undefined ? type : substitution;
-  const arguments_ = unwrapped.typeArguments?.params;
-  if (arguments_ === undefined || arguments_.length === 0) return resolved;
-  const nextResolving = new Set(resolving);
-  nextResolving.add(name);
-  const substitutedArguments = arguments_.map((argument) =>
-    resolveSubstitutionArgument(argument, base, nextResolving),
-  );
-  const source = resolved.type === "TSTypeReference" ? resolved : unwrapped;
-  return {
-    ...source,
-    typeArguments: {
-      ...(unwrapped.typeArguments ?? { params: [] }),
-      params: substitutedArguments,
-    },
-  };
 }
 
 export type ScopedResolves = (
@@ -173,15 +142,27 @@ export function createScopedResolvesToUnknown(index: ScopeIndex): ScopedResolves
         resolvesToUnknownAt(member, scope, shadowedAliases, visited, substitutions),
       );
     }
+    if (type.type === "TSIntersectionType") {
+      return type.types.some((member) =>
+        resolvesToUnknownAt(member, scope, shadowedAliases, visited, substitutions),
+      );
+    }
     if (type.type !== "TSTypeReference" || type.typeName.type !== "Identifier") return false;
     const name = type.typeName.name;
     const visitKey = `${name}#${typeSignature(type)}`;
     const substitution = substitutions.get(name);
     if (substitution !== undefined) {
+      if (typeof substitution === "boolean") return substitution;
       if (visited.has(visitKey)) return false;
       const nextVisited = new Set(visited);
       nextVisited.add(visitKey);
-      return resolvesToUnknownAt(substitution, scope, shadowedAliases, nextVisited, substitutions);
+      return resolvesToUnknownAt(
+        substitution,
+        scope,
+        shadowedAliases,
+        nextVisited,
+        substitutions,
+      );
     }
     if (shadowedAliases.has(name) || visited.has(visitKey)) return false;
     const found = index.lookupAlias(name, scope);
@@ -204,9 +185,11 @@ export function createScopedResolvesToUnknown(index: ScopeIndex): ScopedResolves
     for (const [parameterIndex, parameter] of parameters.entries()) {
       const argument = arguments_[parameterIndex] ?? parameter.default;
       if (argument === null || argument === undefined) return false;
+      const nextVisited = new Set(visited);
+      nextVisited.add(visitKey);
       nextSubstitutions.set(
         parameter.name.name,
-        resolveSubstitutionArgument(argument, substitutions),
+        resolvesToUnknownAt(argument, scope, shadowedAliases, nextVisited, substitutions),
       );
     }
     const nextVisited = new Set(visited);

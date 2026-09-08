@@ -4,6 +4,9 @@
 //          and same-count message swaps are still caught.
 // Layer: Local developer tooling
 
+import { spawnSync } from "node:child_process";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -14,6 +17,8 @@ import {
   sortedBaselineEntries,
   type Baseline,
 } from "./check-anti-slop.ts";
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const FINGERPRINT_A = messageFingerprint("first message");
 const FINGERPRINT_B = messageFingerprint("second message");
@@ -189,6 +194,30 @@ describe("compareAgainstBaseline", () => {
       `anti-slop(no-runtime-typeof):a.ts [${FINGERPRINT_B}] (1 -> 0)`,
     ]);
   });
+
+  it("fails when a touched file still has a baselined violation", () => {
+    const baseline: Baseline = {
+      "anti-slop(no-runtime-typeof):touched.ts": entry(1, { [FINGERPRINT_A]: 1 }),
+    };
+    const current = countViolationsByRuleAndFile([
+      { code: "anti-slop(no-runtime-typeof)", filename: "touched.ts", message: "first message" },
+    ]);
+    const report = compareAgainstBaseline(baseline, current, new Set(["touched.ts"]));
+    expect(report.failures).toEqual([
+      `anti-slop(no-runtime-typeof):touched.ts [${FINGERPRINT_A}] (touched, 1 -> 1)`,
+    ]);
+    expect(report.burnDown).toEqual([]);
+  });
+
+  it("reports burn-down when a touched file has zero baselined violations", () => {
+    const baseline: Baseline = {
+      "anti-slop(no-runtime-typeof):touched.ts": entry(2, { [FINGERPRINT_A]: 2 }),
+    };
+    const current = countViolationsByRuleAndFile([]);
+    const report = compareAgainstBaseline(baseline, current, new Set(["touched.ts"]));
+    expect(report.failures).toEqual([]);
+    expect(report.burnDown).toEqual(["anti-slop(no-runtime-typeof):touched.ts (gone, 2 -> 0)"]);
+  });
 });
 
 describe("sortedBaselineEntries", () => {
@@ -209,5 +238,16 @@ describe("sortedBaselineEntries", () => {
     expect(entryForA?.messages && Object.keys(entryForA.messages)).toEqual(
       [FINGERPRINT_A, FINGERPRINT_B].sort(),
     );
+  });
+});
+
+describe("anti-slop plugin and skill copy sync", () => {
+  it("matches tools/oxlint/anti-slop against the bundled skill copy", () => {
+    const result = spawnSync("node", [resolve(repoRoot, "scripts/check-anti-slop-sync.ts")], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe("Anti-slop plugin and skill copy are synchronized.");
   });
 });

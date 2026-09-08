@@ -5,6 +5,8 @@ import type { ESTree, SourceCode } from "@oxlint/plugins";
 import { createScopeIndex, type Scope, type ScopeIndex } from "../shared/resolves-to-unknown.ts";
 import { lexicalTypeParameterNames } from "../shared/lexical-type-parameters.ts";
 
+type Substitutions = ReadonlyMap<string, ESTree.TSType | boolean>;
+
 type Parameter = ESTree.ParamPattern;
 type ParameterOwner =
   | ESTree.ArrowFunctionExpression
@@ -34,6 +36,15 @@ function parameterName(parameter: Parameter, sourceCode: SourceCode): string {
     : sourceCode.getText(parameter).replace(/\s*:\s*object\s*$/u, "");
 }
 
+function typeSignature(type: ESTree.TSType): string {
+  const unwrapped = type.type === "TSParenthesizedType" ? type.typeAnnotation : type;
+  if (unwrapped.type !== "TSTypeReference" || unwrapped.typeName.type !== "Identifier") {
+    return unwrapped.type;
+  }
+  const arguments_ = unwrapped.typeArguments?.params ?? [];
+  return `${unwrapped.typeName.name}<${arguments_.map(typeSignature).join(",")}>`;
+}
+
 /** Ban the broad object type on function inputs, including local aliases to object. */
 export const noObjectParametersRule = defineRule({
   meta: {
@@ -55,7 +66,7 @@ export const noObjectParametersRule = defineRule({
       scope: Scope | null,
       shadowedAliases: ReadonlySet<string>,
       visited: Set<string>,
-      substitutions: ReadonlyMap<string, ESTree.TSType>,
+      substitutions: Substitutions,
     ): boolean => {
       if (type.type === "TSObjectKeyword") return true;
       if (type.type === "TSParenthesizedType") {
@@ -74,11 +85,13 @@ export const noObjectParametersRule = defineRule({
       }
       if (type.type !== "TSTypeReference" || type.typeName.type !== "Identifier") return false;
       const name = type.typeName.name;
+      const visitKey = `${name}#${typeSignature(type)}`;
       const substitution = substitutions.get(name);
       if (substitution !== undefined) {
-        if (visited.has(name)) return false;
+        if (typeof substitution === "boolean") return substitution;
+        if (visited.has(visitKey)) return false;
         const nextVisited = new Set(visited);
-        nextVisited.add(name);
+        nextVisited.add(visitKey);
         return resolvesToObjectWith(
           substitution,
           scope,
@@ -94,17 +107,23 @@ export const noObjectParametersRule = defineRule({
       const parameters = alias.typeParameters?.params ?? [];
       const arguments_ = type.typeArguments?.params ?? [];
       if (arguments_.length > 0 && parameters.length === 0) return false;
+      const aliasScope = index?.scopeOf(alias) ?? null;
       const nextSubstitutions = new Map(substitutions);
       for (const [parameterIndex, parameter] of parameters.entries()) {
         const argument = arguments_[parameterIndex] ?? parameter.default;
         if (argument === null || argument === undefined) return false;
-        nextSubstitutions.set(parameter.name.name, argument);
+        const nextVisited = new Set(visited);
+        nextVisited.add(visitKey);
+        nextSubstitutions.set(
+          parameter.name.name,
+          resolvesToObjectWith(argument, scope, shadowedAliases, nextVisited, substitutions),
+        );
       }
       const nextVisited = new Set(visited);
-      nextVisited.add(name);
+      nextVisited.add(visitKey);
       return resolvesToObjectWith(
         alias.typeAnnotation,
-        index?.scopeOf(alias) ?? null,
+        aliasScope,
         shadowedAliases,
         nextVisited,
         nextSubstitutions,

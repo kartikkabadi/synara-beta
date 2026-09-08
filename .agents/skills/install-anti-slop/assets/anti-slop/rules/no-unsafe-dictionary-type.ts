@@ -70,8 +70,9 @@ function isPlainAliasConsumerUse(node: ESTree.TSType, environment: TypeEnvironme
   if (node.type !== "TSTypeReference" || node.typeArguments?.params.length) return false;
   const name = typeReferenceName(node);
   if (name === null || isInsideTypeAliasDeclaration(node)) return false;
-  const alias = environment.aliases.get(name);
-  return alias !== undefined && (alias.typeParameters?.params.length ?? 0) === 0;
+  const scope = environment.scopeOf(node);
+  const found = environment.scopeIndex?.lookupAlias(name, scope) ?? null;
+  return found !== null && !found.ambiguous && (found.alias.typeParameters?.params.length ?? 0) === 0;
 }
 
 function shouldReportType(node: ESTree.TSType, environment: TypeEnvironment): boolean {
@@ -113,7 +114,7 @@ export const noUnsafeDictionaryTypeRule = defineRule({
 
     return {
       Program(node) {
-        environment = createTypeEnvironment(node);
+        environment = createTypeEnvironment(node, context.sourceCode.visitorKeys);
       },
       TSTypeReference: reportIfUnsafe,
       TSTypeLiteral: reportIfUnsafe,
