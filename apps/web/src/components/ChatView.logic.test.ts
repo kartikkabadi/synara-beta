@@ -3253,4 +3253,45 @@ describe("releaseRetriedFailedSend", () => {
     expect(failedSends.has(threadId)).toBe(false);
     expect(cleared).toEqual([]);
   });
+
+  it("keeps the card when a newer failed send re-recorded the same error text — its snapshot must not be stranded", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    // Recording a snapshot does not bump the error version when the message is
+    // unchanged (setError no-ops on identical text), so the newer snapshot
+    // owning the card is the only signal that this is a different failure.
+    const newer = { errorMessage: "rate limited", errorVersion: 1 };
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, newer]]);
+    const cleared: ThreadId[] = [];
+    releaseRetriedFailedSend(
+      failedSends,
+      threadId,
+      null,
+      retriedError,
+      () => retriedError,
+      (id) => {
+        cleared.push(id);
+      },
+    );
+    expect(failedSends.get(threadId)).toBe(newer);
+    expect(cleared).toEqual([]);
+  });
+
+  it("keeps a replaced snapshot and its card when a newer failure owns the current error", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const newer = { errorMessage: "rate limited", errorVersion: 1 };
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, newer]]);
+    const cleared: ThreadId[] = [];
+    releaseRetriedFailedSend(
+      failedSends,
+      threadId,
+      snapshot,
+      retriedError,
+      () => retriedError,
+      (id) => {
+        cleared.push(id);
+      },
+    );
+    expect(failedSends.get(threadId)).toBe(newer);
+    expect(cleared).toEqual([]);
+  });
 });

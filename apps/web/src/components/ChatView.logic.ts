@@ -2040,7 +2040,20 @@ export function releaseRetriedFailedSend<S extends FailedSendErrorIdentity>(
     failedSends.delete(threadId);
   }
   const current = getCurrentError(threadId);
-  if (current.error === retriedError.error && current.errorVersion === retriedError.errorVersion) {
+  const currentSnapshot = failedSends.get(threadId);
+  // An identical error text can hide a newer failure: recording a snapshot does
+  // not bump the error version when the message is unchanged, so a snapshot
+  // that now owns the card — and is not the one this retry just released — is
+  // the only signal that the card belongs to a newer failure. Keep it.
+  const claimedByNewerSnapshot =
+    currentSnapshot !== undefined &&
+    currentSnapshot !== expectedSnapshot &&
+    failedSendSnapshotOwnsCurrentError(currentSnapshot, current);
+  if (
+    !claimedByNewerSnapshot &&
+    current.error === retriedError.error &&
+    current.errorVersion === retriedError.errorVersion
+  ) {
     clearError(threadId);
   }
 }

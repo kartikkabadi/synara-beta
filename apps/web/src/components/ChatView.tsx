@@ -11465,6 +11465,21 @@ export default function ChatView({
     // error identity this retry was initiated for — a newer failure landing in
     // between must keep both its card and its captured payload.
     const retriedError = getCurrentThreadErrorAndVersion(threadId);
+    let failedSend = failedThreadSendsRef.current.get(threadId) ?? null;
+    if (failedSend) {
+      // The snapshot only owns this card while the current error is still the
+      // generation that raised it. A stale snapshot must not replay its payload
+      // for a newer failure — drop it and fall through to the transcript path.
+      // An owned snapshot stays in the map until its resend is accepted: the
+      // send path clears it on dispatch and overwrites it on failure, so a
+      // rejected retry cannot strand the card without its payload.
+      if (
+        !failedSendSnapshotOwnsCurrentError(failedSend, getCurrentThreadErrorAndVersion(threadId))
+      ) {
+        failedThreadSendsRef.current.delete(threadId);
+        failedSend = null;
+      }
+    }
     const dispatchRetryTurn = (retryTurn: QueuedComposerChatTurn) => {
       if (hasQueueableLiveTurn) {
         enqueueQueuedComposerTurn(threadId, retryTurn);
@@ -11533,21 +11548,6 @@ export default function ChatView({
       interactionMode,
       envMode,
     });
-    let failedSend = failedThreadSendsRef.current.get(threadId) ?? null;
-    if (failedSend) {
-      // The snapshot only owns this card while the current error is still the
-      // generation that raised it. A stale snapshot must not replay its payload
-      // for a newer failure — drop it and fall through to the transcript path.
-      // An owned snapshot stays in the map until its resend is accepted: the
-      // send path clears it on dispatch and overwrites it on failure, so a
-      // rejected retry cannot strand the card without its payload.
-      if (
-        !failedSendSnapshotOwnsCurrentError(failedSend, getCurrentThreadErrorAndVersion(threadId))
-      ) {
-        failedThreadSendsRef.current.delete(threadId);
-        failedSend = null;
-      }
-    }
     if (failedSend) {
       const attachmentIdsMatch = (
         live: ReadonlyArray<{ id: string }>,
