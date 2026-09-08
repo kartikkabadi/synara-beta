@@ -8,6 +8,20 @@
 
 import { MAX_BATCH, UUID_PATTERN, validateEvent, type DiagnosticsEvent } from "./contract";
 
+// Minimal structural stand-ins for the Cloudflare D1 API. These keep the
+// worker dependency-free while the desktop/scripts test suite imports it.
+interface D1PreparedStatement {
+  bind(...values: unknown[]): D1PreparedStatement;
+  first<T = unknown>(): Promise<T | null>;
+  all<T = unknown>(): Promise<{ results: T[] }>;
+  run(): Promise<unknown>;
+}
+
+interface D1Database {
+  prepare(sql: string): D1PreparedStatement;
+  batch(statements: D1PreparedStatement[]): Promise<unknown[]>;
+}
+
 export interface Env {
   DB: D1Database;
 }
@@ -18,24 +32,27 @@ export default {
     if (request.method === "GET" && url.pathname === "/health") {
       return Response.json({ ok: true });
     }
-    if (request.method === "GET" && url.pathname === "/v1/stats") {
-      return handleStats(env);
-    }
     if (request.method === "POST" && url.pathname === "/v1/events") {
       return handleIngest(request, env);
     }
     return new Response("Not found", { status: 404 });
   },
   // Enforces the documented 90-day retention without an operator-run job.
-  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+  async scheduled(_controller: unknown, env: Env): Promise<void> {
     const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
     await env.DB.prepare("DELETE FROM events WHERE received_at < ?").bind(cutoff).run();
   },
-} satisfies ExportedHandler<Env>;
+};
 
 const RETENTION_DAYS = 90;
+const MAX_BODY_BYTES = 1024 * 1024;
 
 async function handleIngest(request: Request, env: Env): Promise<Response> {
+  const contentLength = request.headers.get("content-length");
+  if (contentLength !== null && Number(contentLength) > MAX_BODY_BYTES) {
+    return Response.json({ error: "body too large" }, { status: 413 });
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -140,41 +157,4 @@ async function withinRateLimit(env: Env, installId: string, incoming: number): P
     .bind(installId, windowStart)
     .first<{ count: number }>();
   return (row?.count ?? 0) + incoming <= PER_INSTALL_HOURLY_LIMIT;
-}
-
-async function handleStats(env: Env): Promise<Response> {
-  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-  const byKind = await env.DB.prepare(
-    "SELECT kind AS bucket, COUNT(*) AS count FROM events WHERE received_at >= ? GROUP BY kind",
-  )
-    .bind(since)
-    .all<{ bucket: string; count: number }>();
-  const byVersion = await env.DB.prepare(
-    "SELECT app_version AS bucket, COUNT(*) AS count FROM events WHERE received_at >= ? GROUP BY app_version",
-  )
-    .bind(since)
-    .all<{ bucket: string; count: number }>();
-  const byPlatform = await env.DB.prepare(
-    "SELECT platform AS bucket, COUNT(*) AS count FROM events WHERE received_at >= ? GROUP BY platform",
-  )
-    .bind(since)
-    .all<{ bucket: string; count: number }>();
-  const total = await env.DB.prepare("SELECT COUNT(*) AS count FROM events").first<{
-    count: number;
-  }>();
-  return Response.json({
-    window: "30d",
-    total: total?.count ?? 0,
-    byKind: toCounts(byKind.results),
-    byVersion: toCounts(byVersion.results),
-    byPlatform: toCounts(byPlatform.results),
-  });
-}
-
-function toCounts(rows: Array<{ bucket: string; count: number }>): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const row of rows) {
-    counts[row.bucket] = Number(row.count ?? 0);
-  }
-  return counts;
 }
