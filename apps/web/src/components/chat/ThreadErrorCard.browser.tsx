@@ -53,8 +53,7 @@ function ThreadErrorCardHost({
   );
 }
 
-const cardEl = () =>
-  document.querySelector<HTMLElement>('[data-slot="thread-error-card"]');
+const cardEl = () => document.querySelector<HTMLElement>('[data-slot="thread-error-card"]');
 const cardInnerText = () => cardEl()?.innerText ?? "";
 
 function cardButtons() {
@@ -92,9 +91,7 @@ describe("floating thread error card", () => {
   it("animates out when the error clears", async () => {
     let setError: (value: string | null) => void = () => {};
     function Host() {
-      const [error, set] = useState<string | null>(
-        'SocketOpenError: timeout waiting for "open"',
-      );
+      const [error, set] = useState<string | null>('SocketOpenError: timeout waiting for "open"');
       setError = set;
       return <ThreadErrorCardHost threadError={error} onDismiss={() => set(null)} />;
     }
@@ -175,13 +172,7 @@ describe("floating thread error card", () => {
 
   it("expands and collapses raw error details", async () => {
     const raw = '{"ok":false,"context":{"stage":"stream-parsing"}}';
-    await render(
-      <ThreadErrorCardHost
-        threadError={raw}
-        onDismiss={() => {}}
-        onRetry={() => {}}
-      />,
-    );
+    await render(<ThreadErrorCardHost threadError={raw} onDismiss={() => {}} onRetry={() => {}} />);
 
     await expect.poll(() => findCardButton("Details")).toBeDefined();
     const detailsButton = findCardButton("Details");

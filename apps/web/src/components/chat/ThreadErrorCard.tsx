@@ -141,15 +141,12 @@ export function ThreadErrorCard({
     return () => window.clearInterval(id);
   }, [rateLimitStatus?.resetsAt]);
 
-  const rateLimitResetMs = rateLimitStatus?.resetsAt
-    ? Date.parse(rateLimitStatus.resetsAt)
-    : null;
+  const rateLimitResetMs = rateLimitStatus?.resetsAt ? Date.parse(rateLimitStatus.resetsAt) : null;
   const rateLimitSecondsLeft =
     rateLimitResetMs != null && !Number.isNaN(rateLimitResetMs)
       ? Math.max(0, Math.ceil((rateLimitResetMs - nowMs) / 1000))
       : 0;
-  const rateLimitBlocked =
-    presentation.kind === "rate-limit" && rateLimitSecondsLeft > 0;
+  const rateLimitBlocked = presentation.kind === "rate-limit" && rateLimitSecondsLeft > 0;
 
   // Retry stepper state.
   const [retryStep, setRetryStep] = useState<RetryStep>("idle");
@@ -184,10 +181,8 @@ export function ThreadErrorCard({
   // Details accordion.
   const [detailsOpen, setDetailsOpen] = useState(false);
 
-  const canRetry =
-    presentation.retryable && onRetry && !isRetrying && !rateLimitBlocked;
-  const canUnblock =
-    presentation.canUnblock && onUnblock && !unblocking && !isRetrying;
+  const canRetry = presentation.retryable && onRetry && !isRetrying && !rateLimitBlocked;
+  const canUnblock = presentation.canUnblock && onUnblock && !unblocking && !isRetrying;
 
   const actionVariant = isWarning ? "warning-outline" : "destructive-outline";
 
@@ -207,9 +202,7 @@ export function ThreadErrorCard({
           {isRetrying ? (
             <LoaderIcon className="size-4 animate-spin text-[var(--color-text-foreground-tertiary)]" />
           ) : (
-            <ErrorIcon
-              className={cn("size-4", isWarning ? "text-warning" : "text-destructive")}
-            />
+            <ErrorIcon className={cn("size-4", isWarning ? "text-warning" : "text-destructive")} />
           )}
         </span>
         {isRetrying ? (
@@ -296,7 +289,11 @@ export function ThreadErrorCard({
           title={detailsOpen ? "Hide error details" : "Show error details"}
           variant="ghost"
         >
-          {detailsOpen ? <ChevronUpIcon className="size-3" /> : <ChevronDownIcon className="size-3" />}
+          {detailsOpen ? (
+            <ChevronUpIcon className="size-3" />
+          ) : (
+            <ChevronDownIcon className="size-3" />
+          )}
           <span>{detailsOpen ? "Hide" : "Details"}</span>
         </Button>
         <Button
