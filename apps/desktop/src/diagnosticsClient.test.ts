@@ -129,7 +129,9 @@ describe("diagnosticsClient", () => {
     client.setEnabled(true);
     client.record({ kind: "app_start" });
     client.setEnabled(false);
+    // SAFETY: the test just wrote these files, so the persisted shapes are known.
     const queueFile = JSON.parse(readFileSync(join(stateDir, QUEUE_FILE), "utf8")) as unknown[];
+    // SAFETY: the test just wrote the state file, so the persisted shape is known.
     const stateFile = JSON.parse(readFileSync(join(stateDir, STATE_FILE), "utf8")) as {
       enabled: boolean;
     };
@@ -190,7 +192,11 @@ describe("diagnosticsClient", () => {
       stateDir,
       sanitizeContext,
       flushIntervalMs: 0,
+      // SAFETY: the test stub does not read its arguments; the signature cast only
+      // adapts the arrow to the fetch type.
       fetchImpl: (async (_url, init) => {
+        // SAFETY: the test controls both sides of this fetch; the body it wrote is
+        // the JSON it passed in, so the shape cast cannot be wrong.
         const parsedBody = JSON.parse(String(init?.body)) as { events: unknown[] };
         bodies.push(parsedBody);
         return new Response(null, { status: 204 });
@@ -225,6 +231,8 @@ describe("diagnosticsClient", () => {
       stateDir,
       sanitizeContext,
       flushIntervalMs: 0,
+      // SAFETY: the test stub immediately returns a pending promise; the signature
+      // cast only adapts the arrow to the fetch type.
       fetchImpl: (async () =>
         new Promise((res) => {
           resolve = res;
@@ -247,6 +255,8 @@ describe("diagnosticsClient", () => {
       stateDir,
       sanitizeContext,
       flushIntervalMs: 0,
+      // SAFETY: the test stub immediately returns a pending promise; the signature
+      // cast only adapts the arrow to the fetch type.
       fetchImpl: (async () =>
         new Promise((res) => {
           resolve = res;
