@@ -8,6 +8,7 @@ export type Scope = {
   readonly parent: Scope | null;
   readonly aliases: Map<string, ESTree.TSTypeAliasDeclaration[]>;
   readonly interfaces: Map<string, ESTree.TSInterfaceDeclaration[]>;
+  readonly depth: number;
 };
 
 const SCOPE_STARTERS = new Set([
@@ -17,6 +18,40 @@ const SCOPE_STARTERS = new Set([
   "SwitchStatement",
   "TSModuleBlock",
 ]);
+
+const BUILT_IN_TYPE_WRAPPERS = new Set(["Promise", "PromiseLike"]);
+
+function isBuiltInTypeWrapper(name: string): boolean {
+  return BUILT_IN_TYPE_WRAPPERS.has(name);
+}
+
+function collectShadowedTypeWrappers(program: ESTree.Program): ReadonlySet<string> {
+  const shadowed = new Set<string>();
+  for (const statement of program.body) {
+    if (statement.type === "ImportDeclaration") {
+      for (const specifier of statement.specifiers) {
+        if (isBuiltInTypeWrapper(specifier.local.name)) shadowed.add(specifier.local.name);
+      }
+      continue;
+    }
+    const declaration =
+      statement.type === "ExportNamedDeclaration" || statement.type === "ExportDefaultDeclaration"
+        ? statement.declaration
+        : statement;
+    if (
+      declaration !== null &&
+      declaration !== undefined &&
+      "id" in declaration &&
+      declaration.id !== null &&
+      declaration.id !== undefined &&
+      declaration.id.type === "Identifier" &&
+      isBuiltInTypeWrapper(declaration.id.name)
+    ) {
+      shadowed.add(declaration.id.name);
+    }
+  }
+  return shadowed;
+}
 
 function isNode(value: unknown): value is ESTree.Node {
   return (
@@ -67,7 +102,7 @@ function indexScopes(
 
 function scopeForChild(child: ESTree.Node, scope: Scope): Scope {
   return SCOPE_STARTERS.has(child.type)
-    ? { parent: scope, aliases: new Map(), interfaces: new Map() }
+    ? { parent: scope, aliases: new Map(), interfaces: new Map(), depth: scope.depth + 1 }
     : scope;
 }
 
@@ -79,8 +114,9 @@ function scopeForChild(child: ESTree.Node, scope: Scope): Scope {
  * matching TypeScript.
  */
 export function createScopeIndex(program: ESTree.Program, visitorKeys: VisitorKeys): ScopeIndex {
-  const rootScope: Scope = { parent: null, aliases: new Map(), interfaces: new Map() };
+  const rootScope: Scope = { parent: null, aliases: new Map(), interfaces: new Map(), depth: 0 };
   const nodeScopes = new Map<ESTree.Node, Scope>();
+  const shadowedBuiltInWrappers = collectShadowedTypeWrappers(program);
   for (const statement of program.body) {
     indexScopes(statement, rootScope, nodeScopes, visitorKeys);
   }
@@ -113,6 +149,7 @@ export function createScopeIndex(program: ESTree.Program, visitorKeys: VisitorKe
     scopeOf: (node) => nodeScopes.get(node) ?? null,
     lookupAlias,
     lookupInterface,
+    isBuiltInShadowed: (name) => shadowedBuiltInWrappers.has(name),
     allAliases: () => [...nodeScopes.keys()].filter(isAliasDeclaration),
   };
 }
@@ -143,7 +180,7 @@ export type ScopedResolves = (
 
 /** Builds a scope-aware resolver that decides whether a type annotation resolves to `unknown`. */
 export function createScopedResolvesToUnknown(index: ScopeIndex): ScopedResolves {
-  const rootScope: Scope = { parent: null, aliases: new Map() };
+  const rootScope: Scope = { parent: null, aliases: new Map(), interfaces: new Map(), depth: 0 };
 
   const resolvesToUnknownAt = (
     type: ESTree.TSType,
@@ -168,7 +205,7 @@ export function createScopedResolvesToUnknown(index: ScopeIndex): ScopedResolves
       );
     }
     if (type.type === "TSIntersectionType") {
-      return type.types.some((member) =>
+      return type.types.every((member) =>
         resolvesToUnknownAt(member, scope, shadowedAliases, visited, substitutions),
       );
     }
@@ -187,6 +224,9 @@ export function createScopedResolvesToUnknown(index: ScopeIndex): ScopedResolves
     const found = index.lookupAlias(name, scope);
     if (found === null) {
       if (name === "Promise" || name === "PromiseLike") {
+        if (index.lookupInterface(name, scope) !== null || index.isBuiltInShadowed(name)) {
+          return false;
+        }
         const value = type.typeArguments?.params[0];
         return (
           value !== undefined &&
