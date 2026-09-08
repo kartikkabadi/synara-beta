@@ -310,6 +310,41 @@ describe("no-unsafe-dictionary-type", () => {
     expect(byFile.get("generic-interface.ts")).toEqual(["anti-slop(no-unsafe-dictionary-type)"]);
   });
 
+  it("resolves generic interface extends with different parameter names", () => {
+    const byFile = runRules(
+      {
+        "mismatched-interface.ts":
+          "interface Base<T> { [key: string]: T }\ninterface Box<U> extends Base<U> {}\nexport let b: Box<unknown> = {};\n",
+      },
+      { "anti-slop/no-unsafe-dictionary-type": "error" },
+    );
+    expect(byFile.get("mismatched-interface.ts")).toEqual(["anti-slop(no-unsafe-dictionary-type)"]);
+  });
+
+  it("resolves aliases in Record value position", () => {
+    const byFile = runRules(
+      {
+        "alias-value.ts": "type M = unknown;\nexport let d: Record<string, M> = {};\n",
+        "nested-alias-value.ts":
+          "export function f() {\n  type M = unknown;\n  let d: Record<string, M> = {};\n  return d;\n}\n",
+      },
+      { "anti-slop/no-unsafe-dictionary-type": "error" },
+    );
+    expect(byFile.get("alias-value.ts")).toEqual(["anti-slop(no-unsafe-dictionary-type)"]);
+    expect(byFile.get("nested-alias-value.ts")).toEqual(["anti-slop(no-unsafe-dictionary-type)"]);
+  });
+
+  it("resolves generic defaults that reference earlier type parameters", () => {
+    const byFile = runRules(
+      {
+        "sibling-default.ts":
+          "type F<T, U = T> = Record<string, U>;\nexport let x: F<unknown> = {};\n",
+      },
+      { "anti-slop/no-unsafe-dictionary-type": "error" },
+    );
+    expect(byFile.get("sibling-default.ts")).toEqual(["anti-slop(no-unsafe-dictionary-type)"]);
+  });
+
   it("treats imported built-in names as shadowed regardless of import kind", () => {
     const byFile = runRules(
       {
@@ -576,15 +611,15 @@ describe("scope and substitution regression", () => {
     expect(byFile.get("caller-scope.ts")).toEqual(["anti-slop(no-unknown-parameters)"]);
   });
 
-  it("does not treat a nested Record alias as the built-in Record", () => {
+  it("does not treat a same-scope Record alias as the built-in Record", () => {
     const byFile = runRules(
       {
-        "nested-shadow.ts":
-          'export function f() {\n  type Record<T> = { id: string };\n  const r: Record<string> = { id: "a" };\n  return r as { id: string };\n}\n',
+        "shadow-record.ts":
+          'type Record<A, B> = { id: string };\nconst r: Record<string, unknown> = { id: "a" };\nexport const result = r as { id: string };\n',
       },
       { "anti-slop/no-widen-then-assert": "error" },
     );
-    expect(byFile.get("nested-shadow.ts")).toBeUndefined();
+    expect(byFile.get("shadow-record.ts")).toBeUndefined();
   });
 });
 

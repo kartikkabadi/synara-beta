@@ -50,42 +50,14 @@ export type WideningTarget = {
 
 export type TypeEnvironment = {
   readonly scopeIndex: ScopeIndex | null;
-  readonly interfaces: ReadonlyMap<string, readonly ESTree.TSInterfaceDeclaration[]>;
   readonly scopeOf: (node: ESTree.Node) => Scope | null;
   readonly shadowedBuiltIns: ReadonlySet<string>;
 };
 
 type MutableEnvironment = {
   scopeIndex: ScopeIndex | null;
-  interfaces: Map<string, ESTree.TSInterfaceDeclaration[]>;
   visitorKeys: VisitorKeys | null;
 };
-
-function isNode(value: unknown): value is ESTree.Node {
-  return (
-    typeof value === "object" && value !== null && "type" in value && typeof value.type === "string"
-  );
-}
-
-function collectTypeDeclarations(node: ESTree.Node, environment: MutableEnvironment): void {
-  if (node.type === "TSInterfaceDeclaration") {
-    const declarations = environment.interfaces.get(node.id.name) ?? [];
-    declarations.push(node);
-    environment.interfaces.set(node.id.name, declarations);
-  }
-  const record = node as unknown as Readonly<Record<string, unknown>>;
-  for (const key of (environment.visitorKeys?.[node.type] ?? [])) {
-    const value = record[key];
-    if (isNode(value)) {
-      collectTypeDeclarations(value, environment);
-      continue;
-    }
-    if (!Array.isArray(value)) continue;
-    for (const child of value) {
-      if (isNode(child)) collectTypeDeclarations(child, environment);
-    }
-  }
-}
 
 function isBuiltInName(name: string): boolean {
   return BUILT_INS.has(name);
@@ -125,19 +97,11 @@ export function createTypeEnvironment(
   visitorKeys: VisitorKeys | null = null,
 ): TypeEnvironment {
   const environment: MutableEnvironment = {
-    scopeIndex: null,
-    interfaces: new Map(),
+    scopeIndex: visitorKeys !== null ? createScopeIndex(program, visitorKeys) : null,
     visitorKeys,
   };
-  if (visitorKeys !== null) {
-    environment.scopeIndex = createScopeIndex(program, visitorKeys);
-  }
-  for (const statement of program.body) {
-    collectTypeDeclarations(statement, environment);
-  }
   return {
     scopeIndex: environment.scopeIndex,
-    interfaces: environment.interfaces,
     scopeOf: (node) => environment.scopeIndex?.scopeOf(node) ?? null,
     shadowedBuiltIns: collectShadowedBuiltIns(program),
   };
@@ -211,22 +175,24 @@ function resolvedSubstitutionArgument(
   base: TypeAliasEnvironment,
   scope: Scope | null,
   resolving: ReadonlySet<string> = new Set(),
+  local: TypeAliasEnvironment | null = null,
 ): ResolvedSubstitution {
   const unwrapped = unwrapTransparentType(type);
+  const substitutions = local ?? base;
   if (unwrapped.type !== "TSTypeReference") {
-    return { type, scope, substitutions: base };
+    return { type, scope, substitutions };
   }
   const name = typeReferenceName(unwrapped);
   if (name === null || resolving.has(name)) {
-    return { type, scope, substitutions: base };
+    return { type, scope, substitutions };
   }
   // Resolve one level through the caller's own substitutions so nested
   // generic arguments keep their original scope.
-  const direct = base.get(name);
+  const direct = base.get(name) ?? local?.get(name);
   if (direct !== undefined) {
     return direct;
   }
-  return { type, scope, substitutions: base };
+  return { type, scope, substitutions };
 }
 
 function substitutionEnvironment(
@@ -240,9 +206,10 @@ function substitutionEnvironment(
   for (const [index, parameter] of (parameters ?? []).entries()) {
     const argument = arguments_[index] ?? parameter.default;
     if (argument === null || argument === undefined) return null;
+    const isDefault = arguments_[index] === undefined;
     next.set(
       parameter.name.name,
-      resolvedSubstitutionArgument(argument, base, scope, new Set()),
+      resolvedSubstitutionArgument(argument, base, scope, new Set(), isDefault ? next : null),
     );
   }
   return next;
@@ -268,28 +235,22 @@ function findAlias(
 function findInterface(
   name: string,
   environment: TypeEnvironment,
-): readonly ESTree.TSInterfaceDeclaration[] | undefined {
-  return environment.interfaces.get(name);
+  scope: Scope | null,
+): readonly ESTree.TSInterfaceDeclaration[] | null {
+  return environment.scopeIndex?.lookupInterface(name, scope) ?? null;
 }
 
 function collectInterfaceIndexSignatures(
   declaration: ESTree.TSInterfaceDeclaration,
   name: string,
-  typeArguments: ESTree.TSTypeParameterInstantiation | null,
-  base: TypeAliasEnvironment,
+  interfaceSubstitutions: TypeAliasEnvironment,
   environment: TypeEnvironment,
   resolvingAliases: ReadonlySet<string>,
   resolvingInterfaces: ReadonlySet<string>,
 ): ResolvedType[] {
   if (resolvingInterfaces.has(name)) return [];
   const nextResolvingInterfaces = new Set([...resolvingInterfaces, name]);
-  const interfaceSubstitutions = substitutionEnvironment(
-    declaration.typeParameters?.params,
-    typeArguments?.params,
-    base,
-    null,
-  );
-  if (interfaceSubstitutions === null) return [];
+  const declarationScope = environment.scopeOf(declaration);
 
   const results: ResolvedType[] = [];
   for (const member of declaration.body.body) {
@@ -302,21 +263,20 @@ function collectInterfaceIndexSignatures(
     const extendName =
       extend.expression.type === "Identifier" ? (extend.expression as ESTree.IdentifierReference).name : null;
     if (extendName === null) continue;
-    const baseDeclarations = findInterface(extendName, environment);
-    if (baseDeclarations === undefined) continue;
+    const baseDeclarations = findInterface(extendName, environment, declarationScope);
+    if (baseDeclarations === null) continue;
     for (const baseDeclaration of baseDeclarations) {
       const baseSubstitutions = substitutionEnvironment(
         baseDeclaration.typeParameters?.params,
         extend.typeArguments?.params,
         interfaceSubstitutions,
-        null,
+        declarationScope,
       );
       if (baseSubstitutions === null) continue;
       results.push(
         ...collectInterfaceIndexSignatures(
           baseDeclaration,
           extendName,
-          extend.typeArguments,
           baseSubstitutions,
           environment,
           resolvingAliases,
@@ -380,15 +340,21 @@ function unsafeDirectValue(
     return value === null ? null : unsafeDirectValue(value, environment, substitutions, resolvingAliases, scope);
   }
 
-  const interfaceDeclarations = findInterface(name, environment);
-  if (interfaceDeclarations !== undefined) {
+  const interfaceDeclarations = findInterface(name, environment, scope);
+  if (interfaceDeclarations !== null) {
     if (isEffectivelyEmptyInterface(interfaceDeclarations)) return "empty-object";
     for (const declaration of interfaceDeclarations) {
+      const interfaceSubstitutions = substitutionEnvironment(
+        declaration.typeParameters?.params,
+        unwrapped.typeArguments?.params,
+        substitutions,
+        scope,
+      );
+      if (interfaceSubstitutions === null) continue;
       const indexSignatures = collectInterfaceIndexSignatures(
         declaration,
         name,
-        unwrapped.typeArguments,
-        substitutions,
+        interfaceSubstitutions,
         environment,
         resolvingAliases,
         new Set(),
@@ -399,7 +365,7 @@ function unsafeDirectValue(
           environment,
           valueSubstitutions,
           resolvingAliases,
-          null,
+          environment.scopeOf(valueType) ?? scope,
         );
         if (unsafe !== null) return unsafe;
       }
@@ -471,16 +437,22 @@ function dictionaryValueTypes(
       : dictionaryValueTypes(source, environment, substitutions, resolvingAliases, scope);
   }
 
-  const interfaceDeclarations = findInterface(name, environment);
-  if (interfaceDeclarations !== undefined) {
+  const interfaceDeclarations = findInterface(name, environment, scope);
+  if (interfaceDeclarations !== null) {
     const results: ResolvedType[] = [];
     for (const declaration of interfaceDeclarations) {
+      const interfaceSubstitutions = substitutionEnvironment(
+        declaration.typeParameters?.params,
+        unwrapped.typeArguments?.params,
+        substitutions,
+        scope,
+      );
+      if (interfaceSubstitutions === null) continue;
       results.push(
         ...collectInterfaceIndexSignatures(
           declaration,
           name,
-          unwrapped.typeArguments,
-          substitutions,
+          interfaceSubstitutions,
           environment,
           resolvingAliases,
           new Set(),
@@ -528,7 +500,7 @@ export function classifyUnsafeDictionary(
       environment,
       substitutions,
       new Set(),
-      null,
+      environment.scopeOf(valueType) ?? scope,
     );
     if (unsafeValue !== null) return { kind: "unsafe-dictionary", unsafeValue };
   }

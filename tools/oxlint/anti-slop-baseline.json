@@ -5098,8 +5098,13 @@
     }
   },
   "anti-slop(no-known-value-widening):apps/desktop/src/browserWebMcp/guestBridge.ts": {
-    "total": 1,
+    "total": 6,
     "messages": {
+      "09b0b6fe": 1,
+      "2481215d": 1,
+      "298ac31f": 1,
+      "341437b4": 1,
+      "6606b7b6": 1,
       "cba9d132": 1
     }
   },
@@ -7235,12 +7240,6 @@
       "ed47c3b8": 1
     }
   },
-  "anti-slop(no-known-value-widening):scripts/check-anti-slop.ts": {
-    "total": 1,
-    "messages": {
-      "eb67e730": 1
-    }
-  },
   "anti-slop(no-known-value-widening):scripts/check-migration-lineage.ts": {
     "total": 1,
     "messages": {
@@ -7307,12 +7306,6 @@
     "messages": {
       "029220ce": 1,
       "0d2b6377": 1
-    }
-  },
-  "anti-slop(no-known-value-widening):scripts/verify-packaged-desktop-startup.ts": {
-    "total": 1,
-    "messages": {
-      "8da9d288": 1
     }
   },
   "anti-slop(no-module-mocking):apps/desktop/src/browserAutomation/browserManagerAutomation.test.ts": {
@@ -16192,11 +16185,13 @@
     }
   },
   "anti-slop(no-unsafe-dictionary-type):apps/desktop/src/browserWebMcp/guestBridge.ts": {
-    "total": 3,
+    "total": 5,
     "messages": {
+      "1e7348fa": 1,
       "2a1254e4": 1,
       "70c7c123": 1,
-      "8f036f5e": 1
+      "8f036f5e": 1,
+      "eef18157": 1
     }
   },
   "anti-slop(no-unsafe-dictionary-type):apps/desktop/src/desktopCustomTitleBar.ts": {
@@ -16360,7 +16355,6 @@
       "6a54f20a": 1,
       "6ce7b73a": 1,
       "7104b925": 1,
-      "7a86d809": 1,
       "8cbd1d7d": 2,
       "a0328124": 1,
       "a087affd": 1,
@@ -16376,7 +16370,8 @@
       "f70e93f9": 1,
       "fb82568a": 1,
       "fbfe0ec7": 1,
-      "fdeacb7a": 1
+      "fdeacb7a": 1,
+      "ffc76ff8": 1
     }
   },
   "anti-slop(no-unsafe-dictionary-type):apps/server/src/agentGateway/Layers/AgentGateway.ts": {
@@ -24551,12 +24546,6 @@
       "df8b5a7a": 1
     }
   },
-  "anti-slop(require-safety-comment-for-type-assertion):scripts/anti-slop-rules.test.ts": {
-    "total": 1,
-    "messages": {
-      "c879d60b": 1
-    }
-  },
   "anti-slop(require-safety-comment-for-type-assertion):scripts/build-desktop-artifact-mac-config.test.ts": {
     "total": 3,
     "messages": {
@@ -24572,13 +24561,6 @@
       "18ce47a3": 1,
       "7b7149e2": 1,
       "85e64840": 1
-    }
-  },
-  "anti-slop(require-safety-comment-for-type-assertion):scripts/check-anti-slop.ts": {
-    "total": 2,
-    "messages": {
-      "aee2b086": 1,
-      "f77619ec": 1
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):scripts/dev-runner.test.ts": {

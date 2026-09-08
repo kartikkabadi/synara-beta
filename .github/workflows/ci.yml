@@ -71,6 +71,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fetch PR base ref
+        if: github.base_ref != ''
+        run: git fetch origin ${{ github.base_ref }} --depth=100
 
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
@@ -88,6 +94,8 @@ jobs:
         run: bun run lint
 
       - name: Anti-slop ratchet
+        env:
+          SYNARA_ANTI_SLOP_BASE_REF: ${{ github.base_ref != '' && format('origin/{0}', github.base_ref) || 'origin/main' }}
         run: bun run lint:anti-slop
 
   static-typecheck:

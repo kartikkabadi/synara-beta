@@ -7,6 +7,7 @@ export type VisitorKeys = Readonly<Record<string, readonly string[]>>;
 export type Scope = {
   readonly parent: Scope | null;
   readonly aliases: Map<string, ESTree.TSTypeAliasDeclaration[]>;
+  readonly interfaces: Map<string, ESTree.TSInterfaceDeclaration[]>;
 };
 
 const SCOPE_STARTERS = new Set([
@@ -27,6 +28,10 @@ function isAliasDeclaration(node: ESTree.Node): node is ESTree.TSTypeAliasDeclar
   return node.type === "TSTypeAliasDeclaration";
 }
 
+function isInterfaceDeclaration(node: ESTree.Node): node is ESTree.TSInterfaceDeclaration {
+  return node.type === "TSInterfaceDeclaration";
+}
+
 function indexScopes(
   node: ESTree.Node,
   scope: Scope,
@@ -38,6 +43,11 @@ function indexScopes(
     const list = scope.aliases.get(node.id.name) ?? [];
     list.push(node);
     scope.aliases.set(node.id.name, list);
+  }
+  if (isInterfaceDeclaration(node)) {
+    const list = scope.interfaces.get(node.id.name) ?? [];
+    list.push(node);
+    scope.interfaces.set(node.id.name, list);
   }
   const record = node as unknown as Readonly<Record<string, unknown>>;
   for (const key of visitorKeys[node.type] ?? []) {
@@ -56,7 +66,9 @@ function indexScopes(
 }
 
 function scopeForChild(child: ESTree.Node, scope: Scope): Scope {
-  return SCOPE_STARTERS.has(child.type) ? { parent: scope, aliases: new Map() } : scope;
+  return SCOPE_STARTERS.has(child.type)
+    ? { parent: scope, aliases: new Map(), interfaces: new Map() }
+    : scope;
 }
 
 /**
@@ -67,7 +79,7 @@ function scopeForChild(child: ESTree.Node, scope: Scope): Scope {
  * matching TypeScript.
  */
 export function createScopeIndex(program: ESTree.Program, visitorKeys: VisitorKeys): ScopeIndex {
-  const rootScope: Scope = { parent: null, aliases: new Map() };
+  const rootScope: Scope = { parent: null, aliases: new Map(), interfaces: new Map() };
   const nodeScopes = new Map<ESTree.Node, Scope>();
   for (const statement of program.body) {
     indexScopes(statement, rootScope, nodeScopes, visitorKeys);
@@ -85,9 +97,22 @@ export function createScopeIndex(program: ESTree.Program, visitorKeys: VisitorKe
     }
     return null;
   };
+  const lookupInterface = (
+    name: string,
+    scope: Scope | null,
+  ): readonly ESTree.TSInterfaceDeclaration[] | null => {
+    let current = scope;
+    while (current !== null) {
+      const list = current.interfaces.get(name);
+      if (list !== undefined && list.length > 0) return list;
+      current = current.parent;
+    }
+    return null;
+  };
   return {
     scopeOf: (node) => nodeScopes.get(node) ?? null,
     lookupAlias,
+    lookupInterface,
     allAliases: () => [...nodeScopes.keys()].filter(isAliasDeclaration),
   };
 }

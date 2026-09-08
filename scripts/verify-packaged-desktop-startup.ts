@@ -390,10 +390,11 @@ export async function verifyPackagedDesktopStartup(
       windowsHide: true,
     });
 
-    const childOutcome: {
+    type ChildOutcome = {
       exited: { code: number | null; signal: NodeJS.Signals | null } | null;
       launchError: Error | null;
-    } = { exited: null, launchError: null };
+    };
+    const childOutcome: ChildOutcome = { exited: null, launchError: null };
     child.once("exit", (code, signal) => {
       childOutcome.exited = { code, signal };
     });

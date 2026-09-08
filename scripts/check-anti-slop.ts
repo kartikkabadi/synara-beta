@@ -212,21 +212,22 @@ export function getChangedFiles(root: string): Set<string> {
     );
   }
 
+  const baseRef = process.env.SYNARA_ANTI_SLOP_BASE_REF ?? "origin/main";
   try {
     const result = spawnSync(
       "git",
-      ["diff", "--name-only", "--diff-filter=ACMR", "origin/main...HEAD"],
+      ["diff", "--name-only", "--diff-filter=ACMR", `${baseRef}...HEAD`],
       { cwd: root, encoding: "utf8" },
     );
     if (result.status !== 0 || result.stderr) {
-      console.warn(
+      throw new Error(
         `Could not determine changed files from git: ${(result.stderr ?? "").split("\n")[0] ?? result.status}`,
       );
-      return new Set();
     }
     return new Set(result.stdout.split("\n").filter(Boolean));
-  } catch {
-    return new Set();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to get changed files: ${message}`);
   }
 }
 
