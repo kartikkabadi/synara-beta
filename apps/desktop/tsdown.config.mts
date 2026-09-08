@@ -12,7 +12,20 @@ import { defineConfig } from "tsdown";
 
 const sourcemapEnv = process.env.SYNARA_DESKTOP_SOURCEMAP?.trim().toLowerCase();
 const buildSourcemap = sourcemapEnv === "1" || sourcemapEnv === "true";
-const windowsUpdaterPublisher = process.env.AZURE_TRUSTED_SIGNING_SUBJECT_DN?.trim() ?? "";
+// Embed the updater publisher pin only when this build will actually be signed
+// (the workflow sets every Azure secret together). An unsigned beta build must
+// ship without a pin, or the updater would verify an unsigned installer against
+// it and block every one-click update.
+const windowsSigningConfigured = Boolean(
+  process.env.AZURE_TRUSTED_SIGNING_ENDPOINT?.trim() &&
+  process.env.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME?.trim() &&
+  process.env.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME?.trim() &&
+  process.env.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME?.trim() &&
+  process.env.AZURE_TRUSTED_SIGNING_SUBJECT_DN?.trim(),
+);
+const windowsUpdaterPublisher = windowsSigningConfigured
+  ? (process.env.AZURE_TRUSTED_SIGNING_SUBJECT_DN?.trim() ?? "")
+  : "";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const migrationRuntimeSource = fs.readFileSync(
   path.join(repoRoot, "apps/server/src/persistence/Migrations.ts"),
