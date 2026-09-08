@@ -1037,6 +1037,8 @@ type FailedThreadSendSnapshot = Pick<
   restoredToComposer: boolean;
   /** The error string this failure raised, so eviction can tell whether the thread's current error still belongs to it. */
   errorMessage: string;
+  /** The thread's error epoch right after this failure raised its card. */
+  errorVersion: number;
 };
 
 // Abandoned error cards would otherwise pin attachment File blobs in the map
@@ -1511,9 +1513,15 @@ export default function ChatView({
     Record<ThreadId, string | null>
   >({});
   const localDraftErrorsByThreadIdRef = useRef(localDraftErrorsByThreadId);
-  useEffect(() => {
+  // Commit-phase mirror: an in-flight send can read the ref before a passive
+  // effect would run, and must see the latest errors to decide eviction clears.
+  useLayoutEffect(() => {
     localDraftErrorsByThreadIdRef.current = localDraftErrorsByThreadId;
   }, [localDraftErrorsByThreadId]);
+  // Monotonic per-thread error epoch, bumped by setThreadError below, so a
+  // failed-send snapshot can tell whether the error it raised is still the one
+  // on the thread.
+  const threadErrorVersionRef = useRef(new Map<ThreadId, number>());
   const [localDispatch, setLocalDispatch] = useState<LocalDispatchSnapshot | null>(null);
   const failedWorktreeSetupDispatchStartedAtRef = useRef<string | null>(null);
   // Live handle to the in-flight send's worktree preparation, resolved by the
@@ -4383,6 +4391,10 @@ export default function ChatView({
   const setThreadError = useCallback(
     (targetThreadId: ThreadId | null, error: string | null) => {
       if (!targetThreadId) return;
+      threadErrorVersionRef.current.set(
+        targetThreadId,
+        (threadErrorVersionRef.current.get(targetThreadId) ?? 0) + 1,
+      );
       if (getThreadFromState(useStore.getState(), targetThreadId)) {
         setStoreThreadError(targetThreadId, error);
         return;
@@ -9046,6 +9058,10 @@ export default function ChatView({
         composerFileCommentsRef.current.length === 0 &&
         composerTerminalContextsRef.current.length === 0 &&
         composerPastedTextsRef.current.length === 0;
+      const sendErrorMessage = err instanceof Error ? err.message : "Failed to send message.";
+      if (!setupCancelled) {
+        setThreadError(threadIdForSend, sendErrorMessage);
+      }
       if (queuedChatTurn === null && !turnStartSucceeded && !setupCancelled) {
         // The failed send never reached the transcript, so capture its full
         // payload: the error card's retry replays this exact content instead of
@@ -9060,19 +9076,24 @@ export default function ChatView({
             // The evicted thread's error card can no longer replay its payload
             // — clear it rather than leave a retry that resends the wrong
             // transcript message. Only clear when the current error is still
-            // the one this failure raised; a newer error is unrelated.
+            // the one this failure raised (same text AND same error epoch);
+            // a newer error — even an identical-message one — is unrelated.
             const currentError =
               getThreadFromState(useStore.getState(), oldest)?.error ??
               localDraftErrorsByThreadIdRef.current[oldest] ??
               null;
-            if (currentError === evicted.errorMessage) {
+            if (
+              currentError === evicted.errorMessage &&
+              threadErrorVersionRef.current.get(oldest) === evicted.errorVersion
+            ) {
               setThreadError(oldest, null);
             }
           }
         }
         failedSends.set(threadIdForSend, {
           restoredToComposer: composerDraftWasEmpty,
-          errorMessage: err instanceof Error ? err.message : "Failed to send message.",
+          errorMessage: sendErrorMessage,
+          errorVersion: threadErrorVersionRef.current.get(threadIdForSend) ?? 0,
           prompt: promptForSend,
           images: composerImagesSnapshot,
           files: composerFilesSnapshot,
@@ -9118,12 +9139,6 @@ export default function ChatView({
         updateSelectedComposerSkills(composerSkillsSnapshot);
         updateSelectedComposerMentions(composerMentionsSnapshot);
         setComposerTrigger(detectComposerTrigger(promptForSend, promptForSend.length));
-      }
-      if (!setupCancelled) {
-        setThreadError(
-          threadIdForSend,
-          err instanceof Error ? err.message : "Failed to send message.",
-        );
       }
     });
     sendInFlightRef.current = false;
