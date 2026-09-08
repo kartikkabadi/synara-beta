@@ -104,6 +104,10 @@ const buttonVariants = cva(
           "border-[color:var(--color-border)] bg-[var(--color-background-elevated-primary-opaque)] text-[var(--color-text-foreground)] [:hover,[data-pressed]]:bg-secondary/12",
         subtle:
           "border-transparent bg-[var(--color-background-button-secondary)] text-[var(--color-text-foreground)] focus-visible:ring-[color:var(--color-border-focus)]/60 focus-visible:ring-offset-0 [:hover,[data-pressed]]:bg-[var(--color-background-button-secondary-hover)]",
+        warning:
+          "border-warning bg-warning text-warning-foreground [:hover,[data-pressed]]:bg-warning/90",
+        "warning-outline":
+          "border-[color:var(--color-border)] bg-[var(--color-background-elevated-primary-opaque)] text-warning [:hover,[data-pressed]]:border-warning/32 [:hover,[data-pressed]]:bg-warning/4 [:hover,[data-pressed]]:text-warning",
       },
     },
     compoundVariants: [
