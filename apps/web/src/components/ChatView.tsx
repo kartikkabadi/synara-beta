@@ -8187,6 +8187,12 @@ export default function ChatView({
         interactionMode: interactionModeForSend,
         envMode: envModeForSend,
       });
+      if (activeThread.error !== null || failedThreadSendsRef.current.has(activeThread.id)) {
+        // A queued send (including a restored retry) supersedes any shown error.
+        // Clear the error only when one is actually being replaced; the snapshot
+        // release below will delete the matching failed-send record.
+        setThreadError(activeThread.id, null);
+      }
       return true;
     }
     const threadIdForSend = activeThread.id;
@@ -11449,8 +11455,11 @@ export default function ChatView({
       if (hasQueueableLiveTurn) {
         setThreadError(threadId, null);
         enqueueQueuedComposerTurn(threadId, retryTurn);
-        // The queued turn now durably owns the payload — release the snapshot.
-        failedThreadSendsRef.current.delete(threadId);
+        // The queued turn now durably owns the payload — release the snapshot,
+        // but only if it is still the exact snapshot this retry is holding.
+        if (failedThreadSendsRef.current.get(threadId) === failedSend) {
+          failedThreadSendsRef.current.delete(threadId);
+        }
         return;
       }
       void lateSendHandlers.send(undefined, "queue", retryTurn);
@@ -11548,19 +11557,22 @@ export default function ChatView({
       if (failedSend.restoredToComposer && draftMatchesRestored) {
         if (hasQueueableLiveTurn) {
           // A live turn would reject a direct resend — queue the restored draft.
-          setThreadError(threadId, null);
           // The snapshot is only consumed once the queue accepts the resend;
           // a rejected send keeps the payload so the user can retry again.
           void releaseFailedSendSnapshotAfterSend(
             lateSendHandlers.send(undefined, "queue"),
             failedThreadSendsRef.current,
             threadId,
+            failedSend,
+            getCurrentThreadErrorAndVersion,
           );
         } else {
           void releaseFailedSendSnapshotAfterSend(
             lateSendHandlers.send(undefined),
             failedThreadSendsRef.current,
             threadId,
+            failedSend,
+            getCurrentThreadErrorAndVersion,
           );
         }
         return;

@@ -3063,13 +3063,15 @@ describe("bumpLocalDraftErrorVersion", () => {
 describe("releaseFailedSendSnapshotAfterSend", () => {
   const snapshot = { errorMessage: "rate limited", errorVersion: 1 };
 
-  it("deletes the snapshot when the resend is accepted", async () => {
+  it("deletes the exact snapshot when the resend is accepted and the error was cleared", async () => {
     const threadId = ThreadId.makeUnsafe("thread-1");
     const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, snapshot]]);
     const accepted = await releaseFailedSendSnapshotAfterSend(
       Promise.resolve(true),
       failedSends,
       threadId,
+      snapshot,
+      () => ({ error: null, errorVersion: 2 }),
     );
     expect(accepted).toBe(true);
     expect(failedSends.has(threadId)).toBe(false);
@@ -3082,8 +3084,39 @@ describe("releaseFailedSendSnapshotAfterSend", () => {
       Promise.resolve(false),
       failedSends,
       threadId,
+      snapshot,
+      () => ({ error: null, errorVersion: 2 }),
     );
     expect(accepted).toBe(false);
     expect(failedSends.get(threadId)).toBe(snapshot);
+  });
+
+  it("does not delete the snapshot when accepted but the send did not actually dispatch", async () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, snapshot]]);
+    const accepted = await releaseFailedSendSnapshotAfterSend(
+      Promise.resolve(true),
+      failedSends,
+      threadId,
+      snapshot,
+      () => ({ error: snapshot.errorMessage, errorVersion: snapshot.errorVersion }),
+    );
+    expect(accepted).toBe(true);
+    expect(failedSends.get(threadId)).toBe(snapshot);
+  });
+
+  it("does not delete a newer snapshot created by an overlapping send", async () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const newer = { errorMessage: "network error", errorVersion: 2 };
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, newer]]);
+    const accepted = await releaseFailedSendSnapshotAfterSend(
+      Promise.resolve(true),
+      failedSends,
+      threadId,
+      snapshot,
+      () => ({ error: newer.errorMessage, errorVersion: newer.errorVersion }),
+    );
+    expect(accepted).toBe(true);
+    expect(failedSends.get(threadId)).toBe(newer);
   });
 });

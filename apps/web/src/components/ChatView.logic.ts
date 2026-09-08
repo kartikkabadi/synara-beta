@@ -1980,16 +1980,28 @@ export function bumpLocalDraftErrorVersion(
 }
 
 // A failed-send snapshot should be released only once the resend is accepted
-// by the send path. Returns the same acceptance boolean so callers can fall
-// through or return after the cleanup.
+// and actually dispatched or durably queued. The promise may resolve `true` for
+// non-dispatching flows (stale automation resolution, slash commands, etc.), so
+// we delete the exact snapshot only when the map still contains it *and* the
+// thread's current error is no longer the one it raised. This also prevents an
+// accepted older retry from deleting a newer failed-send snapshot created by an
+// overlapping send.
 export async function releaseFailedSendSnapshotAfterSend<S extends FailedSendErrorIdentity>(
   acceptedPromise: Promise<boolean>,
   failedSends: Map<ThreadId, S>,
   threadId: ThreadId,
+  expectedSnapshot: S,
+  getCurrentError: (threadId: ThreadId) => CurrentThreadError,
 ): Promise<boolean> {
   const accepted = await acceptedPromise;
   if (accepted) {
-    failedSends.delete(threadId);
+    const current = failedSends.get(threadId);
+    if (
+      current === expectedSnapshot &&
+      !failedSendSnapshotOwnsCurrentError(expectedSnapshot, getCurrentError(threadId))
+    ) {
+      failedSends.delete(threadId);
+    }
   }
   return accepted;
 }
