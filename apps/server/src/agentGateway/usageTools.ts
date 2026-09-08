@@ -3,7 +3,7 @@
 // Fetching and quota interpretation stay in providerUsage; gateway code only applies authority.
 
 import type { ProviderKind, ServerAgentProviderUsage } from "@synara/contracts";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 
 import { AGENT_PROVIDER_USAGE_MAX_AGE_MS } from "../providerUsage/agent.ts";
 import { mcpToolResultError, mcpToolResultJson } from "./protocol.ts";
@@ -46,12 +46,16 @@ export function makeAgentGatewayUsageTools(
     },
     handler: (_args, context) =>
       input.loadProviderUsage(context.callerProvider).pipe(
-        Effect.timeout(USAGE_TOOL_TIMEOUT),
+        Effect.timeoutOption(USAGE_TOOL_TIMEOUT),
         // Caller-scoped load always requests exactly one provider.
         // Keep an explicit null fallback defensive against future loader changes.
-        Effect.map((usage) => mcpToolResultJson({ usage: usage[0] ?? null })),
-        Effect.catchTag("TimeoutError", () =>
-          Effect.succeed(mcpToolResultJson({ usage: timedOutUsage(context.callerProvider) })),
+        Effect.map((usage) =>
+          mcpToolResultJson({
+            usage: Option.match(usage, {
+              onNone: () => timedOutUsage(context.callerProvider),
+              onSome: (results) => results[0] ?? null,
+            }),
+          }),
         ),
         Effect.catch((error) => Effect.succeed(mcpToolResultError(errorText(error)))),
       ),
