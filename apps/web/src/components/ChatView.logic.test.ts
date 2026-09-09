@@ -72,6 +72,8 @@ import {
   shouldStartActiveTurnLayoutGrace,
   shouldRenderTerminalWorkspace,
   bumpLocalDraftErrorVersion,
+  bumpThreadErrorWriteEpoch,
+  MAX_THREAD_ERROR_WRITE_EPOCHS,
   evictOverflowFailedThreadSend,
   failedSendSnapshotOwnsCurrentError,
   MAX_FAILED_THREAD_SEND_SNAPSHOTS,
@@ -3593,4 +3595,33 @@ describe("hasThreadErrorRetryTarget", () => {
   });
 });
 
+describe("bumpThreadErrorWriteEpoch", () => {
+  it("keeps a recently written thread's entry alive across writes to other threads", () => {
+    const epochs = new Map<ThreadId, number>();
+    const touched = ThreadId.makeUnsafe("thread-touched");
+    bumpThreadErrorWriteEpoch(epochs, touched);
+    for (let i = 0; i < MAX_THREAD_ERROR_WRITE_EPOCHS - 1; i += 1) {
+      bumpThreadErrorWriteEpoch(epochs, ThreadId.makeUnsafe(`thread-other-${i}`));
+    }
+    // The touched entry is still the least recently written here, but the
+    // re-touch moves it to the tail before the bound applies, so it survives.
+    expect(bumpThreadErrorWriteEpoch(epochs, touched)).toBe(2);
+    expect(epochs.has(touched)).toBe(true);
+    expect(epochs.size).toBeLessThanOrEqual(MAX_THREAD_ERROR_WRITE_EPOCHS);
+  });
+
+  it("restarts an evicted thread's epoch — the epoch is defense in depth", () => {
+    // Eviction loses the counter, so a re-written thread restarts at 1 and a
+    // pre-eviction claim could numerically match again. That is safe: the
+    // unblock release also verifies the error generation and the exact
+    // snapshot identity, so the epoch alone never clears a card.
+    const epochs = new Map<ThreadId, number>();
+    const evicted = ThreadId.makeUnsafe("thread-evicted");
+    bumpThreadErrorWriteEpoch(epochs, evicted);
+    for (let i = 0; i < MAX_THREAD_ERROR_WRITE_EPOCHS; i += 1) {
+      bumpThreadErrorWriteEpoch(epochs, ThreadId.makeUnsafe(`thread-other-${i}`));
+    }
+    expect(epochs.has(evicted)).toBe(false);
+    expect(bumpThreadErrorWriteEpoch(epochs, evicted)).toBe(1);
+  });
 });
