@@ -603,6 +603,7 @@ import {
   DISMISSED_PROVIDER_HEALTH_BANNERS_KEY,
   DismissedProviderHealthBannersSchema,
   bumpLocalDraftErrorVersion,
+  bumpThreadErrorWriteEpoch,
   collectUserMessageBlobPreviewUrls,
   deriveComposerSendState,
   evictOverflowFailedThreadSend,
@@ -4439,10 +4440,7 @@ export default function ChatView({
       // generation alone (the unblock's captured identity) cannot tell a
       // newer failure apart. Every write bumps this epoch, so a claim made
       // before the write no longer matches.
-      threadErrorWriteEpochRef.current.set(
-        targetThreadId,
-        (threadErrorWriteEpochRef.current.get(targetThreadId) ?? 0) + 1,
-      );
+      bumpThreadErrorWriteEpoch(threadErrorWriteEpochRef.current, targetThreadId);
       if (getThreadFromState(useStore.getState(), targetThreadId)) {
         setStoreThreadError(targetThreadId, error);
         return getThreadFromState(useStore.getState(), targetThreadId)?.errorVersion ?? 0;

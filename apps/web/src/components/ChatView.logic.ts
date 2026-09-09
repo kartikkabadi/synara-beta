@@ -2145,9 +2145,36 @@ export function hasThreadErrorRetryTarget(
   currentError: CurrentThreadError,
   messages: readonly ChatMessage[],
   latestTurn: Thread["latestTurn"],
+  sessionError: string | null,
 ): boolean {
   if (snapshot && failedSendSnapshotOwnsCurrentError(snapshot, currentError)) {
     return true;
   }
-  return findTranscriptFallbackRetryTarget(messages, latestTurn) !== null;
+  return (
+    findTranscriptFallbackRetryTarget(messages, latestTurn, currentError, sessionError) !== null
+  );
+}
+
+// Bounds the per-thread error-write epoch map (see ChatView's setThreadError).
+// Entries are only read by an in-flight unblock claim, so past this bound the
+// oldest entry can be dropped safely: a claim whose epoch entry was evicted no
+// longer matches, and the guarded release declines to clear — the safe
+// direction (a card is kept, never wrongly cleared).
+export const MAX_THREAD_ERROR_WRITE_EPOCHS = 64;
+
+export function bumpThreadErrorWriteEpoch(
+  epochs: Map<ThreadId, number>,
+  threadId: ThreadId,
+): number {
+  const nextEpoch = (epochs.get(threadId) ?? 0) + 1;
+  // Re-insert at the tail so the bound evicts the least recently written.
+  epochs.delete(threadId);
+  if (epochs.size >= MAX_THREAD_ERROR_WRITE_EPOCHS) {
+    const oldest = epochs.keys().next().value;
+    if (oldest !== undefined) {
+      epochs.delete(oldest);
+    }
+  }
+  epochs.set(threadId, nextEpoch);
+  return nextEpoch;
 }
