@@ -146,6 +146,18 @@ describe("sanitizeDiagnosticsEvent", () => {
       sanitizeDiagnosticsEvent({ kind: "test" }, { ...context(), installId: "not-a-uuid" }),
     ).toBeNull();
   });
+
+  it("accepts beta and canary app versions", () => {
+    expect(
+      sanitizeDiagnosticsEvent(
+        { kind: "test" },
+        { ...context(), appVersion: "0.8.3-canary.4", flavor: "canary" },
+      )?.event.appVersion,
+    ).toBe("0.8.3-canary.4");
+    expect(
+      sanitizeDiagnosticsEvent({ kind: "test" }, { ...context(), appVersion: "0.8.3-alpha.1" }),
+    ).toBeNull();
+  });
 });
 
 describe("diagnosticsDurationBucket", () => {

@@ -29,7 +29,7 @@ const UUID_PATTERN = Schema.String.check(
   Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u),
 );
 const APP_VERSION_PATTERN = Schema.String.check(
-  Schema.isPattern(/^\d{1,3}\.\d{1,3}\.\d{1,3}(?:-beta\.\d{1,3})?$/u),
+  Schema.isPattern(/^\d{1,3}\.\d{1,3}\.\d{1,3}(?:-(?:beta|canary)\.\d{1,3})?$/u),
 );
 const EVENT_ID_PATTERN = Schema.String.check(Schema.isPattern(/^[0-9a-f]{32}$/u));
 const FEATURE_PATTERN = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9-]{0,47}$/u));

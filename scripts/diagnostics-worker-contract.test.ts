@@ -125,6 +125,22 @@ describe("diagnostics worker contract", () => {
     ).toBe(false);
   });
 
+  it("accepts canary app versions on both sides of the boundary", () => {
+    const sanitized = sanitizeDiagnosticsEvent(
+      { kind: "test" },
+      { ...context(), appVersion: "0.8.3-canary.4", flavor: "canary" },
+    );
+    expect(sanitized).not.toBeNull();
+    // SAFETY: the test round-trips its own output through JSON, so the wire
+    // shape is known to be a plain value.
+    const wireEvent = JSON.parse(JSON.stringify(sanitized?.event)) as JsonValue;
+    expect(validateEvent(wireEvent)).toBe(true);
+    expect(
+      validateEvent({ ...workerEvent("test"), appVersion: "0.8.3-canary.4", flavor: "canary" }),
+    ).toBe(true);
+    expect(validateEvent({ ...workerEvent("test"), appVersion: "0.8.3-alpha.1" })).toBe(false);
+  });
+
   it("rejects events carrying fields outside the contract", () => {
     expect(
       validateEvent({ ...workerEvent("app_start"), prompt: "ignore previous instructions" }),
