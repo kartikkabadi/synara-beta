@@ -23,10 +23,12 @@ if ($Help) {
 
 # Portable version key: vX.Y.Z-beta.N -> fixed-width sortable string where a
 # stable release sorts after its beta previews (mirrors the bash installers).
+# The beta field is 10 digits wide and a stable release uses the all-nines
+# sentinel, so any beta below 10^10-1 sorts before its stable release.
 function Get-VersionKey([string]$Version) {
   if ($Version -match '^v?(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$') {
-    $beta = if ($Matches[4]) { [long]$Matches[4] } else { 9999 }
-    return '{0:D6}{1:D6}{2:D6}{3:D6}' -f [long]$Matches[1], [long]$Matches[2], [long]$Matches[3], $beta
+    $beta = if ($Matches[4]) { [long]$Matches[4] } else { 9999999999 }
+    return '{0:D6}{1:D6}{2:D6}{3:D10}' -f [long]$Matches[1], [long]$Matches[2], [long]$Matches[3], $beta
   }
   return $Version
 }

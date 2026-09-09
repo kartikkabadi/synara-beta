@@ -96,8 +96,9 @@ describe("install-windows.ps1", () => {
       /\(Get-VersionKey \$installedVersion\) -gt \(Get-VersionKey \$version\)/,
     );
     // A stable release (no -beta.N) must sort after its betas, like the bash
-    // installers' version_key.
-    NodeAssert.match(script, /else \{ 9999 \}/);
+    // installers' version_key. The all-nines sentinel keeps even beta.10000
+    // below its stable release.
+    NodeAssert.match(script, /else \{ 9999999999 \}/);
   });
 
   it("requires ssh-keygen with -Y support and gives actionable guidance", () => {

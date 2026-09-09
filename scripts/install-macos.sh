@@ -12,11 +12,13 @@ set -euo pipefail
 
 # Portable version key: vX.Y.Z-beta.N -> fixed-width sortable string where a
 # stable release sorts after its beta previews. Avoids GNU sort -V, which the
-# stock macOS sort does not support.
+# stock macOS sort does not support. The beta field is 10 digits wide and a
+# stable release uses the all-nines sentinel, so any beta below 10^10-1 sorts
+# before its stable release.
 version_key() {
   local v="${1#v}"
   local base="${v%%-*}"
-  local beta="9999"
+  local beta="9999999999"
   case "$v" in
     *-beta.*) beta="${v#*-beta.}" ;;
   esac
@@ -24,7 +26,7 @@ version_key() {
   IFS=. read -r a b c <<KEY_EOF
 $base
 KEY_EOF
-  printf '%06d%06d%06d%06d' "${a:-0}" "${b:-0}" "${c:-0}" "${beta:-9999}"
+  printf '%06d%06d%06d%010d' "${a:-0}" "${b:-0}" "${c:-0}" "${beta:-9999999999}"
 }
 
 
