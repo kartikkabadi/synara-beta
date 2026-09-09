@@ -44,7 +44,10 @@ function encryptPlaintext(plaintext: string, version: number, digestHost = "exam
 }
 
 function v10Blob(plaintext: string, version = 0, digestHost = "example.test"): Buffer {
-  return Buffer.concat([Buffer.from("v10", "latin1"), encryptPlaintext(plaintext, version, digestHost)]);
+  return Buffer.concat([
+    Buffer.from("v10", "latin1"),
+    encryptPlaintext(plaintext, version, digestHost),
+  ]);
 }
 
 function wrongKeyBlob(plaintext: string): Buffer {
@@ -509,8 +512,7 @@ describe.skipIf(process.platform !== "darwin")("helium cookie source", () => {
 
   // Permission checks are bypassed for uid 0 (root on self-hosted runners or
   // sudo dev runs), where both chmod assertions would fail spuriously.
-  const skipAsRoot =
-    typeof process.getuid === "function" && process.getuid() === 0;
+  const skipAsRoot = typeof process.getuid === "function" && process.getuid() === 0;
 
   it.skipIf(skipAsRoot)(
     "propagates a permission-denied Helium root directory as a bounded discovery error",

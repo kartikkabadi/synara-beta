@@ -36,10 +36,12 @@ function fixture() {
     reportCaptureReady: vi.fn(),
     shouldOfferSave: vi.fn(async () => true),
     trackSecret: vi.fn(),
-    askSave: vi.fn(async (): Promise<{ choice: "save" | "dismiss"; explicit: boolean }> => ({
-      choice: "dismiss",
-      explicit: false,
-    })),
+    askSave: vi.fn(
+      async (): Promise<{ choice: "save" | "dismiss"; explicit: boolean }> => ({
+        choice: "dismiss",
+        explicit: false,
+      }),
+    ),
     saveCaptured: vi.fn(async () => {}),
   };
   const capture = new BrowserVaultCapture(vault as unknown as BrowserVault);
