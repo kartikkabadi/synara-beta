@@ -1044,6 +1044,12 @@ type FailedThreadSendSnapshot = Pick<
   | "sourceProposedPlan"
 > & {
   restoredToComposer: boolean;
+  /**
+   * The interaction mode the failed dispatch used. A plan follow-up's retry
+   * must resend with the mode the failed submission had — an implementation
+   * follow-up replayed as a refinement would silently downgrade to plan mode.
+   */
+  interactionMode?: "default" | "plan";
   /** The error string this failure raised, so eviction can tell whether the thread's current error still belongs to it. */
   errorMessage: string;
   /** The thread's error generation right after this failure raised its card. The generation lives on the thread, so it cannot be evicted while the snapshot lives. */
@@ -9499,6 +9505,16 @@ export default function ChatView({
     const threadIdForSend = activeThread.id;
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
+    // Computed before the dispatch so a failure can capture the exact plan
+    // linkage the turn was sent with — the retry must replay the same
+    // implementation reference, not re-derive it from later state.
+    const sourceProposedPlanForPlanDispatch =
+      nextInteractionMode === "default"
+        ? buildSourceProposedPlanReference({
+            threadId: activeThread.id,
+            proposedPlan: activeProposedPlan,
+          })
+        : undefined;
     const outgoingMessageText = formatOutgoingComposerPrompt({
       provider: queuedTurn?.selectedProvider ?? selectedProvider,
       model: queuedTurn?.selectedModel ?? selectedModel,
@@ -9553,13 +9569,6 @@ export default function ChatView({
       const providerOptionsForPlanDispatch =
         queuedTurn?.providerOptionsForDispatch ?? providerOptionsForDispatch;
       const modelSelectionForPlanDispatch = queuedTurn?.modelSelection ?? selectedModelSelection;
-      const sourceProposedPlan =
-        nextInteractionMode === "default"
-          ? buildSourceProposedPlanReference({
-              threadId: activeThread.id,
-              proposedPlan: activeProposedPlan,
-            })
-          : undefined;
       rememberCustomBinaryPathForDispatch({
         threadId: threadIdForSend,
         provider: modelSelectionForPlanDispatch.provider,
@@ -9585,7 +9594,9 @@ export default function ChatView({
         dispatchMode,
         runtimeMode: queuedTurn?.runtimeMode ?? runtimeMode,
         interactionMode: nextInteractionMode,
-        ...(sourceProposedPlan ? { sourceProposedPlan } : {}),
+        ...(sourceProposedPlanForPlanDispatch
+          ? { sourceProposedPlan: sourceProposedPlanForPlanDispatch }
+          : {}),
         createdAt: messageCreatedAt,
       });
       // Steers on providers without native mid-turn steering interrupt the live
@@ -9625,15 +9636,56 @@ export default function ChatView({
       setOptimisticUserMessages((existing) =>
         existing.filter((message) => message.id !== messageIdForSend),
       );
-      setThreadError(
-        threadIdForSend,
-        err instanceof Error ? err.message : "Failed to send plan follow-up.",
-      );
+      const sendErrorMessage =
+        err instanceof Error ? err.message : "Failed to send plan follow-up.";
+      const sendErrorVersion = setThreadError(threadIdForSend, sendErrorMessage);
+      // A plan follow-up has no transcript message, so without a snapshot the
+      // card's retry would have nothing to replay and "Try again" would be a
+      // no-op. Capture the follow-up payload the dispatch actually used,
+      // including its interaction mode and plan linkage. A generated
+      // implementation prompt is not restored into the composer: the plan
+      // follow-up banner is still up, and resubmitting empty regenerates the
+      // same prompt with the same default mode — restoring its generated text
+      // would make the next manual send re-read it as a plan refinement.
+      // Queued turns are excluded: the drain retains and retries them itself,
+      // so a captured snapshot here would offer a second, duplicate resend.
+      const restoredToComposer =
+        !queuedTurn && nextInteractionMode === "plan" && promptRef.current.trim().length === 0;
+      const failedSends = failedThreadSendsRef.current;
+      if (!queuedTurn) {
+        failedSends.delete(threadIdForSend);
+        const evictedThreadId = evictOverflowFailedThreadSend(
+          failedSends,
+          getCurrentThreadErrorAndVersion,
+        );
+        if (evictedThreadId !== null) {
+          setThreadError(evictedThreadId, null);
+        }
+        failedSends.set(threadIdForSend, {
+          restoredToComposer,
+          interactionMode: nextInteractionMode,
+          errorMessage: sendErrorMessage,
+          errorVersion: sendErrorVersion,
+          prompt: text,
+          images: [],
+          files: [],
+          assistantSelections: [],
+          browserAnnotations: [],
+          terminalContexts: [],
+          fileComments: [],
+          pastedTexts: [],
+          skills: [],
+          mentions: [],
+          ...(sourceProposedPlanForPlanDispatch
+            ? { sourceProposedPlan: sourceProposedPlanForPlanDispatch }
+            : {}),
+        });
+      }
       // The submitted text would otherwise be lost: a plan follow-up has no
-      // transcript message and no failed-send snapshot, so the card's retry
-      // cannot replay it. Restore it into the composer — only when the user
-      // has not typed something newer while the dispatch was in flight.
-      if (!queuedTurn && promptRef.current.trim().length === 0) {
+      // transcript message, so the composer is the only place a user-authored
+      // refinement can come back. Only when the user has not typed something
+      // newer while the dispatch was in flight.
+      if (restoredToComposer) {
         promptRef.current = text;
         setPrompt(text);
         setComposerDraftPrompt(threadIdForSend, text);
@@ -11611,7 +11663,7 @@ export default function ChatView({
         | "skills"
         | "mentions"
         | "sourceProposedPlan"
-      >,
+      > & { interactionMode?: "default" | "plan" },
     ): QueuedComposerChatTurn => ({
       id: randomUUID(),
       kind: "chat",
@@ -11643,7 +11695,10 @@ export default function ChatView({
       ...(providerOptionsForDispatch ? { providerOptionsForDispatch } : {}),
       ...(payload.sourceProposedPlan ? { sourceProposedPlan: payload.sourceProposedPlan } : {}),
       runtimeMode,
-      interactionMode,
+      // A captured retry replays the mode its failed dispatch used — a plan
+      // follow-up snapshot must not be re-interpreted by the composer's
+      // current mode toggle.
+      interactionMode: payload.interactionMode ?? interactionMode,
       envMode,
     });
     if (failedSend) {
