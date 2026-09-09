@@ -114,10 +114,11 @@ function typeReferenceName(type: ESTree.TSTypeReference): string | null {
 function isBuiltIn(name: string, environment: TypeEnvironment, scope: Scope | null): boolean {
   if (!BUILT_INS.has(name)) return false;
   if (environment.shadowedBuiltIns.has(name)) return false;
-  const alias = environment.scopeIndex?.lookupAlias(name, scope);
-  if (alias !== null && alias !== undefined) return false;
-  const interfaces = environment.scopeIndex?.lookupInterface(name, scope);
-  return interfaces === null || interfaces === undefined || interfaces.length === 0;
+  const index = environment.scopeIndex;
+  if (index === null) return true;
+  // Any local binding of the name (alias, interface, class, enum, module, or
+  // import) means uses resolve to that binding, not the built-in.
+  return !index.isBuiltInShadowed(name, scope);
 }
 
 function isUnappliedReferenceTo(type: ESTree.TSType, name: string): boolean {

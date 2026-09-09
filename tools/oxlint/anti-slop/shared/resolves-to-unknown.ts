@@ -169,6 +169,9 @@ export function createScopeIndex(program: ESTree.Program, visitorKeys: VisitorKe
   for (const statement of program.body) {
     indexScopes(statement, scopeForChild(statement, rootScope), nodeScopes, visitorKeys);
   }
+  // Both lookups stop at the nearest binding of any kind: TypeScript resolves a
+  // name to the closest class, interface, enum, module, or import binding, so
+  // an outer alias of the same name must never be reached past one.
   const lookupAlias = (
     name: string,
     scope: Scope | null,
@@ -178,6 +181,8 @@ export function createScopeIndex(program: ESTree.Program, visitorKeys: VisitorKe
       const list = current.aliases.get(name);
       const first = list?.[0];
       if (first !== undefined) return { alias: first, ambiguous: (list?.length ?? 0) > 1 };
+      const shadowing = current.typeNames.get(name);
+      if (shadowing !== undefined && shadowing.length > 0) return null;
       current = current.parent;
     }
     return null;
@@ -190,6 +195,8 @@ export function createScopeIndex(program: ESTree.Program, visitorKeys: VisitorKe
     while (current !== null) {
       const list = current.interfaces.get(name);
       if (list !== undefined && list.length > 0) return list;
+      const shadowing = current.typeNames.get(name);
+      if (shadowing !== undefined && shadowing.length > 0) return null;
       current = current.parent;
     }
     return null;

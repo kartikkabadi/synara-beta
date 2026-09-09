@@ -89,10 +89,9 @@ function isRecordBuiltInName(name: string, at: ESTree.TSType): boolean {
   if (state.shadowedBuiltIns.has(name)) return false;
   if (lexicalTypeParameterNames(at, state.visitorKeys).has(name)) return false;
   const scope = state.scopeIndex.scopeOf(at);
-  const alias = state.scopeIndex.lookupAlias(name, scope);
-  if (alias !== null) return false;
-  const interfaces = state.scopeIndex.lookupInterface(name, scope);
-  return interfaces === null || interfaces.length === 0;
+  // Any local binding of the name (alias, interface, class, enum, module, or
+  // import) means uses resolve to that binding, not the built-in.
+  return !state.scopeIndex.isBuiltInShadowed(name, scope);
 }
 
 function unwrapExpressionParentheses(expression: ESTree.Expression): ESTree.Expression {

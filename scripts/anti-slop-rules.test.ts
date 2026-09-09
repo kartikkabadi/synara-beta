@@ -295,6 +295,40 @@ describe("no-unknown-parameters", () => {
     expect(byFile.get("class-expression.ts")).toEqual(["anti-slop(no-unknown-parameters)"]);
   });
 
+  it("does not resolve a named class expression's name to an outer alias inside its body", () => {
+    const byFile = runRules(
+      {
+        "class-alias-shadow.ts":
+          "type T = unknown;\nconst C = class T {\n  m(input: T) { return input; }\n};\nexport function f(value: T) { return value; }\n",
+        "control.ts":
+          "type T = unknown;\nexport function f(input: T) { return input; }\n",
+      },
+      { "anti-slop/no-unknown-parameters": "error" },
+    );
+    // Inside the class body `T` is the class itself, so the parameter use must
+    // not be reported; outside it the outer alias resolves to unknown. Before
+    // the lookup stopped at the class binding, the in-body use was reported
+    // through the outer alias and this file produced two diagnostics.
+    expect(byFile.get("class-alias-shadow.ts")).toEqual(["anti-slop(no-unknown-parameters)"]);
+    expect(byFile.get("control.ts")).toEqual(["anti-slop(no-unknown-parameters)"]);
+  });
+
+  it("does not report parameters whose alias is shadowed by a nested interface", () => {
+    const byFile = runRules(
+      {
+        "interface-shadow.ts":
+          "type Mysterious = unknown;\nexport function outer() {\n  interface Mysterious { id: string }\n  return function inner(input: Mysterious) { return input; };\n}\n",
+        "control.ts":
+          "type Mysterious = unknown;\nexport function inner(input: Mysterious) { return input; }\n",
+      },
+      { "anti-slop/no-unknown-parameters": "error" },
+    );
+    // Inside `outer` the name `Mysterious` is the local interface, so the
+    // parameter is not unknown; the control without the interface reports.
+    expect(byFile.get("interface-shadow.ts")).toBeUndefined();
+    expect(byFile.get("control.ts")).toEqual(["anti-slop(no-unknown-parameters)"]);
+  });
+
   it("resolves generic defaults that reference earlier type parameters", () => {
     const byFile = runRules(
       {
