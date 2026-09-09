@@ -2111,7 +2111,11 @@ export function findTranscriptFallbackRetryTarget(
     return null;
   }
   const lastUserMessage = messages.findLast((message) => message.role === "user");
-  if (!lastUserMessage || lastUserMessage.turnId == null || lastUserMessage.turnId !== latestTurn.turnId) {
+  if (
+    !lastUserMessage ||
+    lastUserMessage.turnId == null ||
+    lastUserMessage.turnId !== latestTurn.turnId
+  ) {
     return null;
   }
   return { message: lastUserMessage, turn: latestTurn };
