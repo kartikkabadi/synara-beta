@@ -101,6 +101,24 @@ describe("install-windows.ps1", () => {
     NodeAssert.match(script, /else \{ 9999999999 \}/);
   });
 
+  it("rejects beta numbers at the version-key sentinel before any download", () => {
+    // beta.10000000000 would overflow the 10-digit beta field in
+    // Get-VersionKey and could sort above its own stable release, silently
+    // enabling a downgrade. The installer must refuse the tag outright,
+    // including leading-zero spellings of the sentinel.
+    NodeAssert.match(
+      script,
+      /beta number in '\$Tag' is at or beyond the 10\^10 version-key sentinel; refusing to install\./,
+    );
+    const sentinel = script.indexOf("beta number in '$Tag' is at or beyond");
+    NodeAssert.ok(sentinel > -1, "sentinel rejection must exist");
+    NodeAssert.ok(
+      script.indexOf('Invoke-WebRequest -Uri "$base/SHA256SUMS"') > sentinel,
+      "sentinel rejection must run before the first download",
+    );
+    NodeAssert.match(script, /-replace '\^0\+', ''/);
+  });
+
   it("requires ssh-keygen with -Y support and gives actionable guidance", () => {
     NodeAssert.match(script, /Get-Command ssh-keygen -ErrorAction SilentlyContinue/);
     NodeAssert.match(script, /The OpenSSH client is required to verify the release signature/);

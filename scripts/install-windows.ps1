@@ -24,7 +24,9 @@ if ($Help) {
 # Portable version key: vX.Y.Z-beta.N -> fixed-width sortable string where a
 # stable release sorts after its beta previews (mirrors the bash installers).
 # The beta field is 10 digits wide and a stable release uses the all-nines
-# sentinel, so any beta below 10^10-1 sorts before its stable release.
+# sentinel, so any beta below 10^10-1 sorts before its stable release. The
+# installer rejects beta numbers at or beyond the sentinel instead of letting
+# them overflow the field and mis-sort.
 function Get-VersionKey([string]$Version) {
   if ($Version -match '^v?(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$') {
     $beta = if ($Matches[4]) { [long]$Matches[4] } else { 9999999999 }
@@ -55,6 +57,12 @@ if (-not $Tag) {
 # Strict validation: the tag flows into URLs and regex patterns below.
 if ($Tag -notmatch '^v\d+\.\d+\.\d+-beta\.\d+$') {
   throw "install-windows.ps1: invalid tag '$Tag'. Expected vX.Y.Z-beta.N."
+}
+# The version key gives the beta field 10 digits; a beta number at or beyond
+# the 10^10 sentinel would overflow the field and could sort above its own
+# stable release, silently enabling a downgrade. Reject it outright.
+if ($Tag -match '-beta\.(\d+)$' -and (($Matches[1] -replace '^0+', '').Length -gt 10 -or ($Matches[1] -replace '^0+', '') -eq '9999999999')) {
+  throw "install-windows.ps1: beta number in '$Tag' is at or beyond the 10^10 version-key sentinel; refusing to install."
 }
 
 $version = $Tag.TrimStart('v')

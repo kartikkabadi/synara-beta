@@ -14,7 +14,8 @@ set -euo pipefail
 # Portable version key: vX.Y.Z-beta.N -> fixed-width sortable string where a
 # stable release sorts after its beta. The beta field is 10 digits wide and a
 # stable release uses the all-nines sentinel, so any beta below 10^10-1 sorts
-# before its stable release.
+# before its stable release. The installer rejects beta numbers at or beyond
+# the sentinel instead of letting them overflow the field and mis-sort.
 version_key() {
   local v="${1#v}"
   local base="${v%%-*}"
@@ -112,6 +113,16 @@ fi
 # the exact release shape is accepted (no metacharacters, no substitution).
 if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]; then
   echo "install-linux.sh: invalid tag '$tag'. Expected vX.Y.Z-beta.N." >&2
+  exit 1
+fi
+
+# The version key gives the beta field 10 digits; a beta number at or beyond
+# the 10^10 sentinel would overflow the field and could sort above its own
+# stable release, silently enabling a downgrade. Reject it outright.
+beta_digits="${tag##*-beta.}"
+beta_value="${beta_digits#"${beta_digits%%[1-9]*}"}"
+if [ "${#beta_value}" -gt 10 ] || [ "${beta_value}" = "9999999999" ]; then
+  echo "install-linux.sh: beta number in '$tag' is at or beyond the 10^10 version-key sentinel; refusing to install." >&2
   exit 1
 fi
 

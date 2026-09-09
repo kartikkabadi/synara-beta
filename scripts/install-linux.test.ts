@@ -71,6 +71,46 @@ describe("install-linux.sh", () => {
     NodeAssert.match(missing.stderr, /--tag requires a value/);
   });
 
+  it("rejects beta numbers at the version-key sentinel before any download", () => {
+    // beta.10000000000 would overflow the 10-digit beta field in version_key
+    // and could sort above its own stable release, silently enabling a
+    // downgrade. The installer must refuse the tag outright.
+    NodeAssert.match(
+      script,
+      /beta number in '\$tag' is at or beyond the 10\^10 version-key sentinel; refusing to install\./,
+    );
+    const sentinel = script.indexOf("beta number in '$tag' is at or beyond");
+    NodeAssert.ok(sentinel > -1, "sentinel rejection must exist");
+    NodeAssert.ok(
+      script.indexOf("failed to fetch SHA256SUMS") > sentinel,
+      "sentinel rejection must run before the first download",
+    );
+  });
+
+  it("refuses a beta tag whose number overflows the version-key sentinel", () => {
+    const sandbox = NodeFS.mkdtempSync("/tmp/synara-linux-sentinel-");
+    const stubBin = NodePath.join(sandbox, "bin");
+    NodeFS.mkdirSync(stubBin, { recursive: true });
+    NodeFS.writeFileSync(
+      NodePath.join(stubBin, "uname"),
+      '#!/bin/sh\nif [ "$1" = "-s" ]; then echo Linux; elif [ "$1" = "-m" ]; then echo x86_64; else exit 1; fi\n',
+    );
+    NodeFS.chmodSync(NodePath.join(stubBin, "uname"), 0o755);
+    try {
+      for (const tag of ["v9.9.9-beta.10000000000", "v9.9.9-beta.9999999999", "v9.9.9-beta.009999999999"]) {
+        const result = tryBash(scriptPath, ["--tag", tag], {
+          ...process.env,
+          PATH: `${stubBin}${NodePath.delimiter}${process.env.PATH ?? ""}`,
+          HOME: sandbox,
+        });
+        NodeAssert.equal(result.status, 1);
+        NodeAssert.match(result.stderr, /at or beyond the 10\^10 version-key sentinel/);
+      }
+    } finally {
+      NodeFS.rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
   it("downloads SHA256SUMS and AppImage with a pipefail-safe fallback", () => {
     NodeAssert.match(
       script,
