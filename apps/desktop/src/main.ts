@@ -53,7 +53,6 @@ import {
 import type { ContextMenuItem, DiagnosticsEventInput } from "@synara/contracts";
 
 import { createDiagnosticsClient } from "./diagnosticsClient";
-import { makeWillQuitDiagnosticsCoordinator } from "./willQuitDiagnostics";
 import { isKeyboardShortcutsHelpChord } from "@synara/shared/browserShortcuts";
 import { getMacTrafficLightPosition } from "@synara/shared/desktopChrome";
 import { DEVICE_HELPER_SOURCE_DIR_ENV } from "@synara/shared/deviceHelperCache";
@@ -5352,24 +5351,23 @@ app.on("before-quit", (event) => {
 // already durable: record() writes the queue file synchronously, so a send
 // that misses this window is flushed on the next launch instead of lost.
 const WILL_QUIT_DIAGNOSTICS_FLUSH_BUDGET_MS = 2_000;
-const willQuitDiagnostics = makeWillQuitDiagnosticsCoordinator();
 
-app.on("will-quit", (event) => {
-  // `will-quit` is the committed quit signal: it does not fire when a quit is
-  // cancelled. The graceful path below re-enters it via its own `app.quit()`,
-  // so the coordinator's once-guard gates the record itself: one successful
-  // exit records exactly one app_quit, and the second firing is a no-op.
-  if (!willQuitDiagnostics.beginQuit()) {
-    return;
-  }
+// `once` is the whole once-guard: the graceful path below re-enters
+// `will-quit` via its own `app.quit()`, and only the first firing may record
+// app_quit — one successful exit records exactly one event, and the second
+// firing finds no listener. A missed flush window is covered by the durable
+// queue on the next launch, never by re-recording.
+app.once("will-quit", (event) => {
   recordDiagnosticsEvent({ kind: "app_quit" });
   const diagnostics = diagnosticsClient.getState();
+  // Hold the exit only for a flushable batch: the updater's quit-and-install
+  // owns its exit, a disabled client has nothing to send, and an empty queue
+  // has no batch. In every other case the queued events survive to the next
+  // launch, so the exit proceeds.
   if (
-    !willQuitDiagnostics.shouldHoldForFlush({
-      updaterQuitAndInstallInFlight: isUpdaterQuitAndInstallInFlight,
-      diagnosticsEnabled: diagnostics.enabled,
-      queuedEventCount: diagnostics.queuedEventCount,
-    })
+    isUpdaterQuitAndInstallInFlight ||
+    !diagnostics.enabled ||
+    diagnostics.queuedEventCount === 0
   ) {
     return;
   }
@@ -5383,8 +5381,7 @@ app.on("will-quit", (event) => {
     .catch(() => undefined)
     .then(() => {
       // Re-enter the normal quit flow: before-quit short-circuits on
-      // `desktopShutdownComplete`, and this handler's once-guard makes the
-      // second will-quit a no-op.
+      // `desktopShutdownComplete`, and this once-listener is already gone.
       app.quit();
     });
 });
