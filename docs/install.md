@@ -85,7 +85,7 @@ Every release publishes `SHA256SUMS` **and an SSH signature (`SHA256SUMS.sig`)**
 
 **What is not verified:** the one-line commands fetch the installer scripts themselves (`scripts/install.sh`, `scripts/install-macos.sh`, `scripts/install-linux.sh`, `scripts/install-windows.ps1`) over HTTPS from `raw.githubusercontent.com` at the resolved release tag and execute them directly. Those scripts are not signature-verified - only the release artifacts they download are. The resolved tag pins which ref the scripts come from and HTTPS authenticates the transport, but a compromised tag or repository could serve a modified script. If your threat model includes a compromised repository, clone the repo at a tag you have audited and run the scripts locally instead (see [Standalone Script Usage](#2-standalone-script-usage)).
 
-Keep the private signing key (`SYNARA_RELEASE_SIGNING_KEY` repository secret) private; rotate it by updating the secret and `scripts/release-signing.pub` in the same release.
+Keep the private signing key (`SYNARA_RELEASE_SIGNING_KEY` repository secret) private; rotate it by updating the secret, `scripts/release-signing.pub`, and the key embedded in all three installers in the same release. `node scripts/check-release-signing-sync.ts` (also run by the unit tests) fails when any of the four pinned copies drifts apart.
 
 ## Updating
 
