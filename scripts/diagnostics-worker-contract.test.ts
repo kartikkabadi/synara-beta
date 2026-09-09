@@ -13,7 +13,7 @@ import {
   sanitizeDiagnosticsEvent,
   type SanitizeContext,
 } from "../apps/desktop/src/diagnosticsSanitizer";
-import { validateEvent } from "../infrastructure/diagnostics-worker/src/contract";
+import { validateEvent, type JsonValue } from "../infrastructure/diagnostics-worker/src/contract";
 
 const CONTEXT: SanitizeContext = {
   appVersion: "0.8.3-beta.1",
@@ -93,7 +93,10 @@ describe("diagnostics worker contract", () => {
     for (const input of VALID_INPUTS) {
       const sanitized = sanitizeDiagnosticsEvent(input, context());
       expect(sanitized).not.toBeNull();
-      expect(validateEvent(sanitized?.event)).toBe(true);
+      // The worker sees events after JSON round-tripping, so mirror that in the
+      // type boundary test rather than asserting on the in-memory nominal type.
+      const wireEvent = JSON.parse(JSON.stringify(sanitized?.event)) as JsonValue;
+      expect(validateEvent(wireEvent)).toBe(true);
     }
   });
 

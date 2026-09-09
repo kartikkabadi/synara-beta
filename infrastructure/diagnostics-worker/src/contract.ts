@@ -14,10 +14,11 @@ export type JsonValue =
   | number
   | boolean
   | null
-  | { readonly [key: string]: JsonValue }
-  | readonly JsonValue[];
+  | { readonly [key: string]: JsonValue | undefined }
+  | readonly (JsonValue | undefined)[];
 
 export interface DiagnosticsEvent {
+  readonly [key: string]: JsonValue | undefined;
   schemaVersion: number;
   kind: string;
   eventId: string;
@@ -101,12 +102,12 @@ const OPTIONAL_FIELD_RULES = {
 // Fields each kind requires. An optional field is only allowed on kinds that
 // require it — the same rule the desktop sanitizer enforces via excess-property
 // rejection, so both sides accept exactly the same events.
-const REQUIRED_FIELDS_BY_KIND = {
+const REQUIRED_FIELDS_BY_KIND: Record<string, ReadonlyArray<string>> = {
   session_started: ["provider"],
   session_ended: ["provider", "durationBucket", "outcome"],
   feature_used: ["feature"],
   error: ["errorCode", "errorSurface"],
-} as const satisfies Record<string, ReadonlyArray<string>>;
+};
 
 const ALLOWED_KEYS: Set<string> = new Set([
   "schemaVersion",
@@ -131,7 +132,9 @@ function isNumber(value: JsonValue | undefined): value is number {
   );
 }
 
-export function isPlainObject(value: JsonValue | undefined): value is Record<string, JsonValue> {
+export function isPlainObject(
+  value: JsonValue | undefined,
+): value is Record<string, JsonValue | undefined> {
   return !Array.isArray(value) && Object.prototype.toString.call(value) === "[object Object]";
 }
 
