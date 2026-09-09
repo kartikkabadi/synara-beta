@@ -21,7 +21,11 @@ interface CapturingEnv extends Env {
   counters: Map<string, number>;
 }
 
-function makeEnv(options?: { counters?: Map<string, number>; failQuota?: boolean }): CapturingEnv {
+function makeEnv(options?: {
+  counters?: Map<string, number>;
+  failQuota?: boolean;
+  failInsert?: boolean;
+}): CapturingEnv {
   const batches: D1PreparedStatement[][] = [];
   const counters = options?.counters ?? new Map<string, number>();
   const db: D1Database = {
@@ -47,12 +51,17 @@ function makeEnv(options?: { counters?: Map<string, number>; failQuota?: boolean
             const key = `${String(bound[0])}|${String(bound[1])}`;
             counters.set(key, (counters.get(key) ?? 0) + Number(bound[2]));
           }
+          if (sql.startsWith("UPDATE rate_counters")) {
+            const key = `${String(bound[1])}|${String(bound[2])}`;
+            counters.set(key, Math.max(0, (counters.get(key) ?? 0) - Number(bound[0])));
+          }
           return {};
         },
       };
       return statement;
     },
     batch: async (statements) => {
+      if (options?.failInsert === true) throw new Error("d1 write failed");
       batches.push(statements);
       return statements.map((): D1BatchResult => ({}));
     },
@@ -267,12 +276,94 @@ describe("diagnostics worker fetch handler", () => {
     expect(response.status).toBe(429);
   });
 
+  it("returns the reservation when a batch crosses the hourly limit", async () => {
+    const env = makeEnv();
+    const first = await worker.fetch(
+      makeIngestRequest({ events: [workerEvent("app_start")] }),
+      env,
+    );
+    expect(first.status).toBe(202);
+    // Seed the install scope one event below its limit so the next batch of
+    // two crosses it. The batch must be rejected without keeping the
+    // reservation, or a single batch straddling the threshold would lock the
+    // install out for the rest of the hour.
+    const installKey = [...env.counters.keys()].find((key) => key.startsWith("install:"));
+    env.counters.set(installKey ?? "", 599);
+    const rejected = await worker.fetch(
+      makeIngestRequest({ events: [workerEvent("app_start"), workerEvent("test")] }),
+      env,
+    );
+    expect(rejected.status).toBe(429);
+    expect(env.counters.get(installKey ?? "")).toBe(599);
+    // The handed-back budget is usable again within the same hour window.
+    const recovered = await worker.fetch(
+      makeIngestRequest({ events: [workerEvent("app_start")] }),
+      env,
+    );
+    expect(recovered.status).toBe(202);
+    expect(env.counters.get(installKey ?? "")).toBe(600);
+  });
+
   it("fails closed with 503 when the quota store is unavailable", async () => {
     const response = await worker.fetch(
       makeIngestRequest({ events: [workerEvent("app_start")] }),
       makeEnv({ failQuota: true }),
     );
     expect(response.status).toBe(503);
+  });
+
+  it("rejects an invalid batch without spending quota", async () => {
+    const env = makeEnv();
+    const response = await worker.fetch(
+      makeIngestRequest({
+        events: [{ ...workerEvent("session_started"), provider: undefined }],
+      }),
+      env,
+    );
+    expect(response.status).toBe(422);
+    expect(env.counters.size).toBe(0);
+  });
+
+  it("releases the reservation when the event write fails", async () => {
+    const options = { failInsert: true };
+    const env = makeEnv(options);
+    const failed = await worker.fetch(
+      makeIngestRequest({ events: [workerEvent("app_start")] }),
+      env,
+    );
+    expect(failed.status).toBe(503);
+    // The reservation was handed back, so the next write gets a clean budget.
+    for (const count of env.counters.values()) {
+      expect(count).toBe(0);
+    }
+    options.failInsert = false;
+    const recovered = await worker.fetch(
+      makeIngestRequest({ events: [workerEvent("app_start")] }),
+      env,
+    );
+    expect(recovered.status).toBe(202);
+  });
+
+  it("rejects a flooding sender without spending durable quota", async () => {
+    const env = makeEnv();
+    const sender = { "cf-connecting-ip": "203.0.113.7" };
+    // Rotating install ids keep the per-install limit out of the way so only
+    // the sender cap can reject. 48 batches of 50 events reach the 2400 cap.
+    for (let batch = 0; batch < 48; batch += 1) {
+      const installId = `0f1a2b3c-0000-4000-8000-${String(batch).padStart(12, "0")}`;
+      const events = Array.from({ length: 50 }, () => workerEvent("test", installId));
+      const response = await worker.fetch(makeIngestRequest({ events }, sender), env);
+      expect(response.status).toBe(202);
+    }
+    const globalKey = [...env.counters.keys()].find((key) => key.startsWith("global|"));
+    expect(env.counters.get(globalKey ?? "global|")).toBe(2400);
+    const installId = "0f1a2b3c-0000-4000-8000-000000000049";
+    const events = Array.from({ length: 50 }, () => workerEvent("test", installId));
+    const rejected = await worker.fetch(makeIngestRequest({ events }, sender), env);
+    expect(rejected.status).toBe(429);
+    // The rejection happened before the durable reservation: counters are
+    // unchanged by the refused batch.
+    expect(env.counters.get(globalKey ?? "global|")).toBe(2400);
   });
 
   it("scheduled deletes old events and stale rate counters", async () => {
