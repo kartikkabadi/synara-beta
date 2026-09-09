@@ -109,6 +109,9 @@ restore_on_exit() {
   fi
   hdiutil detach "$mnt" >/dev/null 2>&1 || true
   rm -rf "$tmp"
+  if [ -n "${lock_held:-}" ]; then
+    rm -rf "${lock_dir:-}"
+  fi
 }
 trap restore_on_exit EXIT
 mkdir -p "$mnt"
@@ -144,6 +147,40 @@ fi
 
 version="${tag#v}"
 app="/Applications/Synara Beta.app"
+
+# Serialize concurrent installs: the installed-version check and the app swap
+# below must commit together, or two overlapping updates can both pass the
+# version check against the same old app and the older one can finish last,
+# replacing the newer app and deleting it as its backup. mkdir is atomic, so
+# it works as a lock on stock macOS (no flock). A lock whose owner is gone is
+# stolen; a live holder is waited out with a timeout instead of blocking
+# forever. The lock is released when the process exits.
+lock_dir="${XDG_STATE_HOME:-$HOME/.local/state}/synara-beta-installer/install.lock"
+mkdir -p "${lock_dir%/*}"
+acquire_install_lock() {
+  local waited=0 owner
+  while :; do
+    if mkdir "$lock_dir" 2>/dev/null; then
+      echo "$$" > "$lock_dir/pid"
+      lock_held=1
+      return 0
+    fi
+    owner="$(cat "$lock_dir/pid" 2>/dev/null || true)"
+    if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then
+      rm -rf "$lock_dir" # owner exited without cleanup: steal the stale lock
+      continue
+    fi
+    if [ "$waited" -ge 900 ]; then
+      echo "install-macos.sh: another install is holding $lock_dir; timed out waiting." >&2
+      return 1
+    fi
+    sleep 5
+    waited=$((waited + 5))
+  done
+}
+if ! acquire_install_lock; then
+  exit 1
+fi
 
 # Update semantics: re-running this installer is the update path. Skip when the
 # installed version already matches; refuse downgrades without --force. The

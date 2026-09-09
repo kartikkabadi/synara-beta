@@ -77,6 +77,21 @@ describe("install-macos.sh", () => {
     NodeAssert.match(missing.stderr, /--tag requires a value/);
   });
 
+  it("covers the version check and app swap with one install lock", () => {
+    const lock = script.indexOf("if ! acquire_install_lock; then");
+    const versionCheck = script.indexOf('installed_version="$(/usr/libexec/PlistBuddy');
+    const swap = script.indexOf('mv "$app" "$old_app"');
+    NodeAssert.ok(lock > -1, "installer must take an install lock");
+    NodeAssert.ok(versionCheck > lock, "version check must run under the lock");
+    NodeAssert.ok(swap > lock, "app swap must run under the lock");
+    // The lock is released when the process exits, after any restore.
+    NodeAssert.match(script, /rm -rf "\$\{lock_dir:-\}"/);
+    NodeAssert.ok(
+      script.indexOf('rm -rf "${lock_dir:-}"') > script.indexOf("previous installation restored"),
+      "lock release must follow the rollback in the EXIT trap",
+    );
+  });
+
   it("refuses to run on non-Darwin hosts", () => {
     const sandbox = NodeFS.mkdtempSync("/tmp/synara-macos-non-darwin-");
     const stubBin = NodePath.join(sandbox, "bin");
