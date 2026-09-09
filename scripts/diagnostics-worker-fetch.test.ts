@@ -5,7 +5,7 @@
 //          validator; this file checks the request handler that wraps it.
 // Layer: Scripts (cross-boundary integration test)
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import worker, {
   type D1BatchResult,
@@ -19,6 +19,8 @@ import worker, {
 interface CapturingEnv extends Env {
   batches: D1PreparedStatement[][];
   counters: Map<string, number>;
+  /** Releases the first event write when it was parked via holdFirstInsert. */
+  releaseFirstInsert: () => void;
 }
 
 function makeEnv(options?: {
@@ -26,9 +28,21 @@ function makeEnv(options?: {
   failQuota?: boolean;
   failGlobalReserve?: boolean;
   failInsert?: boolean;
+  holdFirstInsert?: boolean;
 }): CapturingEnv {
   const batches: D1PreparedStatement[][] = [];
   const counters = options?.counters ?? new Map<string, number>();
+  // The first event write can be parked on this gate so a test can roll the
+  // sender window over while that request is still in flight; on release the
+  // write fails, which is what drives the post-charge refund path.
+  let releaseFirstInsert: (() => void) | undefined;
+  const firstInsertGate =
+    options?.holdFirstInsert === true
+      ? new Promise<void>((resolve) => {
+          releaseFirstInsert = resolve;
+        })
+      : undefined;
+  let firstInsertSeen = false;
   const db: D1Database = {
     prepare: (sql: string) => {
       let bound: D1Value[] = [];
@@ -67,12 +81,24 @@ function makeEnv(options?: {
       return statement;
     },
     batch: async (statements) => {
+      if (!firstInsertSeen) {
+        firstInsertSeen = true;
+        if (firstInsertGate !== undefined) {
+          await firstInsertGate;
+          throw new Error("d1 write failed");
+        }
+      }
       if (options?.failInsert === true) throw new Error("d1 write failed");
       batches.push(statements);
       return statements.map((): D1BatchResult => ({}));
     },
   };
-  return { DB: db, batches, counters };
+  return {
+    DB: db,
+    batches,
+    counters,
+    releaseFirstInsert: () => releaseFirstInsert?.(),
+  };
 }
 
 function workerEvent(kind: string, installId?: string) {
@@ -428,6 +454,60 @@ describe("diagnostics worker fetch handler", () => {
       env,
     );
     expect(recovered.status).toBe(202);
+  });
+
+  it("does not refund an expired sender window into the new one", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const options: { failInsert?: boolean; holdFirstInsert?: boolean } = {
+        failInsert: true,
+        holdFirstInsert: true,
+      };
+      const env = makeEnv(options);
+      const sender = { "cf-connecting-ip": "203.0.113.10" };
+      // Request A charges 50 sender events, then parks on its event write.
+      const parkedEvents = Array.from(
+        { length: 50 },
+        () => workerEvent("test", "0f1a2b3c-0000-4000-8000-000000000600"),
+      );
+      const parked = worker.fetch(makeIngestRequest({ events: parkedEvents }, sender), env);
+      // Drain microtasks so A is suspended inside its gated write with the
+      // spend already charged to the current sender window.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      // The hourly sender window rolls over while A is still in flight.
+      vi.setSystemTime(new Date(Date.now() + 3_600_000 + 1));
+      // Request B opens the fresh window and spends 2350 of the 2400 budget.
+      options.failInsert = false;
+      for (let batch = 0; batch < 47; batch += 1) {
+        const installId = `0f1a2b3c-0000-4000-8000-${String(601 + batch).padStart(12, "0")}`;
+        const events = Array.from({ length: 50 }, () => workerEvent("test", installId));
+        const response = await worker.fetch(makeIngestRequest({ events }, sender), env);
+        expect(response.status).toBe(202);
+      }
+      // A's parked write now fails and refunds. The refund must match the
+      // window that charged it: the rolled-over window must keep its budget.
+      env.releaseFirstInsert();
+      const parkedResponse = await parked;
+      expect(parkedResponse.status).toBe(503);
+      // Two more batches of 50: the first reaches the 2400 cap exactly, and
+      // the one after is refused by the sender limit — not by durable quota.
+      // A refund that leaked into this window would leave room for the last
+      // batch and turn this rejection into a 202.
+      const atCapEvents = Array.from(
+        { length: 50 },
+        () => workerEvent("test", "0f1a2b3c-0000-4000-8000-000000000648"),
+      );
+      const atCap = await worker.fetch(makeIngestRequest({ events: atCapEvents }, sender), env);
+      expect(atCap.status).toBe(202);
+      const cappedEvents = Array.from(
+        { length: 50 },
+        () => workerEvent("test", "0f1a2b3c-0000-4000-8000-000000000649"),
+      );
+      const capped = await worker.fetch(makeIngestRequest({ events: cappedEvents }, sender), env);
+      expect(capped.status).toBe(429);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rejects a flooding sender without spending durable quota", async () => {

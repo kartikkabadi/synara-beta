@@ -143,9 +143,12 @@ async function handleIngest(request: Request, env: Env): Promise<Response> {
   }
   // Best-effort sender-level limit (per isolate; no IP is ever stored). It
   // blunts floods inside one isolate and runs before the durable reservation
-  // so a rejected batch cannot spend quota it never used.
+  // so a rejected batch cannot spend quota it never used. The returned
+  // reservation carries the exact window the spend was charged to, so a later
+  // refund can only hand budget back to that same window.
   const senderIp = request.headers.get("cf-connecting-ip") ?? "unknown";
-  if (!withinSenderRateLimit(senderIp, validEvents.length)) {
+  const senderReservation = withinSenderRateLimit(senderIp, validEvents.length);
+  if (senderReservation === null) {
     return Response.json({ error: "rate limited" }, { status: 429 });
   }
   // Durable quota: atomic D1 counter reservations. A single upsert statement
@@ -165,7 +168,7 @@ async function handleIngest(request: Request, env: Env): Promise<Response> {
   } catch {
     // A missing rate_counters table (schema not re-applied) must not surface
     // as an opaque worker exception.
-    refundSenderRateLimit(senderIp, validEvents.length);
+    refundSenderRateLimit(senderReservation);
     return Response.json({ error: "quota store unavailable" }, { status: 503 });
   }
   let globalCount: number;
@@ -175,7 +178,7 @@ async function handleIngest(request: Request, env: Env): Promise<Response> {
     // The install reservation landed but the global one threw: hand the first
     // back, or a partial failure would inflate the install scope for an hour.
     await releaseHourlyQuota(env, installScope, windowStart, validEvents.length).catch(() => {});
-    refundSenderRateLimit(senderIp, validEvents.length);
+    refundSenderRateLimit(senderReservation);
     return Response.json({ error: "quota store unavailable" }, { status: 503 });
   }
   if (installCount > PER_INSTALL_HOURLY_LIMIT || globalCount > GLOBAL_HOURLY_LIMIT) {
@@ -185,7 +188,7 @@ async function handleIngest(request: Request, env: Env): Promise<Response> {
       releaseHourlyQuota(env, installScope, windowStart, validEvents.length),
       releaseHourlyQuota(env, "global", windowStart, validEvents.length),
     ]).catch(() => {});
-    refundSenderRateLimit(senderIp, validEvents.length);
+    refundSenderRateLimit(senderReservation);
     return Response.json({ error: "rate limited" }, { status: 429 });
   }
   const receivedAt = new Date().toISOString();
@@ -223,7 +226,7 @@ async function handleIngest(request: Request, env: Env): Promise<Response> {
       releaseHourlyQuota(env, installScope, windowStart, validEvents.length),
       releaseHourlyQuota(env, "global", windowStart, validEvents.length),
     ]).catch(() => {});
-    refundSenderRateLimit(senderIp, validEvents.length);
+    refundSenderRateLimit(senderReservation);
     return Response.json({ error: "event store unavailable" }, { status: 503 });
   }
   return Response.json({ accepted: validEvents.length }, { status: 202 });
@@ -236,9 +239,26 @@ const SENDER_WINDOW_MS = 60 * 60 * 1000;
 const MAX_TRACKED_SENDERS = 10_000;
 const senderHits = new Map<string, { count: number; resetAt: number }>();
 
-function withinSenderRateLimit(senderIp: string, incoming: number): boolean {
+// The exact sender-window spend a request was charged: the sender identity
+// plus the resetAt of the window that absorbed it. A refund may only hand
+// budget back to that same window.
+interface SenderRateReservation {
+  readonly senderIp: string;
+  readonly count: number;
+  readonly resetAt: number;
+}
+
+// Returns the reservation for the spend, or null when the batch is refused.
+// An "unknown" sender is never tracked: its reservation carries resetAt 0, so
+// a refund finds no window and is a no-op.
+function withinSenderRateLimit(
+  senderIp: string,
+  incoming: number,
+): SenderRateReservation | null {
   const now = Date.now();
-  if (senderIp === "unknown") return true;
+  if (senderIp === "unknown") {
+    return { senderIp, count: incoming, resetAt: 0 };
+  }
   if (senderHits.size > MAX_TRACKED_SENDERS) {
     for (const [key, entry] of senderHits) {
       if (entry.resetAt <= now) senderHits.delete(key);
@@ -247,24 +267,30 @@ function withinSenderRateLimit(senderIp: string, incoming: number): boolean {
   }
   const entry = senderHits.get(senderIp);
   if (!entry || entry.resetAt <= now) {
-    senderHits.set(senderIp, { count: incoming, resetAt: now + SENDER_WINDOW_MS });
-    return true;
+    const resetAt = now + SENDER_WINDOW_MS;
+    senderHits.set(senderIp, { count: incoming, resetAt });
+    return { senderIp, count: incoming, resetAt };
   }
   entry.count += incoming;
-  return entry.count <= PER_SENDER_HOURLY_LIMIT;
+  if (entry.count > PER_SENDER_HOURLY_LIMIT) return null;
+  return { senderIp, count: incoming, resetAt: entry.resetAt };
 }
 
 // Hands a rejected batch's spend back to the sender's in-memory window, so a
 // request refused after the sender check (over-limit rejection, failed D1
 // write) never costs sender budget: only events that actually land spend it,
-// and a transient D1 outage cannot lock an honest sender out. Best effort —
-// a lost refund only tightens the limit.
-function refundSenderRateLimit(senderIp: string, incoming: number): void {
-  if (senderIp === "unknown") return;
-  const entry = senderHits.get(senderIp);
-  // A rolled-over window already forgot the spend; never debit the new one.
-  if (!entry || entry.resetAt <= Date.now()) return;
-  entry.count = Math.max(0, entry.count - incoming);
+// and a transient D1 outage cannot lock an honest sender out. The refund
+// matches the reservation's resetAt, so it can only debit the very window
+// that was charged — a window that rolled over while the request was in
+// flight already forgot the spend, and debiting the new window instead would
+// hand it free budget. Best effort — a lost refund only tightens the limit.
+function refundSenderRateLimit(reservation: SenderRateReservation): void {
+  if (reservation.resetAt === 0) return; // untracked sender
+  const entry = senderHits.get(reservation.senderIp);
+  // A rolled-over or evicted window no longer holds the spend; only the
+  // exact charged window may be decremented.
+  if (!entry || entry.resetAt !== reservation.resetAt) return;
+  entry.count = Math.max(0, entry.count - reservation.count);
 }
 
 // Fixed hourly buckets keep the counter a single upsertable row per scope.
