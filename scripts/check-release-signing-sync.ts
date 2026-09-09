@@ -36,7 +36,13 @@ function signersLineOf(source: string, label: string): string {
   return line;
 }
 
-function main(): void {
+/**
+ * Returns one entry per installer whose embedded key is missing, duplicated, or
+ * differs from scripts/release-signing.pub. An empty list means all four pinned
+ * locations agree.
+ */
+export function findReleaseSigningKeyDrift(repoRoot: string): string[] {
+  const mismatches: string[] = [];
   let pinnedLine: string;
   try {
     pinnedLine = signersLineOf(
@@ -44,28 +50,28 @@ function main(): void {
       publicKeyPath,
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`Release-signing key check failed: ${message}`);
-    process.exit(1);
+    mismatches.push(error instanceof Error ? error.message : String(error));
+    return mismatches;
   }
 
-  const mismatches: string[] = [];
   for (const installerPath of installerPaths) {
-    let embeddedLine: string;
     try {
-      embeddedLine = signersLineOf(
+      const embeddedLine = signersLineOf(
         readFileSync(resolve(repoRoot, installerPath), "utf8"),
         installerPath,
       );
+      if (embeddedLine !== pinnedLine) {
+        mismatches.push(`${installerPath}: embedded key differs from ${publicKeyPath}`);
+      }
     } catch (error) {
       mismatches.push(error instanceof Error ? error.message : String(error));
-      continue;
-    }
-    if (embeddedLine !== pinnedLine) {
-      mismatches.push(`${installerPath}: embedded key differs from ${publicKeyPath}`);
     }
   }
+  return mismatches;
+}
 
+function main(): void {
+  const mismatches = findReleaseSigningKeyDrift(repoRoot);
   if (mismatches.length === 0) {
     console.log(
       "Release-signing public key is identical in scripts/release-signing.pub and all installers.",
@@ -83,4 +89,7 @@ function main(): void {
   process.exit(1);
 }
 
-main();
+const invokedDirectly = process.argv[1] === fileURLToPath(import.meta.url);
+if (invokedDirectly) {
+  main();
+}
