@@ -518,15 +518,14 @@ function trimToUndefined(value: string | null | undefined): string | undefined {
 // Pi extensions send TUI text with ANSI colors and running timers
 // (e.g. "Moonwalking... (1m 23s)"). Clean before compare/emit so the
 // timeline shows one readable row instead of 200+ raw rows.
-function cleanPiUiText(value: string): string {
+export function cleanPiUiText(value: string): string {
   return value
     .replace(/\[[0-9;]*[A-Za-z]/g, "")
-    .replace(/\[[0-9;]*m/g, "")
+    .replace(/\[[0-9;]+m/g, "")
     .replace(/\([A-B0-9]/g, "")
-    .replace(/\s*\(\d+\s*m[^)]*\)?/g, "")
-    .replace(/\s*\(\d+\s*m\s*$/g, "")
+    .replace(/\s*\(\d+\s*m(?:\s+\d+\s*s)?\)?(?=\s*$)/g, "")
     .replace(/(^|\s)\.(?=\s|$)/g, "$1")
-    .replace(/[·•●○◌○◍◎◦\u2000-\u206F]+/g, " ")
+    .replace(/[·•●○◌◍◎◦]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -1558,7 +1557,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       const statusTexts = new Map<string, string>();
       let workingMessage: string | undefined;
       let lastPluginSummary: string | undefined;
-      let lastPluginAt = 0;
+      let lastPluginTurnId: TurnId | undefined;
       const warnUnsupported = (method: string) => {
         if (unsupportedWarnings.has(method)) return;
         unsupportedWarnings.add(method);
@@ -1579,10 +1578,15 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       const emitPluginProgress = (summary: string) => {
         const normalized = cleanPiUiTextToUndefined(summary);
         if (!normalized) return;
-        const now = Date.now();
-        if (normalized === lastPluginSummary && now - lastPluginAt < 2000) return;
+        // Dedupe on the summary alone (a sustained task must not pile up a
+        // row every couple of seconds), but reset when the turn changes so a
+        // later turn can emit the same text again.
+        if (context.activeTurnId !== lastPluginTurnId) {
+          lastPluginTurnId = context.activeTurnId;
+          lastPluginSummary = undefined;
+        }
+        if (normalized === lastPluginSummary) return;
         lastPluginSummary = normalized;
-        lastPluginAt = now;
         offerRuntimeEvent({
           ...makeEventBase(context),
           type: "tool.progress",

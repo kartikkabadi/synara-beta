@@ -14,6 +14,7 @@ import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import {
+  cleanPiUiText,
   createPiModelRuntime,
   ensurePiAnthropicCatalogModels,
   getPiDiscoverableModels,
@@ -614,5 +615,17 @@ describe("Pi extension UI helpers", () => {
     expect(PLAIN_PI_EXTENSION_THEME.fg("accent", "ready")).toBe("ready");
     expect(PLAIN_PI_EXTENSION_THEME.bold("done")).toBe("done");
     expect(PLAIN_PI_EXTENSION_THEME.getThinkingBorderColor("medium")("thinking")).toBe("thinking");
+  });
+
+  it("strips ANSI colors and running timers but keeps ordinary text", () => {
+    expect(
+      cleanPiUiText("[38;2;215;119;87mMoonwalking...[0m [38;2;153;153;153m (0m 5s)[0m"),
+    ).toBe("Moonwalking...");
+    expect(cleanPiUiText("Moonwalking... (1m 23s)")).toBe("Moonwalking...");
+    expect(cleanPiUiText("Install [m] package")).toBe("Install [m] package");
+    expect(cleanPiUiText("Sync (1m complete")).toBe("Sync (1m complete");
+    expect(cleanPiUiText("level reached — nice work…")).toBe("level reached — nice work…");
+    expect(cleanPiUiText("• loading")).toBe("loading");
+    expect(cleanPiUiText(". . caveman level: FULL")).toBe("caveman level: FULL");
   });
 });
