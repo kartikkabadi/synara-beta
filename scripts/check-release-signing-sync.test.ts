@@ -32,7 +32,10 @@ function stageFixture(
 ): string {
   const root = mkdtempSync(join(tmpdir(), "release-signing-drift-"));
   mkdirSync(join(root, "scripts"), { recursive: true });
-  writeFileSync(join(root, "scripts/release-signing.pub"), `${options.pinnedLine ?? PINNED_LINE}\n`);
+  writeFileSync(
+    join(root, "scripts/release-signing.pub"),
+    `${options.pinnedLine ?? PINNED_LINE}\n`,
+  );
   for (const installerPath of installerRelativePaths) {
     const lines = options.installerLines?.[installerPath] ?? [options.pinnedLine ?? PINNED_LINE];
     writeFileSync(join(root, installerPath), lines.map((line) => `${line}\n`).join(""));

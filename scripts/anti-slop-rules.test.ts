@@ -300,8 +300,7 @@ describe("no-unknown-parameters", () => {
       {
         "class-alias-shadow.ts":
           "type T = unknown;\nconst C = class T {\n  m(input: T) { return input; }\n};\nexport function f(value: T) { return value; }\n",
-        "control.ts":
-          "type T = unknown;\nexport function f(input: T) { return input; }\n",
+        "control.ts": "type T = unknown;\nexport function f(input: T) { return input; }\n",
       },
       { "anti-slop/no-unknown-parameters": "error" },
     );

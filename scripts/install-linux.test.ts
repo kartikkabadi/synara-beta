@@ -97,7 +97,11 @@ describe("install-linux.sh", () => {
     );
     NodeFS.chmodSync(NodePath.join(stubBin, "uname"), 0o755);
     try {
-      for (const tag of ["v9.9.9-beta.10000000000", "v9.9.9-beta.9999999999", "v9.9.9-beta.009999999999"]) {
+      for (const tag of [
+        "v9.9.9-beta.10000000000",
+        "v9.9.9-beta.9999999999",
+        "v9.9.9-beta.009999999999",
+      ]) {
         const result = tryBash(scriptPath, ["--tag", tag], {
           ...process.env,
           PATH: `${stubBin}${NodePath.delimiter}${process.env.PATH ?? ""}`,
