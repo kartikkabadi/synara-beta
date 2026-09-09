@@ -11755,8 +11755,11 @@ export default function ChatView({
         terminalContexts: [],
         fileComments: [],
         pastedTexts: [],
-        skills: lastUserMessage?.skills ?? [],
-        mentions: lastUserMessage?.mentions ?? [],
+        skills: lastUserMessage.skills ?? [],
+        mentions: lastUserMessage.mentions ?? [],
+        // The transcript fallback has no snapshot; the failed turn's plan
+        // linkage survives only on the turn record, so recover it from there.
+        sourceProposedPlan: retriedTurn.sourceProposedPlan,
       }),
     );
   }, [

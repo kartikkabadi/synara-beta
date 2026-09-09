@@ -3449,6 +3449,10 @@ describe("findTranscriptFallbackRetryTarget", () => {
       erroredPlanTurn,
     );
     expect(target?.message).toBe(failedUserMessage);
+    // Identity, not a copy: the retry reads sourceProposedPlan off this exact
+    // turn record, so the retried thread.turn.start keeps the linkage.
+    expect(target?.turn).toBe(erroredPlanTurn);
+    expect(target?.turn.sourceProposedPlan).toEqual(planReference);
   });
 
   it("rejects a live turn so a retry cannot interrupt or duplicate it", () => {
