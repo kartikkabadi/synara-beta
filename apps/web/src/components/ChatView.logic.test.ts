@@ -3434,6 +3434,7 @@ describe("findTranscriptFallbackRetryTarget", () => {
     assistantMessageId: null,
     sourceProposedPlan: planReference,
   };
+  const currentError = { error: "boom", errorVersion: 3 };
   const userMessage = (turnId: TurnId | null, text = "Implement the plan"): ChatMessage => ({
     id: MessageId.makeUnsafe(text.toLowerCase().replace(/\s+/g, "-")),
     role: "user",
@@ -3448,6 +3449,8 @@ describe("findTranscriptFallbackRetryTarget", () => {
     const target = findTranscriptFallbackRetryTarget(
       [userMessage(TurnId.makeUnsafe("turn-older"), "Propose a plan"), failedUserMessage],
       erroredPlanTurn,
+      currentError,
+      "boom",
     );
     expect(target?.message).toBe(failedUserMessage);
     // Identity, not a copy: the retry reads sourceProposedPlan off this exact
@@ -3458,11 +3461,12 @@ describe("findTranscriptFallbackRetryTarget", () => {
 
   it("rejects a live turn so a retry cannot interrupt or duplicate it", () => {
     expect(
-      findTranscriptFallbackRetryTarget([userMessage(erroredTurnId)], {
-        ...erroredPlanTurn,
-        state: "running",
-        completedAt: null,
-      }),
+      findTranscriptFallbackRetryTarget(
+        [userMessage(erroredTurnId)],
+        { ...erroredPlanTurn, state: "running", completedAt: null },
+        currentError,
+        "boom",
+      ),
     ).toBeNull();
   });
 
@@ -3471,27 +3475,33 @@ describe("findTranscriptFallbackRetryTarget", () => {
     // still the latest but its own dispatch never produced a transcript message
     // — the fallback must not resend the older turn's input.
     expect(
-      findTranscriptFallbackRetryTarget([userMessage(TurnId.makeUnsafe("turn-older"))], {
-        ...erroredPlanTurn,
-        turnId: TurnId.makeUnsafe("turn-newer"),
-      }),
+      findTranscriptFallbackRetryTarget(
+        [userMessage(TurnId.makeUnsafe("turn-older"))],
+        { ...erroredPlanTurn, turnId: TurnId.makeUnsafe("turn-newer") },
+        currentError,
+        "boom",
+      ),
     ).toBeNull();
   });
 
   it("rejects a transcript whose last user message never joined a turn", () => {
-    expect(findTranscriptFallbackRetryTarget([userMessage(null)], erroredPlanTurn)).toBeNull();
+    expect(
+      findTranscriptFallbackRetryTarget([userMessage(null)], erroredPlanTurn, currentError, "boom"),
+    ).toBeNull();
   });
 
   it("rejects a transcript with no user message at all", () => {
-    expect(findTranscriptFallbackRetryTarget([], erroredPlanTurn)).toBeNull();
+    expect(findTranscriptFallbackRetryTarget([], erroredPlanTurn, currentError, "boom")).toBeNull();
   });
 
   it("rejects a completed latest turn — its failure is not the card's error", () => {
     expect(
-      findTranscriptFallbackRetryTarget([userMessage(erroredTurnId)], {
-        ...erroredPlanTurn,
-        state: "completed",
-      }),
+      findTranscriptFallbackRetryTarget(
+        [userMessage(erroredTurnId)],
+        { ...erroredPlanTurn, state: "completed" },
+        currentError,
+        "boom",
+      ),
     ).toBeNull();
   });
 });
@@ -3522,33 +3532,65 @@ describe("hasThreadErrorRetryTarget", () => {
   const snapshot = { errorMessage: "boom", errorVersion: 1 };
 
   it("accepts a snapshot that still owns the current error", () => {
-    expect(hasThreadErrorRetryTarget(snapshot, { error: "boom", errorVersion: 1 }, [], null)).toBe(
-      true,
-    );
+    expect(
+      hasThreadErrorRetryTarget(snapshot, { error: "boom", errorVersion: 1 }, [], null, null),
+    ).toBe(true);
   });
 
   it("rejects a stale snapshot with no transcript fallback target", () => {
     // An approval or user-input response failure replaced the card: the
     // snapshot no longer owns it and no errored turn exists to replay.
-    expect(hasThreadErrorRetryTarget(snapshot, { error: "boom", errorVersion: 2 }, [], null)).toBe(
-      false,
-    );
+    expect(
+      hasThreadErrorRetryTarget(snapshot, { error: "boom", errorVersion: 2 }, [], null, null),
+    ).toBe(false);
   });
 
-  it("accepts the transcript fallback when the errored turn is the latest", () => {
+  it("accepts the transcript fallback when the card still shows the session failure", () => {
     expect(
       hasThreadErrorRetryTarget(
         undefined,
         { error: "boom", errorVersion: 1 },
         [userMessage(erroredTurnId)],
         erroredPlanTurn,
+        "boom",
       ),
     ).toBe(true);
   });
 
-  it("rejects when neither a snapshot nor a fallback target exists", () => {
-    expect(hasThreadErrorRetryTarget(undefined, { error: "boom", errorVersion: 1 }, [], null)).toBe(
-      false,
-    );
+  it("closes the transcript fallback once a newer client-side failure overwrites the error", () => {
+    // An attachment, script, approval, or user-input failure overwrites
+    // thread.error without touching the session's lastError: the card now
+    // belongs to that newer failure, and the old turn's input must not resend.
+    expect(
+      hasThreadErrorRetryTarget(
+        undefined,
+        { error: "You can attach up to 8 references per message.", errorVersion: 4 },
+        [userMessage(erroredTurnId)],
+        erroredPlanTurn,
+        "boom",
+      ),
+    ).toBe(false);
   });
+
+  it("rejects when neither a snapshot nor a fallback target exists", () => {
+    expect(
+      hasThreadErrorRetryTarget(undefined, { error: "boom", errorVersion: 1 }, [], null, null),
+    ).toBe(false);
+  });
+
+  it("keeps the fallback closed when the session error is null", () => {
+    // A client-side clear or a non-session error source: nothing ties the
+    // card to the errored turn.
+    expect(
+      hasThreadErrorRetryTarget(
+        undefined,
+        { error: "boom", errorVersion: 1 },
+        [userMessage(erroredTurnId)],
+        erroredPlanTurn,
+        null,
+      ),
+    ).toBe(false);
+  });
+});
+
 });

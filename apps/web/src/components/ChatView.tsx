@@ -396,6 +396,7 @@ import {
 } from "../composerDraftStore";
 import { useTemporaryThreadStore } from "../temporaryThreadStore";
 import { useComposerFocusRequestStore } from "../composerFocusRequestStore";
+import { normalizeThreadErrorMessage } from "../storeNormalization";
 import { useWorkflowRunUiStore, useWorkflowRunUiThreadState } from "../workflowRunUiStore";
 import { appendComposerPromptText } from "../lib/chatReferences";
 import {
@@ -11634,6 +11635,7 @@ export default function ChatView({
         getCurrentThreadErrorAndVersion(thread.id),
         thread.messages,
         thread.latestTurn,
+        normalizeThreadErrorMessage(thread.session?.lastError ?? null),
       ),
     );
   }, [activeThread, getCurrentThreadErrorAndVersion]);
@@ -11811,11 +11813,15 @@ export default function ChatView({
       return;
     }
     // The transcript fallback replays the input of the turn that errored. Any
-    // other error source — an approval, an unblock, an edit, or a dispatch that
-    // never produced a turn — must not resend an unrelated earlier message.
+    // other error source — an approval, an unblock, an edit, an attachment or
+    // script failure, or a dispatch that never produced a turn — must not
+    // resend an unrelated earlier message: the gate also requires the card to
+    // still show the session-projected failure that turn raised.
     const retryTarget = findTranscriptFallbackRetryTarget(
       activeThread.messages,
       activeThread.latestTurn,
+      retriedError,
+      normalizeThreadErrorMessage(activeThread.session?.lastError ?? null),
     );
     if (!retryTarget) {
       return;
