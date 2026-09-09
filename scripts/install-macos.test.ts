@@ -77,6 +77,46 @@ describe("install-macos.sh", () => {
     NodeAssert.match(missing.stderr, /--tag requires a value/);
   });
 
+  it("rejects beta numbers at the version-key sentinel before any download", () => {
+    // beta.10000000000 would overflow the 10-digit beta field in version_key
+    // and could sort above its own stable release, silently enabling a
+    // downgrade. The installer must refuse the tag outright.
+    NodeAssert.match(
+      script,
+      /beta number in '\$tag' is at or beyond the 10\^10 version-key sentinel; refusing to install\./,
+    );
+    const sentinel = script.indexOf("beta number in '$tag' is at or beyond");
+    NodeAssert.ok(sentinel > -1, "sentinel rejection must exist");
+    NodeAssert.ok(
+      script.indexOf("failed to fetch SHA256SUMS") > sentinel,
+      "sentinel rejection must run before the first download",
+    );
+  });
+
+  it("refuses a beta tag whose number overflows the version-key sentinel", () => {
+    const sandbox = NodeFS.mkdtempSync("/tmp/synara-macos-sentinel-");
+    const stubBin = NodePath.join(sandbox, "bin");
+    NodeFS.mkdirSync(stubBin, { recursive: true });
+    NodeFS.writeFileSync(
+      NodePath.join(stubBin, "uname"),
+      '#!/bin/sh\nif [ "$1" = "-s" ]; then echo Darwin; elif [ "$1" = "-m" ]; then echo arm64; else exit 1; fi\n',
+    );
+    NodeFS.chmodSync(NodePath.join(stubBin, "uname"), 0o755);
+    try {
+      for (const tag of ["v9.9.9-beta.10000000000", "v9.9.9-beta.9999999999", "v9.9.9-beta.009999999999"]) {
+        const result = tryBash(scriptPath, ["--tag", tag], {
+          ...process.env,
+          PATH: `${stubBin}${NodePath.delimiter}${process.env.PATH ?? ""}`,
+          HOME: sandbox,
+        });
+        NodeAssert.equal(result.status, 1);
+        NodeAssert.match(result.stderr, /at or beyond the 10\^10 version-key sentinel/);
+      }
+    } finally {
+      NodeFS.rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
   it("covers the version check and app swap with one install lock", () => {
     const lock = script.indexOf("if ! acquire_install_lock; then");
     const versionCheck = script.indexOf('installed_version="$(/usr/libexec/PlistBuddy');
@@ -214,6 +254,29 @@ describe("install-macos.sh", () => {
     NodeAssert.ok(
       lastBackupRemove > quarantine,
       "privileged AppleScript must remove the backup only after quarantine succeeds",
+    );
+  });
+
+  it("keeps the previous app on writable installs until quarantine removal succeeds", () => {
+    // The unprivileged swap must hold the backup until the installed app is
+    // verified free of the quarantine flag, mirroring the privileged path.
+    const writableSwap = script.indexOf('if [ -w "/Applications" ]; then');
+    NodeAssert.ok(writableSwap > -1, "writable install path must exist");
+    const quarantineRemoval = script.indexOf('xattr -d com.apple.quarantine "$app"', writableSwap);
+    NodeAssert.ok(quarantineRemoval > -1, "writable install must clear quarantine");
+    const backupRemove = script.indexOf('rm -rf "$old_app"', quarantineRemoval);
+    NodeAssert.ok(
+      backupRemove > -1,
+      "writable install must keep the backup until after quarantine removal",
+    );
+    const restore = script.indexOf('mv "$old_app" "$app"', quarantineRemoval);
+    NodeAssert.ok(
+      restore > -1 && restore < backupRemove,
+      "writable install must restore the previous app when the flag survives",
+    );
+    NodeAssert.match(
+      script,
+      /could not remove the quarantine flag from the installed app; the previous installation was restored/,
     );
   });
 
