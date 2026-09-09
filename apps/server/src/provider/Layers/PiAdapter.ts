@@ -515,6 +515,28 @@ function trimToUndefined(value: string | null | undefined): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+// Pi extensions send TUI text with ANSI colors and running timers
+// (e.g. "Moonwalking... (1m 23s)"). Clean before compare/emit so the
+// timeline shows one readable row instead of 200+ raw rows.
+function cleanPiUiText(value: string): string {
+  return value
+    .replace(/\[[0-9;]*[A-Za-z]/g, "")
+    .replace(/\[[0-9;]*m/g, "")
+    .replace(/\([A-B0-9]/g, "")
+    .replace(/\s*\(\d+\s*m[^)]*\)?/g, "")
+    .replace(/\s*\(\d+\s*m\s*$/g, "")
+    .replace(/(^|\s)\.(?=\s|$)/g, "$1")
+    .replace(/[·•●○◌○◍◎◦\u2000-\u206F]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanPiUiTextToUndefined(value: string | null | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const cleaned = cleanPiUiText(value);
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
 function isPiThinkingLevel(value: string | null | undefined): value is ThinkingLevel {
   return (
     value === "off" ||
@@ -1535,6 +1557,8 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       const unsupportedWarnings = new Set<string>();
       const statusTexts = new Map<string, string>();
       let workingMessage: string | undefined;
+      let lastPluginSummary: string | undefined;
+      let lastPluginAt = 0;
       const warnUnsupported = (method: string) => {
         if (unsupportedWarnings.has(method)) return;
         unsupportedWarnings.add(method);
@@ -1553,8 +1577,12 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         } satisfies ProviderRuntimeEvent);
       };
       const emitPluginProgress = (summary: string) => {
-        const normalized = trimToUndefined(summary);
+        const normalized = cleanPiUiTextToUndefined(summary);
         if (!normalized) return;
+        const now = Date.now();
+        if (normalized === lastPluginSummary && now - lastPluginAt < 2000) return;
+        lastPluginSummary = normalized;
+        lastPluginAt = now;
         offerRuntimeEvent({
           ...makeEventBase(context),
           type: "tool.progress",
@@ -1618,7 +1646,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           return firstPiUserInputAnswer(answers, questionId);
         },
         notify(message, type) {
-          const normalized = trimToUndefined(message);
+          const normalized = cleanPiUiTextToUndefined(message);
           if (!normalized) return;
           if (type === "warning" || type === "error") {
             offerRuntimeEvent({
@@ -1640,8 +1668,8 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           return () => undefined;
         },
         setStatus(key, text) {
-          const normalizedKey = trimToUndefined(key) ?? "status";
-          const normalizedText = trimToUndefined(text);
+          const normalizedKey = cleanPiUiTextToUndefined(key) ?? "status";
+          const normalizedText = cleanPiUiTextToUndefined(text);
           if (!normalizedText) {
             statusTexts.delete(normalizedKey);
             return;
@@ -1651,7 +1679,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           emitPluginProgress(`${normalizedKey}: ${normalizedText}`);
         },
         setWorkingMessage(message) {
-          const normalizedMessage = trimToUndefined(message);
+          const normalizedMessage = cleanPiUiTextToUndefined(message);
           if (!normalizedMessage || normalizedMessage === workingMessage) return;
           workingMessage = normalizedMessage;
           emitPluginProgress(normalizedMessage);
