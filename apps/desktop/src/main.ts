@@ -53,6 +53,7 @@ import {
 import type { ContextMenuItem, DiagnosticsEventInput } from "@synara/contracts";
 
 import { createDiagnosticsClient } from "./diagnosticsClient";
+import { makeWillQuitDiagnosticsCoordinator } from "./willQuitDiagnostics";
 import { isKeyboardShortcutsHelpChord } from "@synara/shared/browserShortcuts";
 import { getMacTrafficLightPosition } from "@synara/shared/desktopChrome";
 import { DEVICE_HELPER_SOURCE_DIR_ENV } from "@synara/shared/deviceHelperCache";
@@ -5351,25 +5352,27 @@ app.on("before-quit", (event) => {
 // already durable: record() writes the queue file synchronously, so a send
 // that misses this window is flushed on the next launch instead of lost.
 const WILL_QUIT_DIAGNOSTICS_FLUSH_BUDGET_MS = 2_000;
-let willQuitDiagnosticsFlushStarted = false;
+const willQuitDiagnostics = makeWillQuitDiagnosticsCoordinator();
 
 app.on("will-quit", (event) => {
   // `will-quit` is the committed quit signal: it does not fire when a quit is
-  // cancelled, and it fires exactly once for a successful exit, including the
-  // second `app.quit()` call from the graceful shutdown path.
+  // cancelled. The graceful path below re-enters it via its own `app.quit()`,
+  // so the coordinator's once-guard gates the record itself: one successful
+  // exit records exactly one app_quit, and the second firing is a no-op.
+  if (!willQuitDiagnostics.beginQuit()) {
+    return;
+  }
   recordDiagnosticsEvent({ kind: "app_quit" });
   const diagnostics = diagnosticsClient.getState();
   if (
-    willQuitDiagnosticsFlushStarted ||
-    // The updater's quit-and-install owns this exit; delaying it can interfere
-    // with the handoff. The queued event still survives to the next launch.
-    isUpdaterQuitAndInstallInFlight ||
-    !diagnostics.enabled ||
-    diagnostics.queuedEventCount === 0
+    !willQuitDiagnostics.shouldHoldForFlush({
+      updaterQuitAndInstallInFlight: isUpdaterQuitAndInstallInFlight,
+      diagnosticsEnabled: diagnostics.enabled,
+      queuedEventCount: diagnostics.queuedEventCount,
+    })
   ) {
     return;
   }
-  willQuitDiagnosticsFlushStarted = true;
   event.preventDefault();
   const budget = new Promise<void>((resolve) => {
     setTimeout(resolve, WILL_QUIT_DIAGNOSTICS_FLUSH_BUDGET_MS).unref();
@@ -5380,8 +5383,8 @@ app.on("will-quit", (event) => {
     .catch(() => undefined)
     .then(() => {
       // Re-enter the normal quit flow: before-quit short-circuits on
-      // `desktopShutdownComplete`, and the second will-quit returns early on
-      // the flag above.
+      // `desktopShutdownComplete`, and this handler's once-guard makes the
+      // second will-quit a no-op.
       app.quit();
     });
 });
