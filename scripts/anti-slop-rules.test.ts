@@ -332,8 +332,12 @@ describe("no-unsafe-dictionary-type", () => {
   it("does not let an outer alias shadow a generic parameter when checking the alias body", () => {
     const byFile = runRules(
       {
+        // The outer alias must be a safe value: if a resolution bug consulted
+        // it inside Dict's body, the body would classify as string (no report)
+        // and this expectation would fail. With the shared `unknown` the two
+        // paths were indistinguishable.
         "outer-shadow.ts":
-          "type T = unknown;\ntype Dict<T = unknown> = Record<string, T>;\nexport let d: Dict = {};\n",
+          "type T = string;\ntype Dict<T = unknown> = Record<string, T>;\nexport let d: Dict = {};\n",
       },
       { "anti-slop/no-unsafe-dictionary-type": "error" },
     );
