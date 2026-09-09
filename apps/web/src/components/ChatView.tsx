@@ -9134,7 +9134,12 @@ export default function ChatView({
       if (!setupCancelled) {
         sendErrorVersion = setThreadError(threadIdForSend, sendErrorMessage);
       }
-      if (queuedChatTurn === null && !turnStartSucceeded && !setupCancelled) {
+      // A retry dispatches a pre-built turn the queue does not own — if it fails
+      // after the commit released the retried pair, the payload must be
+      // recaptured or the card loses its retry content. Genuinely queued turns
+      // are excluded: the queue retains them for the drain's own retries.
+      const failedSendIsRetryable = queuedChatTurn === null || retryRelease !== undefined;
+      if (failedSendIsRetryable && !turnStartSucceeded && !setupCancelled) {
         // The failed send never reached the transcript, so capture its full
         // payload: the error card's retry replays this exact content instead of
         // whatever draft the composer happens to hold later.
@@ -9153,7 +9158,9 @@ export default function ChatView({
           setThreadError(evictedThreadId, null);
         }
         failedSends.set(threadIdForSend, {
-          restoredToComposer: composerDraftWasEmpty,
+          // A pre-built retry turn never lived in the composer, so its payload
+          // is replayed directly rather than resent through the live draft.
+          restoredToComposer: queuedChatTurn === null && composerDraftWasEmpty,
           errorMessage: sendErrorMessage,
           errorVersion: sendErrorVersion,
           prompt: promptForSend,
