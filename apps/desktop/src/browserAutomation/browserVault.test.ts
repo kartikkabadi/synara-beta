@@ -195,7 +195,7 @@ describe("browser vault", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     const pending = (await vault.snapshot()).pending[0]!;
     vault.respond({ id: pending.id, save: true });
-    expect(await prompt).toBe("save");
+    expect(await prompt).toEqual({ choice: "save", explicit: true });
     await vault.saveCaptured(origin, { username: "human", password: "original" }, "user");
     expect(await vault.shouldOfferSave({ origin, username: "human", password: "original" })).toBe(
       false,
@@ -216,9 +216,25 @@ describe("browser vault", () => {
     const dismissed = vault.askSave({ origin, username: "human", mode: "update" });
     await new Promise((resolve) => setTimeout(resolve, 0));
     await vault.configure({ agentUse: true, offerSave: false, autosave: false });
-    expect(await dismissed).toBe("dismiss");
+    expect(await dismissed).toEqual({ choice: "dismiss", explicit: false });
     await vault.remove(id);
     expect((await vault.snapshot()).logins).toEqual([]);
+    vault.dispose();
+  });
+
+  it("marks only an answered prompt as an explicit save", async () => {
+    const { vault } = await fixture();
+    await vault.configure({ agentUse: true, offerSave: true, autosave: true });
+    await expect(vault.askSave({ origin, username: "auto", mode: "save" })).resolves.toEqual({
+      choice: "save",
+      explicit: false,
+    });
+    await vault.configure({ agentUse: true, offerSave: true, autosave: false });
+    const prompt = vault.askSave({ origin, username: "manual", mode: "save" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const pending = (await vault.snapshot()).pending[0]!;
+    vault.respond({ id: pending.id, save: true });
+    await expect(prompt).resolves.toEqual({ choice: "save", explicit: true });
     vault.dispose();
   });
 });

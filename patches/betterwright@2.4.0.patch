@@ -49,7 +49,7 @@ index 1701abbbbf141a6f47b8b15ffefe4c168fb77ca9..6e0aad76e3d6d45d15918428ae2d895a
          }
          catch (error) {
 -            return { ok: false, error: String(error?.message || error) };
-+            return { ok: false, error: "Cookie Sync could not read the selected local browser profile.", cookieReaderCode: error?.cookieReaderCode || "reader_unavailable", cookiePermissionDenied: error?.cookiePermissionDenied === true, cookieReaderStage: error?.cookieReaderStage };
++            return { ok: false, error: "Cookie Sync could not read the selected local browser profile.", cookieReaderCode: error?.cookieReaderCode || "reader_failed", cookiePermissionDenied: error?.cookiePermissionDenied === true, cookieReaderStage: error?.cookieReaderStage };
          }
          if (!extracted.cookies.length) {
              return {
@@ -216,17 +216,17 @@ index ef705665c8c54d34f2f42c3a2d3820103e81dfc6..b15980ea402632ae78ac400266a6eca3
      try {
 diff --git a/dist/src/helium-cookie-source.js b/dist/src/helium-cookie-source.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..e384c75bda7a82b2217b73c032d60b83347fa117
+index 0000000000000000000000000000000000000000..b32a0cdc3e5631a263a9a542e43630aca682e839
 --- /dev/null
 +++ b/dist/src/helium-cookie-source.js
-@@ -0,0 +1,327 @@
+@@ -0,0 +1,336 @@
 +// Helium (net.imput.helium) cookie source for hosts whose native reader does
 +// not register the browser yet. Reads the same Chromium cookie database the
 +// native reader would, decrypts v10 rows with the profile's Keychain secret,
 +// and emits the same detailed-cookie snapshot shape as the native reader so
 +// the regular Cookie Sync transfer pipeline stays in charge.
 +import { execFile } from "node:child_process";
-+import { createDecipheriv, pbkdf2Sync } from "node:crypto";
++import { createDecipheriv, createHash, pbkdf2Sync, timingSafeEqual } from "node:crypto";
 +import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
 +import { homedir, tmpdir } from "node:os";
 +import { join } from "node:path";
@@ -370,19 +370,28 @@ index 0000000000000000000000000000000000000000..e384c75bda7a82b2217b73c032d60b83
 +    });
 +}
 +
-+function decryptChromiumValue(encrypted, key, version = 0) {
++function decryptChromiumValue(encrypted, key, version, hostKey) {
 +    if (!(encrypted instanceof Uint8Array) || encrypted.length <= 3) return null;
 +    const blob = Buffer.from(encrypted.buffer, encrypted.byteOffset, encrypted.byteLength);
 +    const tag = blob.toString("latin1", 0, 3);
-+    let body;
-+    if (tag === "v10") body = blob.subarray(3);
-+    else if (tag === "v11") body = blob.subarray(35);
-+    else return null;
++    // v10 is the only macOS Chromium format: AES-128-CBC under the profile's
++    // Keychain key. v11 is a Linux keyring variant with no verified infix
++    // layout and never appears on darwin; such rows fail closed as
++    // decrypt_failed instead of trusting an invented format.
++    if (tag !== "v10") return null;
++    const body = blob.subarray(3);
 +    try {
 +        const decipher = createDecipheriv("aes-128-cbc", key, CHROMIUM_AES_IV);
 +        let plain = Buffer.concat([decipher.update(body), decipher.final()]);
 +        if (version >= 24) {
++            // Chromium's load path verifies SHA256(host_key) before stripping
++            // the digest prefix (kHashFailed on mismatch). Require the exact
++            // match so a wrong-key decrypt that survives PKCS7 unpadding, or
++            // a corrupted ciphertext, fails closed as decrypt_failed instead
++            // of producing a silently corrupted cookie value.
 +            if (plain.length < 32) return null;
++            const digest = createHash("sha256").update(hostKey ?? "").digest();
++            if (!timingSafeEqual(plain.subarray(0, 32), digest)) return null;
 +            plain = plain.subarray(32);
 +        }
 +        return plain.length ? plain.toString("utf8") : "";
@@ -401,7 +410,7 @@ index 0000000000000000000000000000000000000000..e384c75bda7a82b2217b73c032d60b83
 +    }
 +    let value = typeof row.value === "string" ? row.value : "";
 +    if (!value) {
-+        value = decryptChromiumValue(row.encrypted_value, key, version);
++        value = decryptChromiumValue(row.encrypted_value, key, version, typeof row.host_key === "string" ? row.host_key : "");
 +        if (value === null) {
 +            warnings.set("decrypt_failed", (warnings.get("decrypt_failed") ?? 0) + 1);
 +            return null;

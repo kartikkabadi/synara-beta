@@ -99,13 +99,16 @@ export class BrowserVaultCapture {
           lastModelActivity: () => Number.NaN,
           shouldCapture: (input) => this.vault.shouldOfferSave(input),
           requestSave: async ({ page, origin, username, mode }) => {
-            const choice = await this.vault.askSave({
+            const { choice, explicit } = await this.vault.askSave({
               origin,
               username,
               mode: mode === "update" ? "update" : "save",
             });
             if (page instanceof NativeCapturePage) {
-              page.saveSource = choice === "save" ? "user" : undefined;
+              // Only an explicit user approval overrides the activity-derived
+              // source. An autosave "save" leaves saveSource unset so the
+              // credential keeps its agent/pending ownership and dedup.
+              page.saveSource = choice === "save" && explicit ? "user" : undefined;
             }
             return choice;
           },

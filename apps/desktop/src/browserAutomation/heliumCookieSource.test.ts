@@ -30,31 +30,31 @@ function syntheticKeychainPassword(): string {
   return createHash("sha256").update(`helium-test:${SYNTHETIC_KEY_MATERIAL}`).digest("hex");
 }
 
-function encryptPlaintext(plaintext: string, version: number): Buffer {
+function encryptPlaintext(plaintext: string, version: number, digestHost = "example.test"): Buffer {
   const key = pbkdf2Sync(syntheticKeychainPassword(), "saltysalt", 1003, 16, "sha1");
   const cipher = createCipheriv("aes-128-cbc", key, Buffer.alloc(16, 0x20));
   let input = Buffer.from(plaintext, "utf8");
   if (version >= 24) {
     // Recent Chromium versions place the host-key SHA-256 digest before the
     // plaintext inside the encrypted blob, so it is removed after decryption.
-    const digest = createHash("sha256").update("example.test").digest();
+    const digest = createHash("sha256").update(digestHost).digest();
     input = Buffer.concat([digest, input]);
   }
   return Buffer.concat([cipher.update(input), cipher.final()]);
 }
 
-function v10Blob(plaintext: string, version = 0): Buffer {
-  return Buffer.concat([Buffer.from("v10", "latin1"), encryptPlaintext(plaintext, version)]);
+function v10Blob(plaintext: string, version = 0, digestHost = "example.test"): Buffer {
+  return Buffer.concat([Buffer.from("v10", "latin1"), encryptPlaintext(plaintext, version, digestHost)]);
 }
 
-function v11Blob(plaintext: string, version = 0): Buffer {
-  // v11 values carry a 35-byte prefix before the CBC ciphertext; for the test
-  // fixture that prefix is arbitrary bytes followed by the encrypted body.
-  return Buffer.concat([
-    Buffer.from("v11", "latin1"),
-    Buffer.alloc(32, 0xab),
-    encryptPlaintext(plaintext, version),
-  ]);
+function wrongKeyBlob(plaintext: string): Buffer {
+  // Encrypted under different key material: a wrong-key decrypt that survives
+  // PKCS7 unpadding must still fail the v24 host-key digest verification.
+  const key = pbkdf2Sync("other-synthetic-key-material", "saltysalt", 1003, 16, "sha1");
+  const cipher = createCipheriv("aes-128-cbc", key, Buffer.alloc(16, 0x20));
+  const digest = createHash("sha256").update("example.test").digest();
+  const input = Buffer.concat([digest, Buffer.from(plaintext, "utf8")]);
+  return Buffer.concat([Buffer.from("v10", "latin1"), cipher.update(input), cipher.final()]);
 }
 
 let home = "";
@@ -405,12 +405,15 @@ describe.skipIf(process.platform !== "darwin")("helium cookie source", () => {
     expect(String(error)).not.toContain("not a sqlite");
   });
 
-  it("decrypts Chromium v11 values", async () => {
-    await createHeliumProfile("ChromiumV11", 0, [
+  it("fails closed when a v24 digest does not match the row host key", async () => {
+    await createHeliumProfile("Chromium24Mismatch", 24, [
       {
         host_key: "example.test",
         name: "session",
-        encrypted_value: v11Blob("v11-session-value", 0),
+        // Digest prefix is SHA-256("evil.test"), not SHA-256("example.test").
+        // Strip-without-verify would silently return the plaintext; the
+        // verified path must drop the row as decrypt_failed instead.
+        encrypted_value: v10Blob("v24-mismatch-value", 24, "evil.test"),
         path: "/",
         expires_utc: futureUtc,
         is_secure: 1,
@@ -419,30 +422,42 @@ describe.skipIf(process.platform !== "darwin")("helium cookie source", () => {
         source_scheme: 2,
         source_port: 443,
       },
-      {
-        host_key: "other.test",
-        name: "plain",
-        value: "plain-value",
-        path: "/",
-        expires_utc: futureUtc,
-        is_secure: 0,
-        is_httponly: 0,
-        samesite: 1,
-        source_scheme: 1,
-        source_port: 80,
-      },
     ]);
     const snapshot = await cookieSync.extractCookieSync(
-      heliumOptions({ profile: "ChromiumV11" }),
+      heliumOptions({ profile: "Chromium24Mismatch", domains: ["example.test"] }),
       neverLoadNativeReader(),
       { keychainPassword: async () => syntheticKeychainPassword() },
     );
-    const names = snapshot.cookies.map((cookie: { name: string }) => cookie.name).sort();
-    expect(names).toEqual(["plain", "session"]);
-    expect(snapshot.cookies.find((c: { name: string }) => c.name === "session")).toMatchObject({
-      value: "v11-session-value",
-      domain: "example.test",
-    });
+    expect(snapshot.cookies).toHaveLength(0);
+    expect(snapshot.warnings).toEqual(
+      expect.arrayContaining([{ code: "decrypt_failed", count: 1 }]),
+    );
+  });
+
+  it("fails closed on a v24 row encrypted under a different key", async () => {
+    await createHeliumProfile("Chromium24WrongKey", 24, [
+      {
+        host_key: "example.test",
+        name: "session",
+        encrypted_value: wrongKeyBlob("v24-wrong-key-value"),
+        path: "/",
+        expires_utc: futureUtc,
+        is_secure: 1,
+        is_httponly: 1,
+        samesite: -1,
+        source_scheme: 2,
+        source_port: 443,
+      },
+    ]);
+    const snapshot = await cookieSync.extractCookieSync(
+      heliumOptions({ profile: "Chromium24WrongKey", domains: ["example.test"] }),
+      neverLoadNativeReader(),
+      { keychainPassword: async () => syntheticKeychainPassword() },
+    );
+    expect(snapshot.cookies).toHaveLength(0);
+    expect(snapshot.warnings).toEqual(
+      expect.arrayContaining([{ code: "decrypt_failed", count: 1 }]),
+    );
   });
 
   it("never loads the native reader and maps a missing profile to source_missing", async () => {
@@ -492,44 +507,55 @@ describe.skipIf(process.platform !== "darwin")("helium cookie source", () => {
     expect(error).toBe(cause);
   });
 
-  it("propagates a permission-denied Helium root directory as a bounded discovery error", async () => {
-    const root = join(home, "Library", "Application Support", "net.imput.helium");
-    await chmod(root, 0o000);
-    try {
-      const error = await heliumSource.listHeliumProfiles().catch((value: unknown) => value);
-      expect(error).toMatchObject({
-        cookieReaderCode: "discovery_failed",
-        cookiePermissionDenied: true,
-      });
-      expect(String(error)).not.toMatch(/\bEACCES\b/);
-      expect(String(error)).not.toMatch(/\bpermission denied\b/i);
-    } finally {
-      await chmod(root, 0o700).catch(() => {});
-    }
-  });
+  // Permission checks are bypassed for uid 0 (root on self-hosted runners or
+  // sudo dev runs), where both chmod assertions would fail spuriously.
+  const skipAsRoot =
+    typeof process.getuid === "function" && process.getuid() === 0;
 
-  it("propagates a permission-denied profile cookie store as a bounded acquisition error", async () => {
-    await createHeliumProfile("Locked", 0, []);
-    const profileDir = join(home, "Library", "Application Support", "net.imput.helium", "Locked");
-    await chmod(profileDir, 0o000);
-    try {
-      const error = await heliumSource
-        .readHeliumCookieSnapshot(heliumOptions({ profile: "Locked" }), {
-          listProfiles: async () => [{ id: "Locked" }],
-          keychainPassword: async () => syntheticKeychainPassword(),
-        })
-        .catch((value: unknown) => value);
-      expect(error).toMatchObject({
-        cookieReaderCode: "source_extraction_failed",
-        cookieReaderStage: "acquisition",
-        cookiePermissionDenied: true,
-      });
-      expect(String(error)).not.toMatch(/\bEACCES\b/);
-      expect(String(error)).not.toMatch(/\bpermission denied\b/i);
-    } finally {
-      await chmod(profileDir, 0o700).catch(() => {});
-    }
-  });
+  it.skipIf(skipAsRoot)(
+    "propagates a permission-denied Helium root directory as a bounded discovery error",
+    async () => {
+      const root = join(home, "Library", "Application Support", "net.imput.helium");
+      await chmod(root, 0o000);
+      try {
+        const error = await heliumSource.listHeliumProfiles().catch((value: unknown) => value);
+        expect(error).toMatchObject({
+          cookieReaderCode: "discovery_failed",
+          cookiePermissionDenied: true,
+        });
+        expect(String(error)).not.toMatch(/\bEACCES\b/);
+        expect(String(error)).not.toMatch(/\bpermission denied\b/i);
+      } finally {
+        await chmod(root, 0o700).catch(() => {});
+      }
+    },
+  );
+
+  it.skipIf(skipAsRoot)(
+    "propagates a permission-denied profile cookie store as a bounded acquisition error",
+    async () => {
+      await createHeliumProfile("Locked", 0, []);
+      const profileDir = join(home, "Library", "Application Support", "net.imput.helium", "Locked");
+      await chmod(profileDir, 0o000);
+      try {
+        const error = await heliumSource
+          .readHeliumCookieSnapshot(heliumOptions({ profile: "Locked" }), {
+            listProfiles: async () => [{ id: "Locked" }],
+            keychainPassword: async () => syntheticKeychainPassword(),
+          })
+          .catch((value: unknown) => value);
+        expect(error).toMatchObject({
+          cookieReaderCode: "source_extraction_failed",
+          cookieReaderStage: "acquisition",
+          cookiePermissionDenied: true,
+        });
+        expect(String(error)).not.toMatch(/\bEACCES\b/);
+        expect(String(error)).not.toMatch(/\bpermission denied\b/i);
+      } finally {
+        await chmod(profileDir, 0o700).catch(() => {});
+      }
+    },
+  );
 });
 
 describe("patched Betterwright listCookieSourceBrowsers", () => {

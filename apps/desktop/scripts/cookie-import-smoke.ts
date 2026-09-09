@@ -13,11 +13,17 @@ void (async () => {
   await app.whenReady();
   // Generate the source here so this smoke can never select a personal profile.
   // Resolve from this module so the fixture is found from any working directory.
-  process.env.HOME = execFileSync(
+  // The fixture prints the fake HOME, then the expected Unix expiry (seconds).
+  const fixture = execFileSync(
     "node",
     [join(import.meta.dirname, "synthetic-cookie-profile.mjs")],
     { encoding: "utf8" },
-  ).trim();
+  )
+    .trim()
+    .split("\n");
+  process.env.HOME = fixture[0]!;
+  const expectedExpires = Number(fixture[1]);
+  assert.ok(expectedExpires > Date.now() / 1000, "Fixture expiry must be in the future");
   const view = new WebContentsView({
     webPreferences: { partition: "persist:import-smoke", sandbox: true, contextIsolation: true },
   });
@@ -48,6 +54,11 @@ void (async () => {
     const stored = await view.webContents.session.cookies.get({ name: "synara_synthetic_import" });
     assert.equal(stored.length, 1);
     assert.equal(stored[0]?.value, "synthetic-only");
+    assert.equal(
+      Math.floor(stored[0]?.expirationDate ?? 0),
+      expectedExpires,
+      "Native reader dropped or corrupted cookie expiry",
+    );
     console.log("Native fixture import and stored-domain metadata passed");
   } finally {
     await connection.close(false);

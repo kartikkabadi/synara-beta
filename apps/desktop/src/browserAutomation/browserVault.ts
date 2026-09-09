@@ -21,6 +21,11 @@ const Preferences = Schema.Struct({
   sources: Schema.Array(Schema.Struct({ id: Schema.String, source: Source })),
 });
 type Source = typeof Source.Type;
+interface BrowserVaultSaveChoice {
+  choice: "save" | "dismiss";
+  /** True only when the user answered the prompt; never for autosave. */
+  explicit: boolean;
+}
 type Payload = Parameters<LocalCredentialVault["handleRequest"]>[1];
 type Action = Parameters<LocalCredentialVault["handleRequest"]>[0];
 interface PageOrigin {
@@ -300,11 +305,13 @@ export class BrowserVault {
     await this.request("save", payload, origin, source);
   }
 
-  async askSave(input: Omit<BrowserVaultSavePrompt, "id">): Promise<"save" | "dismiss"> {
+  async askSave(input: Omit<BrowserVaultSavePrompt, "id">): Promise<BrowserVaultSaveChoice> {
     await this.ready;
-    if (!this.settings.offerSave) return "dismiss";
-    if (this.settings.autosave) return "save";
-    if (this.pending.size >= 8) return "dismiss";
+    if (!this.settings.offerSave) return { choice: "dismiss", explicit: false };
+    // Autosave resolves without a prompt, so it is not an explicit user
+    // approval — callers must not treat it as user-owned consent.
+    if (this.settings.autosave) return { choice: "save", explicit: false };
+    if (this.pending.size >= 8) return { choice: "dismiss", explicit: false };
     const id = randomUUID();
     return new Promise((resolve) => {
       const timer = setTimeout(() => this.respond({ id, save: false }), 120_000);
@@ -312,7 +319,9 @@ export class BrowserVault {
         prompt: { ...input, id },
         resolve: (choice) => {
           clearTimeout(timer);
-          resolve(choice);
+          // A pending prompt only resolves to "save" through respond(), which
+          // is the user's explicit click; every automatic path is a dismissal.
+          resolve({ choice, explicit: choice === "save" });
         },
       });
       this.changed();
