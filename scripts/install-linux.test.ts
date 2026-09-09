@@ -277,4 +277,133 @@ describe("install-linux.sh", () => {
       NodeFS.rmSync(sandbox, { recursive: true, force: true });
     }
   });
+
+  it("covers the version check, swap, and stamp with one install lock", () => {
+    const lock = script.indexOf("flock 9");
+    const versionCheck = script.indexOf('installed_version="$(cat "$version_stamp"');
+    const swap = script.indexOf('mv -f "$staged" "$dest"');
+    const stamp = script.indexOf('printf \'%s\\n\' "$version" > "$version_stamp"');
+    NodeAssert.ok(lock > -1, "installer must take an install lock");
+    NodeAssert.ok(versionCheck > lock, "version check must run under the lock");
+    NodeAssert.ok(swap > lock, "executable swap must run under the lock");
+    NodeAssert.ok(stamp > lock, "version stamp must be written under the lock");
+  });
+
+  /**
+   * Two overlapping installs of different tags race the shared executable swap
+   * and version stamp. Under the install lock they serialize, so the final
+   * stamp always names the binary that is actually installed: the newer tag
+   * either installs after the older one or refuses the downgrade.
+   */
+  it("keeps the version stamp in sync with the binary under concurrent installs", async () => {
+    if (
+      NodeChildProcess.spawnSync("flock", ["--version"], { stdio: "ignore" }).error !== undefined
+    ) {
+      return; // flock is standard on Linux CI; without it the race cannot be serialized.
+    }
+    const sandbox = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "synara-linux-install-"));
+    try {
+      const home = NodePath.join(sandbox, "home");
+      const stubBin = NodePath.join(sandbox, "bin");
+      NodeFS.mkdirSync(home, { recursive: true });
+      NodeFS.mkdirSync(stubBin, { recursive: true });
+
+      // Two releases with distinguishable payloads. Each tag gets its own
+      // SHA256SUMS, signed by one throwaway key whose public half is pinned in
+      // the installer copy, so both runs exercise the real verification path.
+      const tags = ["v9.9.9-beta.8", "v9.9.9-beta.9"] as const;
+      const signingKey = NodePath.join(sandbox, "signing-key");
+      NodeChildProcess.execFileSync(
+        "ssh-keygen",
+        ["-t", "ed25519", "-N", "", "-C", "test", "-f", signingKey],
+        { stdio: "ignore" },
+      );
+      const publicKey = NodeFS.readFileSync(`${signingKey}.pub`, "utf8").trim();
+      for (const tag of tags) {
+        const payload = `distinguishable-payload-${tag}`;
+        const payloadPath = NodePath.join(sandbox, `payload-${tag}`);
+        const sumsPath = NodePath.join(sandbox, `SHA256SUMS-${tag}`);
+        const digest = NodeCrypto.createHash("sha256").update(payload).digest("hex");
+        NodeFS.writeFileSync(payloadPath, payload);
+        NodeFS.writeFileSync(sumsPath, `${digest}  Synara-${tag.slice(1)}-x86_64.AppImage\n`);
+        NodeChildProcess.execFileSync(
+          "ssh-keygen",
+          ["-Y", "sign", "-f", signingKey, "-n", "synara-beta", sumsPath],
+          { stdio: "ignore" },
+        );
+      }
+
+      const installerCopy = NodePath.join(sandbox, "install-linux-under-test.sh");
+      NodeFS.writeFileSync(
+        installerCopy,
+        script.replace(
+          /^ALLOWED_SIGNERS=".*$/m,
+          `ALLOWED_SIGNERS="synara-beta-releases ${publicKey}"`,
+        ),
+      );
+
+      // The curl stub resolves sums, signature, and payload per tag from the
+      // URL, so two concurrent installs can share one stub without env races.
+      // The payload fetch sleeps to widen the swap/stamp window the lock must
+      // cover.
+      NodeFS.writeFileSync(
+        NodePath.join(stubBin, "uname"),
+        '#!/bin/sh\nif [ "$1" = "-s" ]; then echo Linux; elif [ "$1" = "-m" ]; then echo x86_64; else exit 1; fi\n',
+      );
+      NodeFS.writeFileSync(
+        NodePath.join(stubBin, "curl"),
+        '#!/bin/sh\nout=""\nurl=""\nwhile [ "$#" -gt 0 ]; do\n  case "$1" in\n    -o) out="$2"; shift 2;;\n    -*) shift;;\n    *) url="$1"; shift;;\n  esac\ndone\ncase "$url" in\n  *beta.8*) sums="$STUB_SANDBOX/SHA256SUMS-v9.9.9-beta.8"; payload="$STUB_SANDBOX/payload-v9.9.9-beta.8";;\n  *beta.9*) sums="$STUB_SANDBOX/SHA256SUMS-v9.9.9-beta.9"; payload="$STUB_SANDBOX/payload-v9.9.9-beta.9";;\n  *) exit 1;;\nesac\ncase "$url" in\n  */SHA256SUMS.sig) cat "${sums:-$STUB_SANDBOX/SHA256SUMS-v9.9.9-beta.9}.sig" > "$out";;\n  */SHA256SUMS) cat "${sums:-$STUB_SANDBOX/SHA256SUMS-v9.9.9-beta.9}" > "$out";;\n  *) sleep 0.3; cat "$payload" > "$out"; printf \'%s\\n\' "$url" >> "$STUB_FETCHED";;\nesac\n',
+      );
+      for (const stub of ["uname", "curl"]) {
+        NodeFS.chmodSync(NodePath.join(stubBin, stub), 0o755);
+      }
+
+      const env = {
+        ...process.env,
+        PATH: `${stubBin}${NodePath.delimiter}${process.env.PATH ?? ""}`,
+        HOME: home,
+        STUB_SANDBOX: sandbox,
+      };
+
+      const run = (tag: string) =>
+        new Promise<{ status: number; stderr: string }>((resolveRun) => {
+          const child = NodeChildProcess.spawn("bash", [installerCopy, "--tag", tag], {
+            env,
+            stdio: ["ignore", "ignore", "pipe"],
+          });
+          let stderr = "";
+          child.stderr.on("data", (chunk: Buffer) => {
+            stderr += String(chunk);
+          });
+          child.on("close", (code) => resolveRun({ status: code ?? 1, stderr }));
+        });
+
+      const [older, newer] = await Promise.all([run(tags[0]), run(tags[1])]);
+
+      NodeAssert.equal(newer.status, 0, `newer install failed: ${newer.stderr}`);
+      // The older tag either installed first (and was overwritten) or was
+      // refused as a downgrade; both orders end at the newer release.
+      NodeAssert.ok(
+        older.status === 0 || /newer than/.test(older.stderr),
+        `unexpected older-install outcome: status ${older.status}, ${older.stderr}`,
+      );
+
+      const dest = NodePath.join(home, ".local", "bin", "synara-beta");
+      NodeAssert.equal(
+        NodeFS.readFileSync(dest, "utf8"),
+        `distinguishable-payload-${tags[1]}`,
+        "the newer release must be the installed binary",
+      );
+      const stateStamp = NodePath.join(
+        home,
+        ".local",
+        "state",
+        "synara-beta-installer",
+        "installed-version",
+      );
+      NodeAssert.equal(NodeFS.readFileSync(stateStamp, "utf8").trim(), "9.9.9-beta.9");
+    } finally {
+      NodeFS.rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
 });

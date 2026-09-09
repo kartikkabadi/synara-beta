@@ -122,6 +122,16 @@ version="${tag#v}"
 # data directory); skip when it already matches, refuse downgrades without --force.
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/synara-beta-installer"
 version_stamp="$state_dir/installed-version"
+# Serialize concurrent installs: the version check, the executable swap, and the
+# version stamp below must commit together, or two overlapping installs can
+# leave an older binary with a newer stamp (which then wrongly reports
+# "up to date"). The lock is released when the process exits. Systems without
+# flock keep the previous unlocked behavior instead of failing to install.
+mkdir -p "$state_dir"
+if command -v flock >/dev/null 2>&1; then
+  exec 9>>"$state_dir/install.lock"
+  flock 9
+fi
 # A matching stamp only means "up to date" when the binary is actually present;
 # if it was removed, fall through and reinstall.
 if [ -f "$version_stamp" ] && [ -x "$HOME/.local/bin/synara-beta" ]; then
@@ -218,7 +228,8 @@ fi
 
 # Stamp the installed version so re-runs can detect "already up to date" and
 # refuse downgrades. Lives under XDG_STATE_HOME, never inside ~/.synara-beta.
-mkdir -p "$state_dir"
+# Written under the install lock so the stamp can never name a release newer
+# than the binary swapped in above.
 printf '%s\n' "$version" > "$version_stamp"
 
 echo "Installed Synara Beta $tag."
