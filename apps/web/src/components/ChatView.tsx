@@ -607,6 +607,7 @@ import {
   evictOverflowFailedThreadSend,
   failedSendSnapshotOwnsCurrentError,
   findTranscriptFallbackRetryTarget,
+  hasThreadErrorRetryTarget,
   releaseFailedSendAtSendCommit,
   releaseFailedSendSnapshotAfterSend,
   releaseRetriedFailedSend,
@@ -11587,6 +11588,29 @@ export default function ChatView({
   const presentedThreadError = useTransientPresentation(activeThread?.error ?? null, {
     animateOpen: true,
   });
+  // "Try again" must reflect a concrete replay target, not just a retryable
+  // error string: approval and user-input response failures can raise
+  // connection-classified errors with nothing to replay, and a button that
+  // performs no request is worse than no button. The snapshot map is a ref
+  // (not reactive), so availability is reconciled after each commit that could
+  // change its inputs — every map mutation that matters is paired with an
+  // error write, which re-renders and re-runs this reconciliation.
+  const [activeThreadHasRetryTarget, setActiveThreadHasRetryTarget] = useState(false);
+  useLayoutEffect(() => {
+    const thread = activeThread;
+    if (!thread) {
+      setActiveThreadHasRetryTarget(false);
+      return;
+    }
+    setActiveThreadHasRetryTarget(
+      hasThreadErrorRetryTarget(
+        failedThreadSendsRef.current.get(thread.id),
+        getCurrentThreadErrorAndVersion(thread.id),
+        thread.messages,
+        thread.latestTurn,
+      ),
+    );
+  }, [activeThread, getCurrentThreadErrorAndVersion]);
   // The error card's "Try again". Three cases, in order:
   // 1. The failed send never dispatched — its payload was captured into
   //    `failedThreadSendRef` (and restored into the composer when the draft was
@@ -13024,7 +13048,7 @@ export default function ChatView({
                     error={presentedThreadError.snapshot}
                     unblocking={unblockingActiveThread}
                     onDismiss={dismissActiveThreadError}
-                    onRetry={retryActiveThreadError}
+                    onRetry={activeThreadHasRetryTarget ? retryActiveThreadError : undefined}
                     onUnblock={onUnblockActiveThread}
                     // The countdown must outlive the rate-limit banner's own
                     // dismissal — hiding the banner is not "the limit reset".

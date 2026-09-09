@@ -81,6 +81,7 @@ import {
   releaseRetriedFailedSend,
   releaseSupersededFailedSend,
   findTranscriptFallbackRetryTarget,
+  hasThreadErrorRetryTarget,
   worktreeSetupHasError,
 } from "./ChatView.logic";
 
@@ -3492,5 +3493,62 @@ describe("findTranscriptFallbackRetryTarget", () => {
         state: "completed",
       }),
     ).toBeNull();
+  });
+});
+
+// "Try again" must reflect a concrete replay target, not just a retryable
+// error string: approval and user-input response failures can raise
+// connection-classified errors with nothing to replay. A target exists when a
+// failed-send snapshot still owns the current error, or the transcript
+// fallback has a safe target.
+describe("hasThreadErrorRetryTarget", () => {
+  const erroredTurnId = TurnId.makeUnsafe("turn-errored");
+  const erroredPlanTurn: NonNullable<Thread["latestTurn"]> = {
+    turnId: erroredTurnId,
+    state: "error",
+    requestedAt: "2026-09-09T00:00:02.000Z",
+    startedAt: "2026-09-09T00:00:02.500Z",
+    completedAt: "2026-09-09T00:00:03.000Z",
+    assistantMessageId: null,
+  };
+  const userMessage = (turnId: TurnId | null): ChatMessage => ({
+    id: MessageId.makeUnsafe("message-errored"),
+    role: "user",
+    text: "Implement the plan",
+    turnId,
+    createdAt: "2026-09-09T00:00:01.000Z",
+    streaming: false,
+  });
+  const snapshot = { errorMessage: "boom", errorVersion: 1 };
+
+  it("accepts a snapshot that still owns the current error", () => {
+    expect(hasThreadErrorRetryTarget(snapshot, { error: "boom", errorVersion: 1 }, [], null)).toBe(
+      true,
+    );
+  });
+
+  it("rejects a stale snapshot with no transcript fallback target", () => {
+    // An approval or user-input response failure replaced the card: the
+    // snapshot no longer owns it and no errored turn exists to replay.
+    expect(hasThreadErrorRetryTarget(snapshot, { error: "boom", errorVersion: 2 }, [], null)).toBe(
+      false,
+    );
+  });
+
+  it("accepts the transcript fallback when the errored turn is the latest", () => {
+    expect(
+      hasThreadErrorRetryTarget(
+        undefined,
+        { error: "boom", errorVersion: 1 },
+        [userMessage(erroredTurnId)],
+        erroredPlanTurn,
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects when neither a snapshot nor a fallback target exists", () => {
+    expect(hasThreadErrorRetryTarget(undefined, { error: "boom", errorVersion: 1 }, [], null)).toBe(
+      false,
+    );
   });
 });

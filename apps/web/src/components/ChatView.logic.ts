@@ -2120,3 +2120,22 @@ export function findTranscriptFallbackRetryTarget(
   }
   return { message: lastUserMessage, turn: latestTurn };
 }
+
+// The error card's "Try again" must reflect a concrete replay target, not just
+// a retryable-looking error string: approval and user-input response failures
+// can raise connection-classified errors with nothing to replay, and a button
+// that performs no request is worse than no button. A target exists when a
+// failed-send snapshot still owns the current error (its payload replays) or
+// the transcript fallback has a safe target (the errored latest turn's own
+// last user message).
+export function hasThreadErrorRetryTarget(
+  snapshot: FailedSendErrorIdentity | undefined,
+  currentError: CurrentThreadError,
+  messages: readonly ChatMessage[],
+  latestTurn: Thread["latestTurn"],
+): boolean {
+  if (snapshot && failedSendSnapshotOwnsCurrentError(snapshot, currentError)) {
+    return true;
+  }
+  return findTranscriptFallbackRetryTarget(messages, latestTurn) !== null;
+}
