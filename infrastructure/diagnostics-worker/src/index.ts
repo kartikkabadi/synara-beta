@@ -6,12 +6,7 @@
 // The validation contract lives in ./contract.ts so the desktop test suite
 // can prove the sanitizer and this collector stay in sync.
 
-import {
-  MAX_BATCH,
-  UUID_PATTERN,
-  isPlainObject,
-  validateEvent,
-} from "./contract";
+import { MAX_BATCH, UUID_PATTERN, isPlainObject, validateEvent } from "./contract";
 
 // Minimal structural stand-ins for the Cloudflare D1 API. These keep the
 // worker dependency-free while the desktop/scripts test suite imports it.
@@ -251,10 +246,7 @@ interface SenderRateReservation {
 // Returns the reservation for the spend, or null when the batch is refused.
 // An "unknown" sender is never tracked: its reservation carries resetAt 0, so
 // a refund finds no window and is a no-op.
-function withinSenderRateLimit(
-  senderIp: string,
-  incoming: number,
-): SenderRateReservation | null {
+function withinSenderRateLimit(senderIp: string, incoming: number): SenderRateReservation | null {
   const now = Date.now();
   if (senderIp === "unknown") {
     return { senderIp, count: incoming, resetAt: 0 };

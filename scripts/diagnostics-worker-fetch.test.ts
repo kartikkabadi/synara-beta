@@ -466,9 +466,8 @@ describe("diagnostics worker fetch handler", () => {
       const env = makeEnv(options);
       const sender = { "cf-connecting-ip": "203.0.113.10" };
       // Request A charges 50 sender events, then parks on its event write.
-      const parkedEvents = Array.from(
-        { length: 50 },
-        () => workerEvent("test", "0f1a2b3c-0000-4000-8000-000000000600"),
+      const parkedEvents = Array.from({ length: 50 }, () =>
+        workerEvent("test", "0f1a2b3c-0000-4000-8000-000000000600"),
       );
       const parked = worker.fetch(makeIngestRequest({ events: parkedEvents }, sender), env);
       // Drain microtasks so A is suspended inside its gated write with the
@@ -493,15 +492,13 @@ describe("diagnostics worker fetch handler", () => {
       // the one after is refused by the sender limit — not by durable quota.
       // A refund that leaked into this window would leave room for the last
       // batch and turn this rejection into a 202.
-      const atCapEvents = Array.from(
-        { length: 50 },
-        () => workerEvent("test", "0f1a2b3c-0000-4000-8000-000000000648"),
+      const atCapEvents = Array.from({ length: 50 }, () =>
+        workerEvent("test", "0f1a2b3c-0000-4000-8000-000000000648"),
       );
       const atCap = await worker.fetch(makeIngestRequest({ events: atCapEvents }, sender), env);
       expect(atCap.status).toBe(202);
-      const cappedEvents = Array.from(
-        { length: 50 },
-        () => workerEvent("test", "0f1a2b3c-0000-4000-8000-000000000649"),
+      const cappedEvents = Array.from({ length: 50 }, () =>
+        workerEvent("test", "0f1a2b3c-0000-4000-8000-000000000649"),
       );
       const capped = await worker.fetch(makeIngestRequest({ events: cappedEvents }, sender), env);
       expect(capped.status).toBe(429);
