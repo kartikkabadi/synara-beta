@@ -277,7 +277,6 @@ if [ -w "/Applications" ]; then
   fi
   if mv "$new_app" "$app"; then
     swap_started=""
-    rm -rf "$old_app"
   else
     if [ -e "$old_app" ]; then
       mv "$old_app" "$app"
@@ -287,6 +286,25 @@ if [ -w "/Applications" ]; then
     echo "install-macos.sh: installation failed." >&2
     exit 1
   fi
+  # The backup is kept until the installed app passes the final launchability
+  # check: a failed quarantine removal would leave the replacement blocked by
+  # Gatekeeper with no working app, so the previous installation is restored
+  # and the backup is only deleted once the flag is verified gone.
+  xattr -d com.apple.quarantine "$app" >/dev/null 2>&1 || true
+  if xattr "$app" 2>/dev/null | grep -q com.apple.quarantine; then
+    if [ -e "$old_app" ]; then
+      # Mark the swap in progress again so an interruption mid-restore still
+      # brings the previous installation back via the EXIT trap.
+      swap_started=1
+      mv "$app" "$new_app"
+      mv "$old_app" "$app"
+      swap_started=""
+    fi
+    rm -rf "$new_app"
+    echo "install-macos.sh: could not remove the quarantine flag from the installed app; the previous installation was restored. First launches may be blocked by Gatekeeper." >&2
+    exit 1
+  fi
+  rm -rf "$old_app"
 else
   # /Applications is not writable: the AppleScript installs as root, so the
   # quarantine flag must also be removed inside the privileged shell - an
@@ -317,9 +335,10 @@ fi
 # damaged-file warning. Removing the quarantine flag from the installed app
 # only (never changing system security settings) lets it start; the checksum
 # and release-signature verification above are the integrity/authenticity gate.
-# Root-owned installs were already handled in the privileged AppleScript above;
-# here the invoking user owns the app. Verify the flag is really gone instead
-# of hiding a failed removal behind `|| true`.
+# Writable installs already removed the flag and rolled back on failure while
+# the backup was still held; root-owned installs were handled in the
+# privileged AppleScript. This final check only reports a flag that somehow
+# survived, instead of hiding a failed removal behind `|| true`.
 if [ -w "$app" ]; then
   xattr -d com.apple.quarantine "$app" >/dev/null 2>&1 || true
 fi
