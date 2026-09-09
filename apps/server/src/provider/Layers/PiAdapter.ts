@@ -515,6 +515,72 @@ function trimToUndefined(value: string | null | undefined): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+// Pi extensions send TUI text with ANSI colors and running timers
+// (e.g. "Moonwalking... (1m 23s)"). Clean before compare/emit so the
+// timeline shows one readable row instead of 200+ raw rows.
+export function cleanPiUiText(value: string): string {
+  return cleanPiUiNoticeText(value)
+    .replace(/\s*\(\d+\s*m(?:\s+\d+\s*s)?\)?(?=\s*$)/g, "")
+    .replace(/(^|\s)\.(?=\s|$)/g, "$1")
+    .replace(/[·•●○◌◍◎◦]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanPiUiTextToUndefined(value: string | null | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const cleaned = cleanPiUiText(value);
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+// Strip terminal escape sequences only. A bare "[10m]" is ordinary text, so
+// matching brackets without a real escape byte would corrupt it.
+export function cleanPiUiNoticeText(value: string): string {
+  return value
+    .replace(/\[[0-9;]*[A-Za-z]/g, "")
+    .replace(/\([A-B0-9]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanPiUiNoticeTextToUndefined(value: string | null | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const cleaned = cleanPiUiNoticeText(value);
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+// Per-turn progress caches for the extension UI bridge. Repeats fold within
+// a turn; everything resets on turn change so a later turn re-emits.
+export interface PiExtensionProgressTracker {
+  turnId: TurnId | undefined;
+  workingMessage: string | undefined;
+  statusTexts: Map<string, string>;
+  lastSummary: string | undefined;
+}
+
+export function makePiExtensionProgressTracker(): PiExtensionProgressTracker {
+  return {
+    turnId: undefined,
+    workingMessage: undefined,
+    statusTexts: new Map<string, string>(),
+    lastSummary: undefined,
+  };
+}
+
+// Reset per-turn caches when the turn changes. Returns true on reset. Call
+// before any equality check so a later turn re-emits identical text.
+export function syncPiExtensionProgressTurn(
+  tracker: PiExtensionProgressTracker,
+  turnId: TurnId | undefined,
+): boolean {
+  if (tracker.turnId === turnId) return false;
+  tracker.turnId = turnId;
+  tracker.workingMessage = undefined;
+  tracker.statusTexts.clear();
+  tracker.lastSummary = undefined;
+  return true;
+}
+
 function isPiThinkingLevel(value: string | null | undefined): value is ThinkingLevel {
   return (
     value === "off" ||
@@ -1533,8 +1599,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
     // pending user-input flow; terminal/TUI-only APIs remain no-op by design.
     const makePiExtensionUIContext = (context: PiSessionContext): ExtensionUIContext => {
       const unsupportedWarnings = new Set<string>();
-      const statusTexts = new Map<string, string>();
-      let workingMessage: string | undefined;
+      const progress = makePiExtensionProgressTracker();
       const warnUnsupported = (method: string) => {
         if (unsupportedWarnings.has(method)) return;
         unsupportedWarnings.add(method);
@@ -1553,8 +1618,13 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         } satisfies ProviderRuntimeEvent);
       };
       const emitPluginProgress = (summary: string) => {
-        const normalized = trimToUndefined(summary);
+        const normalized = cleanPiUiTextToUndefined(summary);
         if (!normalized) return;
+        // Dedupe on the summary alone (a sustained task must not pile up a
+        // row every couple of seconds); caches reset on turn change.
+        syncPiExtensionProgressTurn(progress, context.activeTurnId);
+        if (normalized === progress.lastSummary) return;
+        progress.lastSummary = normalized;
         offerRuntimeEvent({
           ...makeEventBase(context),
           type: "tool.progress",
@@ -1618,21 +1688,23 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           return firstPiUserInputAnswer(answers, questionId);
         },
         notify(message, type) {
-          const normalized = trimToUndefined(message);
-          if (!normalized) return;
           if (type === "warning" || type === "error") {
+            const notice = cleanPiUiNoticeTextToUndefined(message);
+            if (!notice) return;
             offerRuntimeEvent({
               ...makeEventBase(context),
               type: "runtime.warning",
-              payload: { message: normalized, detail: { type: type ?? "info" } },
+              payload: { message: notice, detail: { type: type ?? "info" } },
               raw: {
                 source: "pi.sdk.event",
                 method: "extension/ui/notify",
-                payload: { message: normalized, type },
+                payload: { message: notice, type },
               },
             } satisfies ProviderRuntimeEvent);
             return;
           }
+          const normalized = cleanPiUiTextToUndefined(message);
+          if (!normalized) return;
           emitPluginProgress(normalized);
         },
         onTerminalInput() {
@@ -1640,20 +1712,22 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           return () => undefined;
         },
         setStatus(key, text) {
-          const normalizedKey = trimToUndefined(key) ?? "status";
-          const normalizedText = trimToUndefined(text);
+          syncPiExtensionProgressTurn(progress, context.activeTurnId);
+          const normalizedKey = cleanPiUiTextToUndefined(key) ?? "status";
+          const normalizedText = cleanPiUiTextToUndefined(text);
           if (!normalizedText) {
-            statusTexts.delete(normalizedKey);
+            progress.statusTexts.delete(normalizedKey);
             return;
           }
-          if (statusTexts.get(normalizedKey) === normalizedText) return;
-          statusTexts.set(normalizedKey, normalizedText);
+          if (progress.statusTexts.get(normalizedKey) === normalizedText) return;
+          progress.statusTexts.set(normalizedKey, normalizedText);
           emitPluginProgress(`${normalizedKey}: ${normalizedText}`);
         },
         setWorkingMessage(message) {
-          const normalizedMessage = trimToUndefined(message);
-          if (!normalizedMessage || normalizedMessage === workingMessage) return;
-          workingMessage = normalizedMessage;
+          syncPiExtensionProgressTurn(progress, context.activeTurnId);
+          const normalizedMessage = cleanPiUiTextToUndefined(message);
+          if (!normalizedMessage || normalizedMessage === progress.workingMessage) return;
+          progress.workingMessage = normalizedMessage;
           emitPluginProgress(normalizedMessage);
         },
         setWorkingVisible() {},
