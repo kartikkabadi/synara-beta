@@ -2096,30 +2096,45 @@ export function releaseFailedSendAtSendCommit<S extends FailedSendErrorIdentity>
 }
 
 // The transcript fallback replays the input of the turn that errored, so it is
-// only safe when the card's failure IS that turn's failure: the latest turn is
-// in the error state, the transcript's last user message belongs to it, and
-// the thread's current error is still the session-projected failure that turn
-// raised. Any other error source — an approval or user-input response, an
-// unblock, a plan follow-up, an attachment or script failure, or a dispatch
-// that never produced a turn — has no safe payload here, and resending the last
+// only safe when the card's failure IS that turn's failure. `ownership` is the
+// attribution ChatView records when it observes a new error generation: it is
+// set only when the thread's current error is the session-projected failure
+// (thread.error equals the session's lastError) of an errored latest turn, and
+// it carries the write epoch observed at that moment. A client-side failure
+// that reuses the session failure's exact text bumps the write epoch without
+// changing the generation, so a stale epoch closes the fallback. Any other
+// error source — an approval or user-input response, an unblock, a plan
+// follow-up, an attachment or script failure, or a dispatch that never
+// produced a turn — has no safe payload here, and resending the last
 // transcript message would launch an unrelated earlier request. The returned
 // turn is the retry's payload source: its sourceProposedPlan keeps a
 // plan-backed retry's implementation linkage.
+export interface TranscriptFallbackOwnership {
+  threadId: ThreadId;
+  turnId: NonNullable<Thread["latestTurn"]>["turnId"];
+  errorVersion: number;
+  writeEpoch: number;
+}
+
 export function findTranscriptFallbackRetryTarget(
   messages: readonly ChatMessage[],
   latestTurn: Thread["latestTurn"],
   currentError: CurrentThreadError,
-  sessionError: string | null,
+  ownership: TranscriptFallbackOwnership | null,
+  currentWriteEpoch: number,
 ): { message: ChatMessage; turn: NonNullable<Thread["latestTurn"]> } | null {
   if (!latestTurn || latestTurn.state !== "error") {
     return null;
   }
-  // The card must still be showing the failure the session projected for this
-  // turn. A newer client-side failure (attachment, script, approval, user
-  // input) overwrites thread.error without touching the session's lastError,
-  // so an equality mismatch means the card belongs to that newer failure and
-  // the old turn's input must not be resent.
-  if (currentError.error === null || currentError.error !== sessionError) {
+  // The card must still be showing the generation the session projected for
+  // this turn, attributed when it landed: a newer client-side failure — even
+  // one reusing the exact text — bumps the write epoch and breaks the match.
+  if (
+    !ownership ||
+    ownership.turnId !== latestTurn.turnId ||
+    ownership.errorVersion !== currentError.errorVersion ||
+    ownership.writeEpoch !== currentWriteEpoch
+  ) {
     return null;
   }
   const lastUserMessage = messages.findLast((message) => message.role === "user");
@@ -2145,13 +2160,20 @@ export function hasThreadErrorRetryTarget(
   currentError: CurrentThreadError,
   messages: readonly ChatMessage[],
   latestTurn: Thread["latestTurn"],
-  sessionError: string | null,
+  ownership: TranscriptFallbackOwnership | null,
+  currentWriteEpoch: number,
 ): boolean {
   if (snapshot && failedSendSnapshotOwnsCurrentError(snapshot, currentError)) {
     return true;
   }
   return (
-    findTranscriptFallbackRetryTarget(messages, latestTurn, currentError, sessionError) !== null
+    findTranscriptFallbackRetryTarget(
+      messages,
+      latestTurn,
+      currentError,
+      ownership,
+      currentWriteEpoch,
+    ) !== null
   );
 }
 

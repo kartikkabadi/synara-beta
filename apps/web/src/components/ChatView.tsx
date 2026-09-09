@@ -614,6 +614,7 @@ import {
   releaseFailedSendSnapshotAfterSend,
   releaseRetriedFailedSend,
   type RetriedFailedSendCommit,
+  type TranscriptFallbackOwnership,
   failWorktreeSetupSnapshot,
   filterSidechatTranscriptMessages,
   hasLiveTurnTakenOver,
@@ -11624,19 +11625,54 @@ export default function ChatView({
   // change its inputs — every map mutation that matters is paired with an
   // error write, which re-renders and re-runs this reconciliation.
   const [activeThreadHasRetryTarget, setActiveThreadHasRetryTarget] = useState(false);
+  // Attributes the thread's current error generation to its source, observed
+  // whenever the generation changes: the transcript fallback may only replay
+  // the errored latest turn's input while the card still shows the failure the
+  // session projected for that turn. A client-side write that reuses the
+  // session failure's exact text bumps the write epoch without changing the
+  // generation, so the recorded epoch goes stale and closes the fallback.
+  const transcriptRetryOwnershipRef = useRef<TranscriptFallbackOwnership | null>(null);
   useLayoutEffect(() => {
     const thread = activeThread;
     if (!thread) {
+      transcriptRetryOwnershipRef.current = null;
       setActiveThreadHasRetryTarget(false);
       return;
+    }
+    const current = getCurrentThreadErrorAndVersion(thread.id);
+    const writeEpoch = threadErrorWriteEpochRef.current.get(thread.id) ?? 0;
+    const observed = transcriptRetryOwnershipRef.current;
+    const generationUnchanged =
+      observed !== null &&
+      observed.threadId === thread.id &&
+      observed.errorVersion === current.errorVersion;
+    if (!generationUnchanged) {
+      const sessionError = normalizeThreadErrorMessage(thread.session?.lastError ?? null);
+      transcriptRetryOwnershipRef.current =
+        thread.error !== null &&
+        thread.error === sessionError &&
+        thread.latestTurn?.state === "error"
+          ? {
+              threadId: thread.id,
+              turnId: thread.latestTurn.turnId,
+              errorVersion: current.errorVersion,
+              writeEpoch,
+            }
+          : null;
+    } else if (observed.writeEpoch !== writeEpoch) {
+      // A client-side write re-used the session failure's exact text: the
+      // generation did not move but the write epoch did, so the card now
+      // belongs to that client write and the turn's input must not resend.
+      transcriptRetryOwnershipRef.current = null;
     }
     setActiveThreadHasRetryTarget(
       hasThreadErrorRetryTarget(
         failedThreadSendsRef.current.get(thread.id),
-        getCurrentThreadErrorAndVersion(thread.id),
+        current,
         thread.messages,
         thread.latestTurn,
-        normalizeThreadErrorMessage(thread.session?.lastError ?? null),
+        transcriptRetryOwnershipRef.current,
+        writeEpoch,
       ),
     );
   }, [activeThread, getCurrentThreadErrorAndVersion]);
@@ -11813,16 +11849,16 @@ export default function ChatView({
       dispatchRetryTurn(buildRetryTurn(failedSend));
       return;
     }
-    // The transcript fallback replays the input of the turn that errored. Any
-    // other error source — an approval, an unblock, an edit, an attachment or
-    // script failure, or a dispatch that never produced a turn — must not
-    // resend an unrelated earlier message: the gate also requires the card to
-    // still show the session-projected failure that turn raised.
+    // The transcript fallback replays the input of the turn that errored. The
+    // ownership attribution must still match — the card shows the failure the
+    // session projected for that turn, and no client-side write (even one
+    // reusing the exact text) has replaced it since.
     const retryTarget = findTranscriptFallbackRetryTarget(
       activeThread.messages,
       activeThread.latestTurn,
       retriedError,
-      normalizeThreadErrorMessage(activeThread.session?.lastError ?? null),
+      transcriptRetryOwnershipRef.current,
+      threadErrorWriteEpochRef.current.get(threadId) ?? 0,
     );
     if (!retryTarget) {
       return;
