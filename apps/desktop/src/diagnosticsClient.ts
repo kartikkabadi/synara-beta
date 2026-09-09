@@ -165,13 +165,19 @@ export function createDiagnosticsClient(options: DiagnosticsOptions): Diagnostic
     try {
       writeDiagnosticsQueue(options.stateDir, reconciledQueue);
     } catch {
-      // The in-memory queue is already correct.
+      // A delete is the next best way to keep revoked or stale events off disk.
+      try {
+        FS.rmSync(Path.join(options.stateDir, QUEUE_FILE), { force: true });
+      } catch {
+        // Unwritable disk; the in-memory queue still wins for this session.
+      }
     }
   }
   let lastSentAt: string | null = null;
   let lastError: string | null = null;
   let consecutiveFailures = 0;
-  let flushing = false;
+  let inFlightFlush: Promise<boolean> | null = null;
+  let inFlightAbort: AbortController | null = null;
   let consentGeneration = 0;
   const fetchImpl = options.fetchImpl ?? fetch;
   const flushIntervalMs = options.flushIntervalMs ?? FLUSH_INTERVAL_MS;
@@ -233,19 +239,18 @@ export function createDiagnosticsClient(options: DiagnosticsOptions): Diagnostic
     };
   }
 
-  async function flush(): Promise<boolean> {
-    if (flushing || !isSendable() || queue.length === 0) return false;
-    const startConsent = consentGeneration;
+  async function flushOnce(controller: AbortController, startConsent: number): Promise<boolean> {
     const batch = queue.slice(0, FLUSH_BATCH_LIMIT);
     const batchEventIds = new Set(batch.map((event) => event.eventId));
     const batchHeadId = batch[0]?.eventId ?? null;
-    flushing = true;
     try {
       const response = await fetchImpl(`${endpointUrl}/v1/events`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ events: batch }),
-        signal: AbortSignal.timeout(10_000),
+        // The consent abort wins over the timeout: an opt-out mid-flight must
+        // stop the request so a queued batch cannot land after revocation.
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]),
       });
       if (!response.ok) throw new Error(`status ${response.status}`);
       // If consent or the queue changed while the request was in flight, this
@@ -280,17 +285,37 @@ export function createDiagnosticsClient(options: DiagnosticsOptions): Diagnostic
       }
       persistQueue();
       return false;
-    } finally {
-      flushing = false;
     }
+  }
+
+  function flush(): Promise<boolean> {
+    // A flush already in flight does not cover events queued after its batch
+    // snapshot (e.g. app_quit recorded at will-quit). Wait for it to settle,
+    // then re-check and flush the new head instead of dropping the call.
+    if (inFlightFlush !== null) return inFlightFlush.then(flush, flush);
+    if (!isSendable() || queue.length === 0) return Promise.resolve(false);
+    const controller = new AbortController();
+    inFlightAbort = controller;
+    const pending = flushOnce(controller, consentGeneration).finally(() => {
+      inFlightFlush = null;
+      inFlightAbort = null;
+    });
+    inFlightFlush = pending;
+    return pending;
   }
 
   return {
     getState: () => buildState(),
     setEnabled: (enabled) => {
-      // Bumping the consent generation before any mutation makes in-flight
-      // flushes ignore stale completions after consent is toggled.
-      consentGeneration += 1;
+      if (enabled !== stateRef.enabled) {
+        // A real consent transition invalidates any in-flight flush: bump the
+        // generation so its completion cannot mutate post-toggle state, and
+        // abort the request so a batch queued under consent cannot land after
+        // opt-out. Repeating the current value changes nothing and must not
+        // discard a healthy in-flight completion.
+        consentGeneration += 1;
+        inFlightAbort?.abort();
+      }
       if (!enabled) {
         // Consent withdrawn: disable recording and sending first, drop the
         // queue, and reset the failure counter so a stale streak cannot drop
@@ -300,18 +325,11 @@ export function createDiagnosticsClient(options: DiagnosticsOptions): Diagnostic
         queue = [];
         consecutiveFailures = 0;
         lastError = null;
-        try {
-          writeDiagnosticsQueue(options.stateDir, queue);
-        } catch {
-          // A full or read-only disk can still allow a delete; a missing queue
-          // file is the next best way to keep revoked events off disk.
-          try {
-            FS.rmSync(Path.join(options.stateDir, QUEUE_FILE), { force: true });
-          } catch {
-            // Nothing persisted. Startup drops any queue that outlives a
-            // persisted opt-out, and events are never sent while disabled.
-          }
-        }
+        // Persist the opt-out before clearing the queue file: if the process
+        // dies between the two writes, the surviving pair is (disabled state,
+        // stale queue), which the next launch resolves by dropping the queue.
+        // Clearing the queue first could leave (enabled state, empty queue)
+        // behind — a silently resurrected consent.
         try {
           writeDiagnosticsState(options.stateDir, {
             version: 1,
@@ -328,8 +346,21 @@ export function createDiagnosticsClient(options: DiagnosticsOptions): Diagnostic
             // unwritable disk cannot record an opt-out at all.
           }
         }
+        try {
+          writeDiagnosticsQueue(options.stateDir, queue);
+        } catch {
+          // A full or read-only disk can still allow a delete; a missing queue
+          // file is the next best way to keep revoked events off disk.
+          try {
+            FS.rmSync(Path.join(options.stateDir, QUEUE_FILE), { force: true });
+          } catch {
+            // Nothing persisted. Startup drops any queue that outlives a
+            // persisted opt-out, and events are never sent while disabled.
+          }
+        }
         return buildState();
       }
+      if (stateRef.enabled) return buildState();
       try {
         writeDiagnosticsState(options.stateDir, {
           version: 1,
@@ -360,6 +391,9 @@ export function createDiagnosticsClient(options: DiagnosticsOptions): Diagnostic
     flush,
     dispose: () => {
       if (timer !== null) clearInterval(timer);
+      // A disposed client must not let a late completion mutate state.
+      consentGeneration += 1;
+      inFlightAbort?.abort();
     },
   };
 }
