@@ -29,6 +29,8 @@ export type ThreadErrorCardProps = {
   unblocking?: boolean;
   onDismiss?: (() => void) | undefined;
   onRetry?: (() => void) | undefined;
+  /** Identity of the thread (or surface) the retry belongs to; a change cancels a pending retry. */
+  retryKey?: string | null;
   onUnblock?: (() => void) | undefined;
   rateLimitStatus?: RateLimitStatus | null;
 };
@@ -113,6 +115,7 @@ export function ThreadErrorCard({
   unblocking,
   onDismiss,
   onRetry,
+  retryKey,
   onUnblock,
   rateLimitStatus,
 }: ThreadErrorCardProps) {
@@ -171,11 +174,14 @@ export function ThreadErrorCard({
   // reused across threads and error rewrites, so a thread switch or a newer
   // failure replacing the error must cancel the delayed onRetry — otherwise
   // the previous chat's failed message would be sent through whichever
-  // callback is captured when the 180ms preparing timer fires.
+  // callback is captured when the 180ms preparing timer fires. The retry key
+  // (the owning thread) keeps unrelated updates on the same thread from
+  // cancelling: the parent's retry callback identity churns on every store
+  // update, which must not abort an in-flight retry.
   useEffect(() => {
     clearRetryTimers();
     setRetryStep("idle");
-  }, [clearRetryTimers, error, onRetry]);
+  }, [clearRetryTimers, error, retryKey]);
 
   const startRetry = useCallback(() => {
     if (!onRetry || isRetrying) return;

@@ -11624,6 +11624,15 @@ export default function ChatView({
   const presentedThreadError = useTransientPresentation(activeThread?.error ?? null, {
     animateOpen: true,
   });
+  // During the close animation — including after a thread switch — the card
+  // still shows the previous error, but the action handlers target the active
+  // thread. Stand the actions down unless the presented error is the active
+  // thread's own current error, so a closing card can never dismiss, unblock,
+  // or retry the wrong conversation.
+  const presentedThreadErrorIsCurrent =
+    presentedThreadError != null &&
+    activeThread != null &&
+    presentedThreadError.snapshot === activeThread.error;
   // "Try again" must reflect a concrete replay target, not just a retryable
   // error string: approval and user-input response failures can raise
   // connection-classified errors with nothing to replay, and a button that
@@ -13123,12 +13132,17 @@ export default function ChatView({
                   <ThreadErrorCard
                     error={presentedThreadError.snapshot}
                     unblocking={unblockingActiveThread}
-                    onDismiss={dismissActiveThreadError}
-                    onRetry={activeThreadHasRetryTarget ? retryActiveThreadError : undefined}
-                    onUnblock={onUnblockActiveThread}
+                    onDismiss={presentedThreadErrorIsCurrent ? dismissActiveThreadError : undefined}
+                    onRetry={
+                      presentedThreadErrorIsCurrent && activeThreadHasRetryTarget
+                        ? retryActiveThreadError
+                        : undefined
+                    }
+                    onUnblock={presentedThreadErrorIsCurrent ? onUnblockActiveThread : undefined}
                     // The countdown must outlive the rate-limit banner's own
                     // dismissal — hiding the banner is not "the limit reset".
                     rateLimitStatus={activeRateLimitStatus}
+                    retryKey={activeThread?.id}
                   />
                 </div>
               </DisclosureRegion>
