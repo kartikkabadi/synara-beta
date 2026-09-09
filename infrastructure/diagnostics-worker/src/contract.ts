@@ -70,7 +70,7 @@ const ERROR_SURFACES = new Set(["desktop", "backend", "updater"]);
 
 export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 export const EVENT_ID_PATTERN = /^[0-9a-f]{32}$/u;
-const APP_VERSION_PATTERN = /^\d{1,3}\.\d{1,3}\.\d{1,3}(?:-beta\.\d{1,3})?$/u;
+const APP_VERSION_PATTERN = /^\d{1,3}\.\d{1,3}\.\d{1,3}(?:-(?:beta|canary)\.\d{1,3})?$/u;
 const MINUTE_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00Z$/u;
 const FEATURE_PATTERN = /^[a-z][a-z0-9-]{0,47}$/u;
 // Mirrors the sanitizer: a known domain prefix keeps caller-supplied free text
