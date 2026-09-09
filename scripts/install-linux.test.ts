@@ -352,7 +352,7 @@ describe("install-linux.sh", () => {
       );
       NodeFS.writeFileSync(
         NodePath.join(stubBin, "curl"),
-        '#!/bin/sh\nout=""\nurl=""\nwhile [ "$#" -gt 0 ]; do\n  case "$1" in\n    -o) out="$2"; shift 2;;\n    -*) shift;;\n    *) url="$1"; shift;;\n  esac\ndone\ncase "$url" in\n  *beta.8*) sums="$STUB_SANDBOX/SHA256SUMS-v9.9.9-beta.8"; payload="$STUB_SANDBOX/payload-v9.9.9-beta.8";;\n  *beta.9*) sums="$STUB_SANDBOX/SHA256SUMS-v9.9.9-beta.9"; payload="$STUB_SANDBOX/payload-v9.9.9-beta.9";;\n  *) exit 1;;\nesac\ncase "$url" in\n  */SHA256SUMS.sig) cat "${sums:-$STUB_SANDBOX/SHA256SUMS-v9.9.9-beta.9}.sig" > "$out";;\n  */SHA256SUMS) cat "${sums:-$STUB_SANDBOX/SHA256SUMS-v9.9.9-beta.9}" > "$out";;\n  *) sleep 0.3; cat "$payload" > "$out"; printf \'%s\\n\' "$url" >> "$STUB_FETCHED";;\nesac\n',
+        '#!/bin/sh\nout=""\nurl=""\nwhile [ "$#" -gt 0 ]; do\n  case "$1" in\n    -o) out="$2"; shift 2;;\n    -*) shift;;\n    *) url="$1"; shift;;\n  esac\ndone\ncase "$url" in\n  *beta.8*) sums="$STUB_SANDBOX/SHA256SUMS-v9.9.9-beta.8"; payload="$STUB_SANDBOX/payload-v9.9.9-beta.8";;\n  *beta.9*) sums="$STUB_SANDBOX/SHA256SUMS-v9.9.9-beta.9"; payload="$STUB_SANDBOX/payload-v9.9.9-beta.9";;\n  *) exit 1;;\nesac\ncase "$url" in\n  */SHA256SUMS.sig) cat "${sums:-$STUB_SANDBOX/SHA256SUMS-v9.9.9-beta.9}.sig" > "$out";;\n  */SHA256SUMS) cat "${sums:-$STUB_SANDBOX/SHA256SUMS-v9.9.9-beta.9}" > "$out";;\n  *) sleep 0.3; cat "$payload" > "$out";;\nesac\n',
       );
       for (const stub of ["uname", "curl"]) {
         NodeFS.chmodSync(NodePath.join(stubBin, stub), 0o755);
