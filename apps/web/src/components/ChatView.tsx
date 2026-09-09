@@ -1756,6 +1756,10 @@ export default function ChatView({
   // error card's "Try again" reads this to resend the exact failed payload.
   // Keyed by thread so a dispatch on another thread cannot erase it.
   const failedThreadSendsRef = useRef(new Map<ThreadId, FailedThreadSendSnapshot>());
+  // Counts thread-error writes per thread (see setThreadError): ownership
+  // claims captured before a write (the unblock's identity) stop matching
+  // once any newer write lands, including an identical-text one.
+  const threadErrorWriteEpochRef = useRef(new Map<ThreadId, number>());
   const dragDepthRef = useRef(0);
   const terminalOpenByThreadRef = useRef<Record<string, boolean>>({});
   const activatedThreadIdRef = useRef<ThreadId | null>(null);
@@ -4429,6 +4433,15 @@ export default function ChatView({
   const setThreadError = useCallback(
     (targetThreadId: ThreadId | null, error: string | null): number => {
       if (!targetThreadId) return 0;
+      // Counts writes, not generations: an identical-text rewrite keeps the
+      // thread's errorVersion by design, so ownership claims keyed on the
+      // generation alone (the unblock's captured identity) cannot tell a
+      // newer failure apart. Every write bumps this epoch, so a claim made
+      // before the write no longer matches.
+      threadErrorWriteEpochRef.current.set(
+        targetThreadId,
+        (threadErrorWriteEpochRef.current.get(targetThreadId) ?? 0) + 1,
+      );
       if (getThreadFromState(useStore.getState(), targetThreadId)) {
         setStoreThreadError(targetThreadId, error);
         return getThreadFromState(useStore.getState(), targetThreadId)?.errorVersion ?? 0;
@@ -11542,16 +11555,23 @@ export default function ChatView({
   // The unblock RPC resolves asynchronously, so the failure it was initiated
   // against must be captured at click time: a newer failure can land while the
   // request is in flight, and the callback may only release the older pair.
+  // The write epoch closes the identical-text hole — a same-text rewrite keeps
+  // the thread's errorVersion, so the generation alone cannot prove the card
+  // still belongs to the captured failure.
   const unblockRequestIdentityRef = useRef<{
     threadId: ThreadId;
     expectedSnapshot: FailedThreadSendSnapshot | null;
     error: { error: string | null; errorVersion: number };
+    writeEpoch: number;
   } | null>(null);
   const clearThreadErrorAfterUnblock = useCallback(
     (unblockedThreadId: ThreadId) => {
       const identity = unblockRequestIdentityRef.current;
       unblockRequestIdentityRef.current = null;
-      if (identity?.threadId === unblockedThreadId) {
+      if (
+        identity?.threadId === unblockedThreadId &&
+        identity.writeEpoch === (threadErrorWriteEpochRef.current.get(unblockedThreadId) ?? 0)
+      ) {
         releaseRetriedFailedSend(
           failedThreadSendsRef.current,
           unblockedThreadId,
@@ -11560,6 +11580,11 @@ export default function ChatView({
           getCurrentThreadErrorAndVersion,
           (targetThreadId) => setThreadError(targetThreadId, null),
         );
+        return;
+      }
+      if (identity?.threadId === unblockedThreadId) {
+        // A newer error write owns the card now — the unblock result is stale
+        // for it, so leave the newer card (and its payload) alone.
         return;
       }
       setThreadError(unblockedThreadId, null);
@@ -11578,6 +11603,7 @@ export default function ChatView({
         threadId,
         expectedSnapshot: failedThreadSendsRef.current.get(threadId) ?? null,
         error: getCurrentThreadErrorAndVersion(threadId),
+        writeEpoch: threadErrorWriteEpochRef.current.get(threadId) ?? 0,
       };
     }
     unblockActiveThread();
