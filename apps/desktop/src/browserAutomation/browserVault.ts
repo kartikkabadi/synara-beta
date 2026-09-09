@@ -205,15 +205,31 @@ export class BrowserVault {
       "id" in result &&
       typeof result.id === "string"
     ) {
+      const previousSource = this.sources.get(result.id);
       this.sources.set(result.id, source);
       try {
         await this.persist();
       } catch (error) {
-        // The credential committed but its provenance did not. A stored login
-        // without a source breaks ownership accounting after restart, so roll
-        // the record back instead of keeping a half-saved state.
-        await this.vault.ownerRemove(result.id).catch(() => {});
-        this.sources.delete(result.id);
+        // The credential committed but its provenance did not. Only a record
+        // this call created may be rolled back: a save/commit that replaced an
+        // existing login (or an explicit update) must survive a metadata write
+        // failure, because removing it would destroy a pre-existing secret.
+        // Kept records restore their previous provenance; after a restart an
+        // unmapped id reads as "unknown", which ownership accounting accepts.
+        const metadata = result as { createdAt?: unknown; updatedAt?: unknown };
+        const created =
+          action !== "update" &&
+          typeof metadata.createdAt === "string" &&
+          typeof metadata.updatedAt === "string" &&
+          metadata.createdAt === metadata.updatedAt;
+        if (created) {
+          await this.vault.ownerRemove(result.id).catch(() => {});
+          this.sources.delete(result.id);
+        } else if (previousSource === undefined) {
+          this.sources.delete(result.id);
+        } else {
+          this.sources.set(result.id, previousSource);
+        }
         throw error;
       }
     }

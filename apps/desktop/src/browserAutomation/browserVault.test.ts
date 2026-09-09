@@ -237,4 +237,34 @@ describe("browser vault", () => {
     await expect(prompt).resolves.toEqual({ choice: "save", explicit: true });
     vault.dispose();
   });
+
+  it("keeps a replaced login when the provenance write fails after an update", async () => {
+    const { home, vault } = await fixture();
+    await vault.configure({ agentUse: true, offerSave: true, autosave: false });
+    await vault.saveCaptured(origin, { username: "human", password: "synthetic-original" }, "user");
+    // Force the provenance write to fail after the credential upsert commits.
+    await rm(join(home, "preferences.json"));
+    await mkdir(join(home, "preferences.json"));
+    await expect(
+      vault.saveCaptured(origin, { username: "human", password: "synthetic-updated" }, "user"),
+    ).rejects.toThrow();
+    const snapshot = await vault.snapshot();
+    expect(snapshot.logins).toHaveLength(1);
+    expect(snapshot.logins[0]).toMatchObject({ username: "human", source: "user" });
+    vault.dispose();
+  });
+
+  it("rolls back a freshly created login when the provenance write fails", async () => {
+    const { home, vault } = await fixture();
+    await vault.configure({ agentUse: true, offerSave: true, autosave: false });
+    await vault.saveCaptured(origin, { username: "human", password: "synthetic-first" }, "user");
+    await rm(join(home, "preferences.json"));
+    await mkdir(join(home, "preferences.json"));
+    await expect(
+      vault.saveCaptured(origin, { username: "fresh", password: "synthetic-second" }, "user"),
+    ).rejects.toThrow();
+    const usernames = (await vault.snapshot()).logins.map((login) => login.username);
+    expect(usernames).toEqual(["human"]);
+    vault.dispose();
+  });
 });
