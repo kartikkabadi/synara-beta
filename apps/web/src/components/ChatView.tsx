@@ -11474,20 +11474,49 @@ export default function ChatView({
     failedThreadSendsRef.current.delete(activeThread.id);
     setThreadError(activeThread.id, null);
   }, [activeThread, setThreadError]);
+  // The unblock RPC resolves asynchronously, so the failure it was initiated
+  // against must be captured at click time: a newer failure can land while the
+  // request is in flight, and the callback may only release the older pair.
+  const unblockRequestIdentityRef = useRef<{
+    threadId: ThreadId;
+    expectedSnapshot: FailedThreadSendSnapshot | null;
+    error: { error: string | null; errorVersion: number };
+  } | null>(null);
   const clearThreadErrorAfterUnblock = useCallback(
     (unblockedThreadId: ThreadId) => {
-      // The unblock clears the card; drop its captured payload too so the pair
-      // cannot split (dismiss does the same) and attachments are not pinned.
-      failedThreadSendsRef.current.delete(unblockedThreadId);
+      const identity = unblockRequestIdentityRef.current;
+      unblockRequestIdentityRef.current = null;
+      if (identity?.threadId === unblockedThreadId) {
+        releaseRetriedFailedSend(
+          failedThreadSendsRef.current,
+          unblockedThreadId,
+          identity.expectedSnapshot,
+          identity.error,
+          getCurrentThreadErrorAndVersion,
+          (targetThreadId) => setThreadError(targetThreadId, null),
+        );
+        return;
+      }
       setThreadError(unblockedThreadId, null);
     },
-    [setThreadError],
+    [getCurrentThreadErrorAndVersion, setThreadError],
   );
   const { unblockThread: unblockActiveThread, unblocking: unblockingActiveThread } =
     useThreadUnblock({
       threadId: activeThread?.id ?? null,
       onUnblocked: clearThreadErrorAfterUnblock,
     });
+  const onUnblockActiveThread = useCallback(() => {
+    const threadId = activeThread?.id;
+    if (threadId) {
+      unblockRequestIdentityRef.current = {
+        threadId,
+        expectedSnapshot: failedThreadSendsRef.current.get(threadId) ?? null,
+        error: getCurrentThreadErrorAndVersion(threadId),
+      };
+    }
+    unblockActiveThread();
+  }, [activeThread?.id, getCurrentThreadErrorAndVersion, unblockActiveThread]);
   // Keeps the card mounted through the disclosure animation in both directions:
   // it opens on a frame flip when the error appears and closes out when the
   // stored error clears (dismiss, unblock, or a send that wipes it).
@@ -12916,7 +12945,7 @@ export default function ChatView({
                     unblocking={unblockingActiveThread}
                     onDismiss={dismissActiveThreadError}
                     onRetry={retryActiveThreadError}
-                    onUnblock={unblockActiveThread}
+                    onUnblock={onUnblockActiveThread}
                     // The countdown must outlive the rate-limit banner's own
                     // dismissal — hiding the banner is not "the limit reset".
                     rateLimitStatus={activeRateLimitStatus}
