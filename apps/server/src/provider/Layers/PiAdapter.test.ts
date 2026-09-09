@@ -13,6 +13,7 @@ import path from "node:path";
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
+import { stripTerminalControlSequences } from "@synara/shared/text";
 import {
   cleanPiUiNoticeText,
   cleanPiUiText,
@@ -656,5 +657,23 @@ describe("Pi extension UI helpers", () => {
     expect(tracker.workingMessage).toBeUndefined();
     expect(tracker.statusTexts.size).toBe(0);
     expect(tracker.lastSummary).toBeUndefined();
+  });
+
+  it("strips caveman footer ticks so extension status never reaches the transcript", () => {
+    // Ports the upstream #1093 lifecycle assertion to unit scope: footer
+    // status ticks are terminal chrome. The hybrid drops setStatus rows by
+    // default, and both cleaners strip the escapes while keeping the text.
+    const ticks = [
+      "\u001b[38;2;215;119;87m\u2820\u001b[0m caveman level: FULL",
+      "\u001b[38;2;215;119;87m\u2814\u001b[0m caveman level: FULL",
+    ];
+    expect(ticks.map((tick) => stripTerminalControlSequences(tick))).toEqual([
+      "\u2820 caveman level: FULL",
+      "\u2814 caveman level: FULL",
+    ]);
+    expect(ticks.map((tick) => cleanPiUiNoticeText(tick))).toEqual([
+      "\u2820 caveman level: FULL",
+      "\u2814 caveman level: FULL",
+    ]);
   });
 });
