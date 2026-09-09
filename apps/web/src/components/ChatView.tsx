@@ -606,6 +606,7 @@ import {
   deriveComposerSendState,
   evictOverflowFailedThreadSend,
   failedSendSnapshotOwnsCurrentError,
+  findTranscriptFallbackRetryTarget,
   releaseFailedSendAtSendCommit,
   releaseFailedSendSnapshotAfterSend,
   releaseRetriedFailedSend,
@@ -11704,9 +11705,19 @@ export default function ChatView({
       dispatchRetryTurn(buildRetryTurn(failedSend));
       return;
     }
-    const lastUserMessage = activeThread.messages.findLast((message) => message.role === "user");
+    // The transcript fallback replays the input of the turn that errored. Any
+    // other error source — an approval, an unblock, an edit, or a dispatch that
+    // never produced a turn — must not resend an unrelated earlier message.
+    const retryTarget = findTranscriptFallbackRetryTarget(
+      activeThread.messages,
+      activeThread.latestTurn,
+    );
+    if (!retryTarget) {
+      return;
+    }
+    const { message: lastUserMessage, turn: retriedTurn } = retryTarget;
     const { images, files, assistantSelections } = await rebuildComposerAttachmentsFromMessage(
-      lastUserMessage?.attachments ?? [],
+      lastUserMessage.attachments ?? [],
     );
     // The rebuild awaited network fetches; if the user switched threads in
     // between, the send handlers now belong to a different thread — abort

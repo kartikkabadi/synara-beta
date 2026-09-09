@@ -10,6 +10,7 @@ import {
 } from "@synara/contracts";
 import { describe, expect, it, vi } from "vitest";
 
+import type { ChatMessage, Thread } from "../types";
 import type { WorkLogEntry } from "../session-logic";
 
 import {
@@ -79,6 +80,7 @@ import {
   releaseFailedSendSnapshotAfterSend,
   releaseRetriedFailedSend,
   releaseSupersededFailedSend,
+  findTranscriptFallbackRetryTarget,
   worktreeSetupHasError,
 } from "./ChatView.logic";
 
@@ -3405,5 +3407,86 @@ describe("releaseFailedSendAtSendCommit", () => {
     );
     expect(failedSends.has(threadId)).toBe(false);
     expect(cleared).toEqual([threadId]);
+  });
+});
+
+// The transcript fallback replays the errored turn's own input, so it must only
+// fire when the card's failure IS that turn's failure. Every other error source
+// (approval and user-input responses, unblocks, plan follow-ups, dispatches
+// that never produced a turn) has no safe payload, and resending the last
+// transcript message would launch an unrelated earlier request. The returned
+// turn is also the retry's plan-linkage source: buildRetryTurn copies its
+// sourceProposedPlan so the retried thread.turn.start keeps implementation
+// tracking attached to the original plan.
+describe("findTranscriptFallbackRetryTarget", () => {
+  const erroredTurnId = TurnId.makeUnsafe("turn-errored");
+  const planReference = {
+    threadId: ThreadId.makeUnsafe("thread-1"),
+    planId: "plan-1",
+  };
+  const erroredPlanTurn: NonNullable<Thread["latestTurn"]> = {
+    turnId: erroredTurnId,
+    state: "error",
+    requestedAt: "2026-09-09T00:00:02.000Z",
+    startedAt: "2026-09-09T00:00:02.500Z",
+    completedAt: "2026-09-09T00:00:03.000Z",
+    assistantMessageId: null,
+    sourceProposedPlan: planReference,
+  };
+  const userMessage = (turnId: TurnId | null, text = "Implement the plan"): ChatMessage => ({
+    id: MessageId.makeUnsafe(text.toLowerCase().replace(/\s+/g, "-")),
+    role: "user",
+    text,
+    turnId,
+    createdAt: "2026-09-09T00:00:01.000Z",
+    streaming: false,
+  });
+
+  it("targets the errored turn's own last user message and carries its plan linkage", () => {
+    const failedUserMessage = userMessage(erroredTurnId, "Implement the plan");
+    const target = findTranscriptFallbackRetryTarget(
+      [userMessage(TurnId.makeUnsafe("turn-older"), "Propose a plan"), failedUserMessage],
+      erroredPlanTurn,
+    );
+    expect(target?.message).toBe(failedUserMessage);
+  });
+
+  it("rejects a live turn so a retry cannot interrupt or duplicate it", () => {
+    expect(
+      findTranscriptFallbackRetryTarget([userMessage(erroredTurnId)], {
+        ...erroredPlanTurn,
+        state: "running",
+        completedAt: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects when the last user message belongs to an older turn", () => {
+    // An approval or user-input response failure lands while an errored turn is
+    // still the latest but its own dispatch never produced a transcript message
+    // — the fallback must not resend the older turn's input.
+    expect(
+      findTranscriptFallbackRetryTarget([userMessage(TurnId.makeUnsafe("turn-older"))], {
+        ...erroredPlanTurn,
+        turnId: TurnId.makeUnsafe("turn-newer"),
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects a transcript whose last user message never joined a turn", () => {
+    expect(findTranscriptFallbackRetryTarget([userMessage(null)], erroredPlanTurn)).toBeNull();
+  });
+
+  it("rejects a transcript with no user message at all", () => {
+    expect(findTranscriptFallbackRetryTarget([], erroredPlanTurn)).toBeNull();
+  });
+
+  it("rejects a completed latest turn — its failure is not the card's error", () => {
+    expect(
+      findTranscriptFallbackRetryTarget([userMessage(erroredTurnId)], {
+        ...erroredPlanTurn,
+        state: "completed",
+      }),
+    ).toBeNull();
   });
 });
