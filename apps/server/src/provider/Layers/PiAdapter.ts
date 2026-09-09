@@ -519,10 +519,7 @@ function trimToUndefined(value: string | null | undefined): string | undefined {
 // (e.g. "Moonwalking... (1m 23s)"). Clean before compare/emit so the
 // timeline shows one readable row instead of 200+ raw rows.
 export function cleanPiUiText(value: string): string {
-  return value
-    .replace(/\[[0-9;]*[A-Za-z]/g, "")
-    .replace(/\[[0-9;]+m/g, "")
-    .replace(/\([A-B0-9]/g, "")
+  return cleanPiUiNoticeText(value)
     .replace(/\s*\(\d+\s*m(?:\s+\d+\s*s)?\)?(?=\s*$)/g, "")
     .replace(/(^|\s)\.(?=\s|$)/g, "$1")
     .replace(/[·•●○◌◍◎◦]+/g, " ")
@@ -536,8 +533,8 @@ function cleanPiUiTextToUndefined(value: string | null | undefined): string | un
   return cleaned.length > 0 ? cleaned : undefined;
 }
 
-// Notices (warnings/errors) keep legitimate durations: strip only sequences
-// with a real escape byte, never bare "[10m]" fragments or "(10m)" suffixes.
+// Strip terminal escape sequences only. A bare "[10m]" is ordinary text, so
+// matching brackets without a real escape byte would corrupt it.
 export function cleanPiUiNoticeText(value: string): string {
   return value
     .replace(/\[[0-9;]*[A-Za-z]/g, "")

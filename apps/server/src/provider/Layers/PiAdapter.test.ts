@@ -626,6 +626,8 @@ describe("Pi extension UI helpers", () => {
     ).toBe("Moonwalking...");
     expect(cleanPiUiText("Moonwalking... (1m 23s)")).toBe("Moonwalking...");
     expect(cleanPiUiText("Install [m] package")).toBe("Install [m] package");
+    expect(cleanPiUiText("Window [10m] closes")).toBe("Window [10m] closes");
+    expect(cleanPiUiText("Rebuild [0;31m] marker")).toBe("Rebuild [0;31m] marker");
     expect(cleanPiUiText("Sync (1m complete")).toBe("Sync (1m complete");
     expect(cleanPiUiText("level reached — nice work…")).toBe("level reached — nice work…");
     expect(cleanPiUiText("• loading")).toBe("loading");
