@@ -5346,12 +5346,44 @@ app.on("before-quit", (event) => {
   void confirmRunningChatsThenQuit("before-quit");
 });
 
-app.on("will-quit", () => {
+// `will-quit` holds the exit briefly so the final diagnostics batch — the
+// app_quit event itself — can leave before the process dies. The event is
+// already durable: record() writes the queue file synchronously, so a send
+// that misses this window is flushed on the next launch instead of lost.
+const WILL_QUIT_DIAGNOSTICS_FLUSH_BUDGET_MS = 2_000;
+let willQuitDiagnosticsFlushStarted = false;
+
+app.on("will-quit", (event) => {
   // `will-quit` is the committed quit signal: it does not fire when a quit is
   // cancelled, and it fires exactly once for a successful exit, including the
   // second `app.quit()` call from the graceful shutdown path.
   recordDiagnosticsEvent({ kind: "app_quit" });
-  void diagnosticsClient.flush();
+  const diagnostics = diagnosticsClient.getState();
+  if (
+    willQuitDiagnosticsFlushStarted ||
+    // The updater's quit-and-install owns this exit; delaying it can interfere
+    // with the handoff. The queued event still survives to the next launch.
+    isUpdaterQuitAndInstallInFlight ||
+    !diagnostics.enabled ||
+    diagnostics.queuedEventCount === 0
+  ) {
+    return;
+  }
+  willQuitDiagnosticsFlushStarted = true;
+  event.preventDefault();
+  const budget = new Promise<void>((resolve) => {
+    setTimeout(resolve, WILL_QUIT_DIAGNOSTICS_FLUSH_BUDGET_MS).unref();
+  });
+  // flush() chains behind any in-flight request, so the app_quit recorded just
+  // above gets its own send rather than riding a stale batch snapshot.
+  void Promise.race([diagnosticsClient.flush(), budget])
+    .catch(() => undefined)
+    .then(() => {
+      // Re-enter the normal quit flow: before-quit short-circuits on
+      // `desktopShutdownComplete`, and the second will-quit returns early on
+      // the flag above.
+      app.quit();
+    });
 });
 
 if (hasSingleInstanceLock) {

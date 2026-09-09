@@ -124,7 +124,7 @@ describe("diagnosticsClient", () => {
     expect(client.getState().enabled).toBe(false);
   });
 
-  it("persists the cleared queue before the disabled state", () => {
+  it("persists the disabled state and clears the queue", () => {
     const client = createDiagnosticsClient({ stateDir, sanitizeContext, flushIntervalMs: 0 });
     client.setEnabled(true);
     client.record({ kind: "app_start" });
@@ -137,6 +137,94 @@ describe("diagnosticsClient", () => {
     };
     expect(queueFile).toHaveLength(0);
     expect(stateFile.enabled).toBe(false);
+  });
+
+  it("aborts an in-flight flush when consent is withdrawn", async () => {
+    let signal: AbortSignal | null | undefined;
+    const client = createDiagnosticsClient({
+      stateDir,
+      sanitizeContext,
+      flushIntervalMs: 0,
+      // SAFETY: the test stub only reads the signal this client passed in; the
+      // signature cast adapts the arrow to the fetch type.
+      fetchImpl: (async (_url, init) => {
+        signal = init?.signal;
+        return new Promise<Response>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => {
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          });
+        });
+      }) as typeof fetch,
+    });
+    client.setEnabled(true);
+    client.record({ kind: "app_start" });
+    const flushPromise = client.flush();
+    client.setEnabled(false);
+    expect(signal?.aborted).toBe(true);
+    await expect(flushPromise).resolves.toBe(false);
+    expect(client.getState().enabled).toBe(false);
+    expect(client.getState().queuedEventCount).toBe(0);
+    expect(client.getState().lastError).toBeNull();
+  });
+
+  it("sends events queued during an in-flight flush on the next call", async () => {
+    const resolvers: Array<() => void> = [];
+    const bodies: Array<{ events: unknown[] }> = [];
+    const client = createDiagnosticsClient({
+      stateDir,
+      sanitizeContext,
+      flushIntervalMs: 0,
+      // SAFETY: the test controls both sides of this fetch; the body it wrote
+      // is the JSON it passed in, so the shape cast cannot be wrong.
+      fetchImpl: (async (_url, init) => {
+        const parsedBody = JSON.parse(String(init?.body)) as { events: unknown[] };
+        bodies.push(parsedBody);
+        return new Promise<Response>((resolve) => {
+          resolvers.push(() => resolve(new Response(null, { status: 204 })));
+        });
+      }) as typeof fetch,
+    });
+    client.setEnabled(true);
+    client.record({ kind: "app_start" });
+    const first = client.flush();
+    // This event lands after the in-flight batch snapshot — the queued flush
+    // call must wait for the first send and then cover it.
+    client.record({ kind: "test" });
+    const second = client.flush();
+    resolvers[0]?.();
+    await expect(first).resolves.toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    resolvers[1]?.();
+    await expect(second).resolves.toBe(true);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]?.events).toHaveLength(1);
+    expect(bodies[1]?.events).toHaveLength(1);
+    expect(client.getState().queuedEventCount).toBe(0);
+  });
+
+  it("keeps an in-flight flush valid when setEnabled repeats the current value", async () => {
+    let resolve: (response: Response) => void = () => {};
+    const client = createDiagnosticsClient({
+      stateDir,
+      sanitizeContext,
+      flushIntervalMs: 0,
+      // SAFETY: the test stub immediately returns a pending promise; the signature
+      // cast only adapts the arrow to the fetch type.
+      fetchImpl: (async () =>
+        new Promise((res) => {
+          resolve = res;
+        })) as typeof fetch,
+    });
+    client.setEnabled(true);
+    client.record({ kind: "app_start" });
+    const flushPromise = client.flush();
+    // A no-op toggle is not a consent transition and must not discard the
+    // in-flight completion.
+    client.setEnabled(true);
+    resolve(new Response(null, { status: 204 }));
+    await expect(flushPromise).resolves.toBe(true);
+    expect(client.getState().queuedEventCount).toBe(0);
+    expect(client.getState().lastSentAt).not.toBeNull();
   });
 
   it("keeps collection disabled when the filesystem cannot persist opt-out", () => {
