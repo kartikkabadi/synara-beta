@@ -11,8 +11,6 @@ import {
   UUID_PATTERN,
   isPlainObject,
   validateEvent,
-  type DiagnosticsEvent,
-  type JsonValue,
 } from "./contract";
 
 // Minimal structural stand-ins for the Cloudflare D1 API. These keep the
@@ -112,7 +110,9 @@ async function handleIngest(request: Request, env: Env): Promise<Response> {
   if (bodyText === null) {
     return Response.json({ error: "body too large" }, { status: 413 });
   }
-  let body: JsonValue;
+  // External input is parsed from `unknown`: JSON.parse output is untrusted,
+  // and isPlainObject/validateEvent are the narrowers that give it a type.
+  let body: unknown;
   try {
     body = JSON.parse(bodyText);
   } catch {

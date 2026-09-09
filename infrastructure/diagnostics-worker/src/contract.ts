@@ -14,11 +14,14 @@ export type JsonValue =
   | number
   | boolean
   | null
-  | { readonly [key: string]: JsonValue | undefined }
-  | readonly (JsonValue | undefined)[];
+  | { readonly [key: string]: JsonValue }
+  | readonly JsonValue[];
 
+// Deliberately closed: no index signature. The validator checks every key
+// against ALLOWED_KEYS and every value against its own rule, so a validated
+// event is fully described by these fields — a loose index signature would
+// let out-of-contract fields typecheck their way past this module.
 export interface DiagnosticsEvent {
-  readonly [key: string]: JsonValue | undefined;
   schemaVersion: number;
   kind: string;
   eventId: string;
@@ -101,13 +104,15 @@ const OPTIONAL_FIELD_RULES = {
 
 // Fields each kind requires. An optional field is only allowed on kinds that
 // require it — the same rule the desktop sanitizer enforces via excess-property
-// rejection, so both sides accept exactly the same events.
-const REQUIRED_FIELDS_BY_KIND: Record<string, ReadonlyArray<string>> = {
-  session_started: ["provider"],
-  session_ended: ["provider", "durationBucket", "outcome"],
-  feature_used: ["feature"],
-  error: ["errorCode", "errorSurface"],
-};
+// rejection, so both sides accept exactly the same events. A Map keeps the
+// lookup safe for any runtime string: no prototype member can masquerade as a
+// kind, and a miss is an explicit undefined, not an inherited value.
+const REQUIRED_FIELDS_BY_KIND: ReadonlyMap<string, readonly string[]> = new Map([
+  ["session_started", ["provider"]],
+  ["session_ended", ["provider", "durationBucket", "outcome"]],
+  ["feature_used", ["feature"]],
+  ["error", ["errorCode", "errorSurface"]],
+]);
 
 const ALLOWED_KEYS: Set<string> = new Set([
   "schemaVersion",
@@ -122,19 +127,19 @@ const ALLOWED_KEYS: Set<string> = new Set([
   ...OPTIONAL_FIELDS,
 ]);
 
-function isString(value: JsonValue | undefined): value is string {
+// External input arrives as `unknown` (JSON.parse output, or any caller
+// object); these guards are the only way a value reaches a typed field.
+function isString(value: unknown): value is string {
   return Object.prototype.toString.call(value) === "[object String]";
 }
 
-function isNumber(value: JsonValue | undefined): value is number {
+function isNumber(value: unknown): value is number {
   return (
     Object.prototype.toString.call(value) === "[object Number]" && Number.isFinite(Number(value))
   );
 }
 
-export function isPlainObject(
-  value: JsonValue | undefined,
-): value is Record<string, JsonValue | undefined> {
+export function isPlainObject(value: unknown): value is Record<string, unknown> {
   return !Array.isArray(value) && Object.prototype.toString.call(value) === "[object Object]";
 }
 
@@ -143,7 +148,7 @@ export function isPlainObject(
  * outside the contract or a value outside its enum/pattern. The batch is
  * rejected whole when any event fails — no partial writes, no silent repair.
  */
-export function validateEvent(value: JsonValue | undefined): value is DiagnosticsEvent {
+export function validateEvent(value: unknown): value is DiagnosticsEvent {
   if (!isPlainObject(value)) return false;
   if (!Object.keys(value).every((key) => ALLOWED_KEYS.has(key))) return false;
   if (!isNumber(value.schemaVersion) || value.schemaVersion !== 1) return false;
@@ -165,7 +170,7 @@ export function validateEvent(value: JsonValue | undefined): value is Diagnostic
   ) {
     return false;
   }
-  const required = REQUIRED_FIELDS_BY_KIND[value.kind] ?? [];
+  const required = REQUIRED_FIELDS_BY_KIND.get(value.kind) ?? [];
   for (const [field, isValidValue] of Object.entries(OPTIONAL_FIELD_RULES)) {
     const present = value[field];
     if (present === undefined) {

@@ -13,7 +13,11 @@ import {
   sanitizeDiagnosticsEvent,
   type SanitizeContext,
 } from "../apps/desktop/src/diagnosticsSanitizer";
-import { validateEvent, type JsonValue } from "../infrastructure/diagnostics-worker/src/contract";
+import {
+  validateEvent,
+  type DiagnosticsEvent,
+  type JsonValue,
+} from "../infrastructure/diagnostics-worker/src/contract";
 
 const CONTEXT: SanitizeContext = {
   appVersion: "0.8.3-beta.1",
@@ -145,5 +149,24 @@ describe("diagnostics worker contract", () => {
     expect(
       validateEvent({ ...workerEvent("app_start"), prompt: "ignore previous instructions" }),
     ).toBe(false);
+  });
+
+  it("keeps the wire types strict", () => {
+    // Strict JSON: undefined is not a JSON value, so the wire type must never
+    // admit it — a widened JsonValue would let absent values typecheck as
+    // present data.
+    // @ts-expect-error — undefined is not a JsonValue.
+    const notJson: JsonValue = undefined;
+    expect(notJson).toBeUndefined();
+    // The event type stays closed: without an index signature, out-of-contract
+    // fields are a type error, not silent extra data.
+    const event: DiagnosticsEvent = workerEvent("test");
+    // @ts-expect-error — no index signature on DiagnosticsEvent.
+    expect(event.notInTheContract).toBeUndefined();
+    // External input is validated from `unknown`, the way JSON.parse output
+    // actually arrives.
+    expect(validateEvent(JSON.parse(JSON.stringify(workerEvent("test"))) as unknown)).toBe(true);
+    expect(validateEvent(undefined)).toBe(false);
+    expect(validateEvent("not-an-object")).toBe(false);
   });
 });
