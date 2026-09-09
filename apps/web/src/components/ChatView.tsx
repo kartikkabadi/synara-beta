@@ -9628,6 +9628,17 @@ export default function ChatView({
         threadIdForSend,
         err instanceof Error ? err.message : "Failed to send plan follow-up.",
       );
+      // The submitted text would otherwise be lost: a plan follow-up has no
+      // transcript message and no failed-send snapshot, so the card's retry
+      // cannot replay it. Restore it into the composer — only when the user
+      // has not typed something newer while the dispatch was in flight.
+      if (!queuedTurn && promptRef.current.trim().length === 0) {
+        promptRef.current = text;
+        setPrompt(text);
+        setComposerDraftPrompt(threadIdForSend, text);
+        setComposerCursor(collapseExpandedComposerCursor(text, text.length));
+        setComposerTrigger(detectComposerTrigger(text, text.length));
+      }
       sendInFlightRef.current = false;
       // The turn RPC failed, so no server turn exists for the watchdog to
       // recover — drop the marker armed when the dispatch began.
