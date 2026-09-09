@@ -447,6 +447,9 @@ jobs:
         with:
           node-version-file: package.json
 
+      - name: Check release-signing key sync
+        run: node scripts/check-release-signing-sync.ts
+
       - name: Download all desktop artifacts
         uses: actions/download-artifact@v8
         with:
@@ -498,6 +501,10 @@ jobs:
           chmod 600 "$key_file"
           ssh-keygen -Y sign -f "$key_file" -n synara-beta SHA256SUMS
           test -f SHA256SUMS.sig
+          # Verify the produced signature against the committed public key
+          # before publishing: a rotated secret with a stale committed .pub
+          # would otherwise publish a release every installer refuses.
+          ssh-keygen -Y verify -f "$GITHUB_WORKSPACE/scripts/release-signing.pub" -I synara-beta-releases -s SHA256SUMS.sig -n synara-beta < SHA256SUMS
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
