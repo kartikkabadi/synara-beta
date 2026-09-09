@@ -24,6 +24,7 @@ interface CapturingEnv extends Env {
 function makeEnv(options?: {
   counters?: Map<string, number>;
   failQuota?: boolean;
+  failGlobalReserve?: boolean;
   failInsert?: boolean;
 }): CapturingEnv {
   const batches: D1PreparedStatement[][] = [];
@@ -48,6 +49,11 @@ function makeEnv(options?: {
         run: async (): Promise<D1RunResult> => {
           if (options?.failQuota === true) throw new Error("no such table: rate_counters");
           if (sql.startsWith("INSERT INTO rate_counters")) {
+            // Fails only the global scope's reservation, so a test can drive
+            // the partial-failure path: install reserved, global thrown.
+            if (options?.failGlobalReserve === true && String(bound[0]) === "global") {
+              throw new Error("global reservation failed");
+            }
             const key = `${String(bound[0])}|${String(bound[1])}`;
             counters.set(key, (counters.get(key) ?? 0) + Number(bound[2]));
           }
@@ -339,6 +345,86 @@ describe("diagnostics worker fetch handler", () => {
     options.failInsert = false;
     const recovered = await worker.fetch(
       makeIngestRequest({ events: [workerEvent("app_start")] }),
+      env,
+    );
+    expect(recovered.status).toBe(202);
+  });
+
+  it("compensates the install reservation when the global reservation fails", async () => {
+    const options: { failGlobalReserve?: boolean } = { failGlobalReserve: true };
+    const env = makeEnv(options);
+    const failed = await worker.fetch(
+      makeIngestRequest({ events: [workerEvent("app_start")] }),
+      env,
+    );
+    expect(failed.status).toBe(503);
+    // The install reservation landed before the global one threw; handing it
+    // back is what keeps a partial failure from inflating the install scope
+    // for the rest of the hour.
+    for (const count of env.counters.values()) {
+      expect(count).toBe(0);
+    }
+    // With the store healthy again the same batch passes on a clean budget.
+    options.failGlobalReserve = false;
+    const recovered = await worker.fetch(
+      makeIngestRequest({ events: [workerEvent("app_start")] }),
+      env,
+    );
+    expect(recovered.status).toBe(202);
+  });
+
+  it("does not spend sender quota on a batch rejected at the durable limit", async () => {
+    const env = makeEnv();
+    const sender = { "cf-connecting-ip": "203.0.113.8" };
+    const installId = "0f1a2b3c-0000-4000-8000-000000000200";
+    const first = await worker.fetch(
+      makeIngestRequest({ events: [workerEvent("test", installId)] }, sender),
+      env,
+    );
+    expect(first.status).toBe(202);
+    const installKey = [...env.counters.keys()].find((key) =>
+      key.startsWith(`install:${installId}|`),
+    );
+    // Seed the install scope one event below its limit so every batch of 50
+    // is refused by the durable check, never by the sender cap.
+    env.counters.set(installKey ?? "", 599);
+    for (let batch = 0; batch < 48; batch += 1) {
+      const events = Array.from({ length: 50 }, () => workerEvent("test", installId));
+      const rejected = await worker.fetch(makeIngestRequest({ events }, sender), env);
+      expect(rejected.status).toBe(429);
+    }
+    // Free the durable quota: the sender cap must not be what rejects next,
+    // because every refused batch handed its sender spend back.
+    env.counters.set(installKey ?? "", 0);
+    const recoveredEvents = Array.from({ length: 50 }, () => workerEvent("test", installId));
+    const recovered = await worker.fetch(
+      makeIngestRequest({ events: recoveredEvents }, sender),
+      env,
+    );
+    expect(recovered.status).toBe(202);
+  });
+
+  it("does not spend sender quota on a batch the event write refuses", async () => {
+    const options: { failInsert?: boolean } = { failInsert: true };
+    const env = makeEnv(options);
+    const sender = { "cf-connecting-ip": "203.0.113.9" };
+    // 48 failing batches of 50 would exhaust the 2400 sender cap if a rejected
+    // request spent sender quota; every write failure refunds the spend.
+    for (let batch = 0; batch < 48; batch += 1) {
+      const installId = `0f1a2b3c-0000-4000-8000-${String(400 + batch).padStart(12, "0")}`;
+      const events = Array.from({ length: 50 }, () => workerEvent("test", installId));
+      const response = await worker.fetch(makeIngestRequest({ events }, sender), env);
+      expect(response.status).toBe(503);
+      for (const count of env.counters.values()) {
+        expect(count).toBe(0);
+      }
+    }
+    options.failInsert = false;
+    const recovered = await worker.fetch(
+      makeIngestRequest(
+        { events: [workerEvent("test", "0f1a2b3c-0000-4000-8000-0000000003ff")] },
+        sender,
+      ),
       env,
     );
     expect(recovered.status).toBe(202);

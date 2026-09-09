@@ -151,30 +151,41 @@ async function handleIngest(request: Request, env: Env): Promise<Response> {
   // Durable quota: atomic D1 counter reservations. A single upsert statement
   // serializes concurrent batches on the (scope, window_start) row, so two
   // requests cannot both pass on a stale pre-insert count. The global scope
-  // bounds total ingest even when a caller rotates fresh install ids. A batch
-  // that would push a scope past its limit is rejected whole and its
-  // reservation is handed back, so one oversized batch cannot lock the scope
-  // out for the rest of the hour. A lost release only tightens the limit.
+  // bounds total ingest even when a caller rotates fresh install ids. The two
+  // scopes are reserved sequentially so a failure of the second can be
+  // compensated: a batch that would push a scope past its limit is rejected
+  // whole with every reservation handed back, so neither an oversized batch
+  // nor a partial reservation can lock a scope out for the rest of the hour.
+  // A lost release only tightens the limit.
   const windowStart = hourlyWindowStart();
+  const installScope = `install:${installId}`;
   let installCount: number;
-  let globalCount: number;
   try {
-    [installCount, globalCount] = await Promise.all([
-      reserveHourlyQuota(env, `install:${installId}`, windowStart, validEvents.length),
-      reserveHourlyQuota(env, "global", windowStart, validEvents.length),
-    ]);
+    installCount = await reserveHourlyQuota(env, installScope, windowStart, validEvents.length);
   } catch {
     // A missing rate_counters table (schema not re-applied) must not surface
     // as an opaque worker exception.
+    refundSenderRateLimit(senderIp, validEvents.length);
+    return Response.json({ error: "quota store unavailable" }, { status: 503 });
+  }
+  let globalCount: number;
+  try {
+    globalCount = await reserveHourlyQuota(env, "global", windowStart, validEvents.length);
+  } catch {
+    // The install reservation landed but the global one threw: hand the first
+    // back, or a partial failure would inflate the install scope for an hour.
+    await releaseHourlyQuota(env, installScope, windowStart, validEvents.length).catch(() => {});
+    refundSenderRateLimit(senderIp, validEvents.length);
     return Response.json({ error: "quota store unavailable" }, { status: 503 });
   }
   if (installCount > PER_INSTALL_HOURLY_LIMIT || globalCount > GLOBAL_HOURLY_LIMIT) {
     // The batch never lands, so neither reservation was used: return both.
     // Release is best effort — a failed release only tightens the limit.
     await Promise.all([
-      releaseHourlyQuota(env, `install:${installId}`, windowStart, validEvents.length),
+      releaseHourlyQuota(env, installScope, windowStart, validEvents.length),
       releaseHourlyQuota(env, "global", windowStart, validEvents.length),
     ]).catch(() => {});
+    refundSenderRateLimit(senderIp, validEvents.length);
     return Response.json({ error: "rate limited" }, { status: 429 });
   }
   const receivedAt = new Date().toISOString();
@@ -209,9 +220,10 @@ async function handleIngest(request: Request, env: Env): Promise<Response> {
     // transient D1 error does not burn the install's hourly budget. Release is
     // best effort — a lost decrement only tightens the limit, never loosens it.
     await Promise.all([
-      releaseHourlyQuota(env, `install:${installId}`, windowStart, validEvents.length),
+      releaseHourlyQuota(env, installScope, windowStart, validEvents.length),
       releaseHourlyQuota(env, "global", windowStart, validEvents.length),
     ]).catch(() => {});
+    refundSenderRateLimit(senderIp, validEvents.length);
     return Response.json({ error: "event store unavailable" }, { status: 503 });
   }
   return Response.json({ accepted: validEvents.length }, { status: 202 });
@@ -240,6 +252,19 @@ function withinSenderRateLimit(senderIp: string, incoming: number): boolean {
   }
   entry.count += incoming;
   return entry.count <= PER_SENDER_HOURLY_LIMIT;
+}
+
+// Hands a rejected batch's spend back to the sender's in-memory window, so a
+// request refused after the sender check (over-limit rejection, failed D1
+// write) never costs sender budget: only events that actually land spend it,
+// and a transient D1 outage cannot lock an honest sender out. Best effort —
+// a lost refund only tightens the limit.
+function refundSenderRateLimit(senderIp: string, incoming: number): void {
+  if (senderIp === "unknown") return;
+  const entry = senderHits.get(senderIp);
+  // A rolled-over window already forgot the spend; never debit the new one.
+  if (!entry || entry.resetAt <= Date.now()) return;
+  entry.count = Math.max(0, entry.count - incoming);
 }
 
 // Fixed hourly buckets keep the counter a single upsertable row per scope.
