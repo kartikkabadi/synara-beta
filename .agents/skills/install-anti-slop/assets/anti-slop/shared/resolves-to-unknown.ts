@@ -33,6 +33,7 @@ const typeNameDeclarationTypes = new Set([
   "TSModuleDeclaration",
   "TSImportEqualsDeclaration",
   "ClassDeclaration",
+  "ClassExpression",
 ]);
 
 function isTypeNameDeclaration(node: ESTree.Node): node is ESTree.Node & { id: ESTree.Identifier } {
@@ -86,50 +87,65 @@ function indexTypeNameDeclaration(node: ESTree.Node, scope: Scope): void {
   }
 }
 
+function isNamedClassExpression(node: ESTree.Node): boolean {
+  return (
+    node.type === "ClassExpression" &&
+    "id" in node &&
+    (node as unknown as Record<string, unknown>).id !== null &&
+    (node as unknown as Record<string, unknown>).id !== undefined
+  );
+}
+
+function childScope(scope: Scope): Scope {
+  return {
+    parent: scope,
+    aliases: new Map(),
+    interfaces: new Map(),
+    typeNames: new Map(),
+    depth: scope.depth + 1,
+  };
+}
+
 function indexScopes(
   node: ESTree.Node,
   scope: Scope,
   nodeScopes: Map<ESTree.Node, Scope>,
   visitorKeys: VisitorKeys,
 ): void {
-  nodeScopes.set(node, scope);
-  indexTypeNameDeclaration(node, scope);
+  // A named class expression binds its name only inside its own body, so the
+  // expression opens a scope that holds the binding; the enclosing scope never
+  // sees it, matching TypeScript.
+  const ownScope = isNamedClassExpression(node) ? childScope(scope) : scope;
+  nodeScopes.set(node, ownScope);
+  indexTypeNameDeclaration(node, ownScope);
   if (isAliasDeclaration(node)) {
-    const list = scope.aliases.get(node.id.name) ?? [];
+    const list = ownScope.aliases.get(node.id.name) ?? [];
     list.push(node);
-    scope.aliases.set(node.id.name, list);
+    ownScope.aliases.set(node.id.name, list);
   }
   if (isInterfaceDeclaration(node)) {
-    const list = scope.interfaces.get(node.id.name) ?? [];
+    const list = ownScope.interfaces.get(node.id.name) ?? [];
     list.push(node);
-    scope.interfaces.set(node.id.name, list);
+    ownScope.interfaces.set(node.id.name, list);
   }
   const record = node as unknown as Readonly<Record<string, unknown>>;
   for (const key of visitorKeys[node.type] ?? []) {
     const value = record[key];
     if (isNode(value)) {
-      indexScopes(value, scopeForChild(value, scope), nodeScopes, visitorKeys);
+      indexScopes(value, scopeForChild(value, ownScope), nodeScopes, visitorKeys);
       continue;
     }
     if (!Array.isArray(value)) continue;
     for (const child of value) {
       if (isNode(child)) {
-        indexScopes(child, scopeForChild(child, scope), nodeScopes, visitorKeys);
+        indexScopes(child, scopeForChild(child, ownScope), nodeScopes, visitorKeys);
       }
     }
   }
 }
 
 function scopeForChild(child: ESTree.Node, scope: Scope): Scope {
-  return SCOPE_STARTERS.has(child.type)
-    ? {
-        parent: scope,
-        aliases: new Map(),
-        interfaces: new Map(),
-        typeNames: new Map(),
-        depth: scope.depth + 1,
-      }
-    : scope;
+  return SCOPE_STARTERS.has(child.type) ? childScope(scope) : scope;
 }
 
 /**
@@ -137,7 +153,9 @@ function scopeForChild(child: ESTree.Node, scope: Scope): Scope {
  * open scopes, so a nested alias shadows outer names only for uses inside its
  * own scope and can never affect annotations outside it. Function parameter and
  * return-type annotations resolve in the scope where the function is declared,
- * matching TypeScript.
+ * matching TypeScript. A named class expression opens a scope that holds its
+ * own name, so built-in names reused by the expression are shadowed only
+ * inside its body.
  */
 export function createScopeIndex(program: ESTree.Program, visitorKeys: VisitorKeys): ScopeIndex {
   const rootScope: Scope = {

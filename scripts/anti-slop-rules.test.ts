@@ -282,6 +282,19 @@ describe("no-unknown-parameters", () => {
     expect(byFile.get("promise-import.ts")).toBeUndefined();
   });
 
+  it("treats a named class expression's name as scoped to its own body", () => {
+    const byFile = runRules(
+      {
+        "class-expression.ts":
+          "const C = class Promise {\n  m(input: Promise<unknown>) { return input; }\n};\nexport function f(value: Promise<unknown>) { return value; }\n",
+      },
+      { "anti-slop/no-unknown-parameters": "error" },
+    );
+    // Inside the class body `Promise` is the local class; outside it the name
+    // is invisible and the built-in wrapper resolves to unknown.
+    expect(byFile.get("class-expression.ts")).toEqual(["anti-slop(no-unknown-parameters)"]);
+  });
+
   it("resolves generic defaults that reference earlier type parameters", () => {
     const byFile = runRules(
       {
