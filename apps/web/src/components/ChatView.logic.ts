@@ -2187,8 +2187,11 @@ export const MAX_THREAD_ERROR_WRITE_EPOCHS = 64;
 export function bumpThreadErrorWriteEpoch(
   epochs: Map<ThreadId, number>,
   threadId: ThreadId,
+  epochCounter: { current: number },
 ): number {
-  const nextEpoch = (epochs.get(threadId) ?? 0) + 1;
+  // Globally monotonic: an evicted thread's next write takes the next global
+  // value, so an old claim can never numerically match a later write.
+  const nextEpoch = ++epochCounter.current;
   // Re-insert at the tail so the bound evicts the least recently written.
   epochs.delete(threadId);
   if (epochs.size >= MAX_THREAD_ERROR_WRITE_EPOCHS) {

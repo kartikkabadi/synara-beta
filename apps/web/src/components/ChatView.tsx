@@ -1761,8 +1761,11 @@ export default function ChatView({
   const failedThreadSendsRef = useRef(new Map<ThreadId, FailedThreadSendSnapshot>());
   // Counts thread-error writes per thread (see setThreadError): ownership
   // claims captured before a write (the unblock's identity) stop matching
-  // once any newer write lands, including an identical-text one.
+  // once any newer write lands, including an identical-text one. The counter
+  // is globally monotonic so an evicted entry's thread can never re-match an
+  // old claim's value.
   const threadErrorWriteEpochRef = useRef(new Map<ThreadId, number>());
+  const threadErrorWriteEpochCounterRef = useRef(0);
   const dragDepthRef = useRef(0);
   const terminalOpenByThreadRef = useRef<Record<string, boolean>>({});
   const activatedThreadIdRef = useRef<ThreadId | null>(null);
@@ -4441,7 +4444,11 @@ export default function ChatView({
       // generation alone (the unblock's captured identity) cannot tell a
       // newer failure apart. Every write bumps this epoch, so a claim made
       // before the write no longer matches.
-      bumpThreadErrorWriteEpoch(threadErrorWriteEpochRef.current, targetThreadId);
+      bumpThreadErrorWriteEpoch(
+        threadErrorWriteEpochRef.current,
+        targetThreadId,
+        threadErrorWriteEpochCounterRef,
+      );
       if (getThreadFromState(useStore.getState(), targetThreadId)) {
         setStoreThreadError(targetThreadId, error);
         return getThreadFromState(useStore.getState(), targetThreadId)?.errorVersion ?? 0;

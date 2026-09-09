@@ -3650,30 +3650,32 @@ describe("hasThreadErrorRetryTarget", () => {
 describe("bumpThreadErrorWriteEpoch", () => {
   it("keeps a recently written thread's entry alive across writes to other threads", () => {
     const epochs = new Map<ThreadId, number>();
+    const counter = { current: 0 };
     const touched = ThreadId.makeUnsafe("thread-touched");
-    bumpThreadErrorWriteEpoch(epochs, touched);
+    bumpThreadErrorWriteEpoch(epochs, touched, counter);
     for (let i = 0; i < MAX_THREAD_ERROR_WRITE_EPOCHS - 1; i += 1) {
-      bumpThreadErrorWriteEpoch(epochs, ThreadId.makeUnsafe(`thread-other-${i}`));
+      bumpThreadErrorWriteEpoch(epochs, ThreadId.makeUnsafe(`thread-other-${i}`), counter);
     }
     // The touched entry is still the least recently written here, but the
-    // re-touch moves it to the tail before the bound applies, so it survives.
-    expect(bumpThreadErrorWriteEpoch(epochs, touched)).toBe(2);
+    // re-touch moves it to the tail before the bound applies, so it survives
+    // with the next globally monotonic value.
+    expect(bumpThreadErrorWriteEpoch(epochs, touched, counter)).toBe(65);
     expect(epochs.has(touched)).toBe(true);
     expect(epochs.size).toBeLessThanOrEqual(MAX_THREAD_ERROR_WRITE_EPOCHS);
   });
 
-  it("restarts an evicted thread's epoch — the epoch is defense in depth", () => {
-    // Eviction loses the counter, so a re-written thread restarts at 1 and a
-    // pre-eviction claim could numerically match again. That is safe: the
-    // unblock release also verifies the error generation and the exact
-    // snapshot identity, so the epoch alone never clears a card.
+  it("keeps epochs globally monotonic past eviction, so old claims never re-match", () => {
     const epochs = new Map<ThreadId, number>();
+    const counter = { current: 0 };
     const evicted = ThreadId.makeUnsafe("thread-evicted");
-    bumpThreadErrorWriteEpoch(epochs, evicted);
+    bumpThreadErrorWriteEpoch(epochs, evicted, counter);
     for (let i = 0; i < MAX_THREAD_ERROR_WRITE_EPOCHS; i += 1) {
-      bumpThreadErrorWriteEpoch(epochs, ThreadId.makeUnsafe(`thread-other-${i}`));
+      bumpThreadErrorWriteEpoch(epochs, ThreadId.makeUnsafe(`thread-other-${i}`), counter);
     }
     expect(epochs.has(evicted)).toBe(false);
-    expect(bumpThreadErrorWriteEpoch(epochs, evicted)).toBe(1);
+    // The next write takes the next global value, not a restarted 1: an old
+    // claim with epoch 1 can never match a later same-text write.
+    const nextEpoch = bumpThreadErrorWriteEpoch(epochs, evicted, counter);
+    expect(nextEpoch).toBeGreaterThan(MAX_THREAD_ERROR_WRITE_EPOCHS);
   });
 });
