@@ -19,7 +19,7 @@ import { readNativeApi } from "../nativeApi";
 export function useThreadUnblock(input: {
   readonly threadId: ThreadId | null;
   readonly onUnblocked: (threadId: ThreadId) => void;
-}): { readonly unblockThread: () => void; readonly unblocking: boolean } {
+}): { readonly unblockThread: () => boolean; readonly unblocking: boolean } {
   const { threadId, onUnblocked } = input;
   const [unblockingThreadId, setUnblockingThreadId] = useState<ThreadId | null>(null);
   const inFlightThreadIdRef = useRef<ThreadId | null>(null);
@@ -32,8 +32,8 @@ export function useThreadUnblock(input: {
     };
   }, []);
 
-  const unblockThread = useCallback(() => {
-    if (!threadId || inFlightThreadIdRef.current !== null) return;
+  const unblockThread = useCallback((): boolean => {
+    if (!threadId || inFlightThreadIdRef.current !== null) return false;
     inFlightThreadIdRef.current = threadId;
     setUnblockingThreadId(threadId);
     void (async () => {
@@ -57,6 +57,7 @@ export function useThreadUnblock(input: {
         if (mountedRef.current) setUnblockingThreadId(null);
       }
     })();
+    return true;
   }, [onUnblocked, threadId]);
 
   return {

@@ -11597,7 +11597,11 @@ export default function ChatView({
     });
   const onUnblockActiveThread = useCallback(() => {
     const threadId = activeThread?.id;
-    if (threadId) {
+    // Capture the identity only when the hook accepts the request: a click
+    // while another unblock is in flight is rejected, and overwriting the
+    // captured identity here would let the in-flight request's completion
+    // clear a newer error without its identity checks.
+    if (threadId && unblockActiveThread()) {
       unblockRequestIdentityRef.current = {
         threadId,
         expectedSnapshot: failedThreadSendsRef.current.get(threadId) ?? null,
@@ -11605,7 +11609,6 @@ export default function ChatView({
         writeEpoch: threadErrorWriteEpochRef.current.get(threadId) ?? 0,
       };
     }
-    unblockActiveThread();
   }, [activeThread?.id, getCurrentThreadErrorAndVersion, unblockActiveThread]);
   // Keeps the card mounted through the disclosure animation in both directions:
   // it opens on a frame flip when the error appears and closes out when the
