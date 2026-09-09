@@ -167,6 +167,16 @@ export function ThreadErrorCard({
 
   useEffect(() => clearRetryTimers, [clearRetryTimers]);
 
+  // A pending retry is bound to the error it was started for: the card is
+  // reused across threads and error rewrites, so a thread switch or a newer
+  // failure replacing the error must cancel the delayed onRetry — otherwise
+  // the previous chat's failed message would be sent through whichever
+  // callback is captured when the 180ms preparing timer fires.
+  useEffect(() => {
+    clearRetryTimers();
+    setRetryStep("idle");
+  }, [clearRetryTimers, error, onRetry]);
+
   const startRetry = useCallback(() => {
     if (!onRetry || isRetrying) return;
     setRetryStep("preparing");
