@@ -1,13 +1,14 @@
-// Beta icon generator — native CoreGraphics, supersampled 2x, top-left design space at 1024.
+// Beta icon generator — square artwork (the system applies the dock mask), colors sampled
+// pixel-exact from the installed Xcode 26 icon.
 //
-// Design: Xcode-style engineering blueprint. Diagonal cyan->cobalt gradient with an
-// upper light pool and a lower-right vignette; fine grid, guide circles, tick ring and
-// inset contour; the mark carries a white wireframe registration edge, a concentric
-// plan ring, a subtle vertical gradient, a top rim light and a soft cast shadow; the
-// BETA pill sits bottom-right over the corner with layered elevation and SF Pro type.
+// Design: full-bleed square. Vertical cyan-to-royal gradient (#0FC3FD -> #186FFA at
+// x=300) measured within a few units of Xcode's own stops; a clean 5x5 grid like
+// Xcode 26; two guide circles and a squircle inset guide like the classic Xcode Beta;
+// faint cardinal axes and diagonals; the Synara mark solid and unshadowed; a white
+// SF Pro BETA pill bottom-right with a soft lift shadow.
 //
 // Usage: swift assets/beta/generate-beta-icon.swift   (from the repo root)
-// Outputs the two 1024 masters; derive the rest with sharp/sips:
+// Outputs the two square masters; derive the rest with sips:
 //   beta-macos-legacy-1024.png, beta-universal-1024.png   <- copy of beta-macos-1024.png
 //   beta-web-apple-touch-180.png                          <- sips -z 180 180
 //   beta-web-favicon-16x16.png / -32x32.png               <- sips -z 16 16 / -z 32 32
@@ -16,21 +17,22 @@ import AppKit
 import CoreGraphics
 import Foundation
 
-let D: CGFloat = 1024 // design space
-let SS: CGFloat = 2   // supersample
+let D: CGFloat = 1024
+let SS: CGFloat = 2
 let PX = Int(D * SS)
 
 struct Palette {
   let top: UInt32
-  let mid: UInt32
+  let upperMid: UInt32
+  let lowerMid: UInt32
   let bottom: UInt32
   let mark: UInt32
-  let wire: CGFloat
-  let glow: CGFloat
 }
 
-let light = Palette(top: 0x16ACFB, mid: 0x0B63D8, bottom: 0x05286E, mark: 0x000000, wire: 0.50, glow: 0.10)
-let dark = Palette(top: 0x2273E0, mid: 0x0E4AA8, bottom: 0x042058, mark: 0xFFFFFF, wire: 0.42, glow: 0.06)
+// Light: exact Xcode 26 stop colors.
+let light = Palette(top: 0x0FC3FD, upperMid: 0x12A4FA, lowerMid: 0x1683FA, bottom: 0x186FFA, mark: 0x000000)
+// Dark appearance: deeper sibling of the same ramp.
+let dark = Palette(top: 0x1470D0, upperMid: 0x1062C2, lowerMid: 0x0D53B4, bottom: 0x0A47A6, mark: 0xFFFFFF)
 
 func cg(_ hex: UInt32, _ a: CGFloat = 1) -> CGColor {
   CGColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: a)
@@ -42,7 +44,6 @@ let markPaths: [String] = [
   "M217.479 291.602C187.396 324.802 187 326.002 187 420.002V494.002C187 499.525 191.477 504.002 197 504.002H234.5H272C277.523 504.002 282 499.525 282 494.002V418.002C282 351.202 280.812 329.602 276.458 322.002C269.729 310.002 239.25 274.002 236.083 274.002C234.5 274.002 226.187 282.002 217.479 291.602Z",
 ]
 
-// Minimal SVG path parser: M, L, H, V, C, Z (absolute).
 func parsePath(_ d: String) -> CGPath {
   let path = CGMutablePath()
   var nums: [CGFloat] = []
@@ -50,230 +51,133 @@ func parsePath(_ d: String) -> CGPath {
   var current = ""
   func flush() {
     if current.isEmpty { return }
-    let cmd = current.first!
-    cmds.append((cmd, nums))
-    current = ""
-    nums = []
+    cmds.append((current.first!, nums))
+    current = ""; nums = []
   }
-  var i = d.startIndex
   var token = ""
   func flushToken() {
     if !token.isEmpty { nums.append(CGFloat(Double(token) ?? 0)); token = "" }
   }
-  while i < d.endIndex {
-    let ch = d[i]
-    if ch.isLetter {
-      flushToken()
-      flush()
-      current = String(ch)
-    } else if ch == "," || ch == " " {
-      flushToken()
-    } else {
-      token.append(ch)
-    }
-    i = d.index(after: i)
+  for ch in d {
+    if ch.isLetter { flushToken(); flush(); current = String(ch) }
+    else if ch == "," || ch == " " { flushToken() }
+    else { token.append(ch) }
   }
-  flushToken()
-  flush()
+  flushToken(); flush()
 
   var last = CGPoint.zero
   var start = CGPoint.zero
   for (cmd, a) in cmds {
     switch cmd {
-    case "M":
-      last = CGPoint(x: a[0], y: a[1]); start = last; path.move(to: last)
-    case "L":
-      last = CGPoint(x: a[0], y: a[1]); path.addLine(to: last)
-    case "H":
-      last = CGPoint(x: a[0], y: last.y); path.addLine(to: last)
-    case "V":
-      last = CGPoint(x: last.x, y: a[0]); path.addLine(to: last)
+    case "M": last = CGPoint(x: a[0], y: a[1]); start = last; path.move(to: last)
+    case "L": last = CGPoint(x: a[0], y: a[1]); path.addLine(to: last)
+    case "H": last = CGPoint(x: a[0], y: last.y); path.addLine(to: last)
+    case "V": last = CGPoint(x: last.x, y: a[0]); path.addLine(to: last)
     case "C":
       let c1 = CGPoint(x: a[0], y: a[1]); let c2 = CGPoint(x: a[2], y: a[3]); let to = CGPoint(x: a[4], y: a[5])
       path.addCurve(to: to, control1: c1, control2: c2); last = to
-    case "Z":
-      path.closeSubpath(); last = start
-    default:
-      break
+    case "Z": path.closeSubpath(); last = start
+    default: break
     }
   }
   return path
 }
 
-var translateMarkTransform = CGAffineTransform(translationX: 274, y: 280)
 let markPath: CGPath = {
   let p = CGMutablePath()
   for d in markPaths { p.addPath(parsePath(d)) }
   return p
 }()
 
-func addMark(to ctx: CGContext, translate: CGPoint) {
-  var t = CGAffineTransform(translationX: translate.x, y: translate.y)
+func addMark(to ctx: CGContext) {
+  var t = CGAffineTransform(translationX: 274, y: 280)
   if let moved = markPath.copy(using: &t) { ctx.addPath(moved) }
 }
 
 func drawIcon(_ p: Palette, name: String) {
   let cs = CGColorSpace(name: CGColorSpace.sRGB)!
   guard let ctx = CGContext(data: nil, width: PX, height: PX, bitsPerComponent: 8, bytesPerRow: 0,
-                            space: cs, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
-    print("no ctx"); return
-  }
-  // top-left design space at 1024
+                            space: cs, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { print("no ctx"); return }
   ctx.saveGState()
   ctx.translateBy(x: 0, y: CGFloat(PX))
   ctx.scaleBy(x: 1, y: -1)
   ctx.scaleBy(x: SS, y: SS)
-  ctx.setAllowsAntialiasing(true)
   ctx.setShouldAntialias(true)
 
-  // Tile clip
-  let tile = CGPath(roundedRect: CGRect(x: 0, y: 0, width: D, height: D), cornerWidth: 232, cornerHeight: 232, transform: nil)
-  ctx.saveGState()
-  ctx.addPath(tile)
-  ctx.clip()
-
-  // Diagonal gradient (upper-left cyan -> lower-right cobalt)
-  let colors = [cg(p.top), cg(p.mid), cg(p.bottom)] as CFArray
-  let locs: [CGFloat] = [0, 0.55, 1]
-  if let g = CGGradient(colorsSpace: cs, colors: colors, locations: locs) {
-    ctx.drawLinearGradient(g, start: CGPoint(x: 60, y: 40), end: CGPoint(x: 900, y: 980), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+  // Full-bleed square gradient (the dock supplies the mask).
+  let stops = [cg(p.top), cg(p.upperMid), cg(p.lowerMid), cg(p.bottom)] as CFArray
+  if let g = CGGradient(colorsSpace: cs, colors: stops, locations: [0, 0.35, 0.7, 1]) {
+    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 0), end: CGPoint(x: 0, y: D), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
   }
 
-  // Soft light from upper-left
-  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF, p.glow), cg(0xFFFFFF, 0)] as CFArray, locations: [0, 1]) {
-    ctx.drawRadialGradient(g, startCenter: CGPoint(x: 330, y: 210), startRadius: 0, endCenter: CGPoint(x: 330, y: 210), endRadius: 1150, options: [])
+  // Blueprint shell: clean 5x5 grid (Xcode 26), guide circles and squircle inset (classic beta)
+  ctx.setLineWidth(2.5)
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.14))
+  for step in 1...4 {
+    let v = CGFloat(step) * D / 5
+    ctx.move(to: CGPoint(x: v, y: 0)); ctx.addLine(to: CGPoint(x: v, y: D))
+    ctx.move(to: CGPoint(x: 0, y: v)); ctx.addLine(to: CGPoint(x: D, y: v))
   }
+  ctx.strokePath()
 
-  // Lower-right vignette
-  if let g = CGGradient(colorsSpace: cs, colors: [cg(0x021A44, 0.16), cg(0x021A44, 0)] as CFArray, locations: [0, 1]) {
-    ctx.drawRadialGradient(g, startCenter: CGPoint(x: 880, y: 920), startRadius: 0, endCenter: CGPoint(x: 880, y: 920), endRadius: 760, options: [])
-  }
-
-  // Blueprint grid
-  ctx.setLineWidth(1.6)
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.045))
-  var x: CGFloat = 128
-  while x < D { ctx.move(to: CGPoint(x: x, y: 0)); ctx.addLine(to: CGPoint(x: x, y: D)); x += 128 }
-  var y: CGFloat = 128
-  while y < D { ctx.move(to: CGPoint(x: 0, y: y)); ctx.addLine(to: CGPoint(x: D, y: y)); y += 128 }
+  // Faint cardinal axes
+  ctx.setLineWidth(2)
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.07))
+  ctx.move(to: CGPoint(x: 512, y: 0)); ctx.addLine(to: CGPoint(x: 512, y: D))
+  ctx.move(to: CGPoint(x: 0, y: 512)); ctx.addLine(to: CGPoint(x: D, y: 512))
   ctx.strokePath()
 
   // Diagonals
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.05))
   ctx.setLineWidth(1.6)
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.06))
   ctx.move(to: CGPoint(x: 0, y: 0)); ctx.addLine(to: CGPoint(x: D, y: D))
   ctx.move(to: CGPoint(x: 0, y: D)); ctx.addLine(to: CGPoint(x: D, y: 0))
   ctx.strokePath()
 
-  // Concentric guide circles + tick ring
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.13))
-  ctx.setLineWidth(3.0)
+  // Concentric guide circles
+  ctx.setLineWidth(2.6)
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.18))
   ctx.strokeEllipse(in: CGRect(x: 512 - 344, y: 512 - 344, width: 688, height: 688))
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.06))
-  ctx.strokeEllipse(in: CGRect(x: 512 - 472, y: 512 - 472, width: 944, height: 944))
-  ctx.setLineWidth(3.2)
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.15))
-  let tickCount = 72
-  for t in 0..<tickCount {
-    if t % 6 == 0 { continue }
-    let a = CGFloat(t) / CGFloat(tickCount) * 2 * .pi
-    let r0: CGFloat = 404
-    let r1: CGFloat = 392
-    ctx.move(to: CGPoint(x: 512 + cos(a) * r0, y: 512 + sin(a) * r0))
-    ctx.addLine(to: CGPoint(x: 512 + cos(a) * r1, y: 512 + sin(a) * r1))
-  }
+  ctx.setLineWidth(2)
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.08))
+  ctx.strokeEllipse(in: CGRect(x: 512 - 470, y: 512 - 470, width: 940, height: 940))
+
+  // Squircle inset guide
+  ctx.setLineWidth(2.4)
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.14))
+  ctx.addPath(CGPath(roundedRect: CGRect(x: 72, y: 72, width: D - 144, height: D - 144), cornerWidth: 160, cornerHeight: 160, transform: nil))
   ctx.strokePath()
 
-  // Inset contour guide
-  let inset = CGPath(roundedRect: CGRect(x: 64, y: 64, width: D - 128, height: D - 128), cornerWidth: 170, cornerHeight: 170, transform: nil)
-  ctx.addPath(inset)
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.22))
-  ctx.setLineWidth(3.6)
-  ctx.strokePath()
+  // Solid mark (flat, no baked lighting)
+  ctx.setFillColor(cg(p.mark))
+  addMark(to: ctx)
+  ctx.fillPath()
 
-  // Blueprint registration: white wireframe edge hugging the mark + concentric plan ring
-  ctx.saveGState()
-  ctx.setStrokeColor(cg(0xFFFFFF, p.wire))
-  ctx.setLineWidth(7)
-  ctx.setLineJoin(.round)
-  addMark(to: ctx, translate: CGPoint(x: 274, y: 280))
-  ctx.strokePath()
-  ctx.restoreGState()
-  ctx.saveGState()
-  ctx.translateBy(x: 510, y: 532)
-  ctx.scaleBy(x: 1.16, y: 1.16)
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.20))
-  ctx.setLineWidth(2.2)
-  ctx.setLineJoin(.round)
-  addMark(to: ctx, translate: CGPoint(x: 274, y: 280))
-  ctx.strokePath()
   ctx.restoreGState()
 
-  // Solid mark with soft cast shadow + subtle vertical volume
+  // BETA pill: inside the dock mask, bottom right
+  let pillRect = CGRect(x: 1010, y: 128, width: 860, height: 300)
   ctx.saveGState()
-  ctx.setShadow(offset: CGSize(width: 0, height: -26), blur: 56, color: cg(0x000000, 0.45))
-  addMark(to: ctx, translate: CGPoint(x: 274, y: 280))
-  ctx.clip()
-  let markTop: UInt32 = p.mark == 0 ? 0x20242D : 0xFFFFFF
-  let markBottom: UInt32 = p.mark == 0 ? 0x000000 : 0xD9E4F2
-  if let g = CGGradient(colorsSpace: cs, colors: [cg(markTop), cg(markBottom)] as CFArray, locations: [0, 1]) {
-    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 280), end: CGPoint(x: 0, y: 785), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
-  }
-  ctx.restoreGState()
-  // Top rim light: light catches the upper edges of the glyph
-  ctx.saveGState()
-  addMark(to: ctx, translate: CGPoint(x: 274, y: 280))
-  ctx.clip()
-  ctx.clip(to: CGRect(x: 180, y: 270, width: 700, height: 175))
-  ctx.addPath(markPath.copy(using: &translateMarkTransform)!)
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.28))
-  ctx.setLineWidth(3.2)
-  ctx.setLineJoin(.round)
-  ctx.strokePath()
-  ctx.restoreGState()
-
-  ctx.restoreGState() // end tile clip
-
-  ctx.restoreGState() // back to identity (device) space
-
-  // Pill (device space, bottom-left origin)
-  let pillRect = CGRect(x: 1180, y: 92, width: 816, height: 304)
-  ctx.saveGState()
-  ctx.setShadow(offset: CGSize(width: 0, height: -40), blur: 92, color: cg(0x03183A, 0.28))
+  ctx.setShadow(offset: CGSize(width: 0, height: -12), blur: 28, color: cg(0x03183A, 0.22))
   ctx.addPath(CGPath(roundedRect: pillRect, cornerWidth: 150, cornerHeight: 150, transform: nil))
   ctx.setFillColor(cg(0xFFFFFF))
   ctx.fillPath()
   ctx.restoreGState()
-  ctx.saveGState()
-  ctx.setShadow(offset: CGSize(width: 0, height: -12), blur: 30, color: cg(0x03183A, 0.24))
-  ctx.addPath(CGPath(roundedRect: pillRect, cornerWidth: 150, cornerHeight: 150, transform: nil))
-  ctx.setFillColor(cg(0xFFFFFF))
-  ctx.fillPath()
-  ctx.restoreGState()
-  ctx.saveGState()
-  ctx.addPath(CGPath(roundedRect: pillRect, cornerWidth: 150, cornerHeight: 150, transform: nil))
-  ctx.clip()
-  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF), cg(0xE7EFF9)] as CFArray, locations: [0, 1]) {
-    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: pillRect.maxY), end: CGPoint(x: 0, y: pillRect.minY), options: [])
-  }
-  ctx.restoreGState()
 
-  // BETA (SF Pro)
-  let font = NSFont.systemFont(ofSize: 160, weight: .bold)
+  let font = NSFont.systemFont(ofSize: 200, weight: .bold)
   let attrs: [NSAttributedString.Key: Any] = [
     .font: font,
-    .foregroundColor: NSColor(srgbRed: 0x0A / 255.0, green: 0x5B / 255.0, blue: 0xD6 / 255.0, alpha: 1),
-    .kern: 18,
+    .foregroundColor: NSColor(srgbRed: 0x1A / 255.0, green: 0x73 / 255.0, blue: 0xE8 / 255.0, alpha: 1),
+    .kern: 20,
   ]
   let text = NSAttributedString(string: "BETA", attributes: attrs)
   let size = text.size()
-  let rect = CGRect(x: 1180 + (816 - size.width) / 2 + 8, y: 92 + (304 - size.height) / 2, width: size.width, height: size.height)
+  let rect = CGRect(x: pillRect.minX + (pillRect.width - size.width) / 2 + 6, y: pillRect.minY + (pillRect.height - size.height) / 2, width: size.width, height: size.height)
   NSGraphicsContext.saveGraphicsState()
   NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
   text.draw(in: rect)
   NSGraphicsContext.restoreGraphicsState()
 
-  // Downsample 2048 -> 1024 for crisp edges, then save.
   guard let image = ctx.makeImage() else { print("no image"); return }
   let rep = NSBitmapImageRep(cgImage: image)
   let scaled = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(D), pixelsHigh: Int(D),
@@ -286,13 +190,9 @@ func drawIcon(_ p: Palette, name: String) {
   source.draw(in: NSRect(x: 0, y: 0, width: D, height: D), from: .zero, operation: .copy, fraction: 1)
   NSGraphicsContext.restoreGraphicsState()
   let png = scaled.representation(using: .png, properties: [:])!
-  let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/\(name).png")
-  try! png.write(to: url)
-  print("saved \(url.lastPathComponent)")
+  try! png.write(to: URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/\(name).png"))
+  print("saved \(name).png")
 }
 
-let fm = FileManager.default
-_ = try? fm.createDirectory(atPath: fm.currentDirectoryPath + "/v6", withIntermediateDirectories: true)
-// run from the repo root; writes into assets/beta/
 drawIcon(light, name: "assets/beta/beta-macos-1024")
 drawIcon(dark, name: "assets/beta/beta-macos-legacy-dark-1024")
