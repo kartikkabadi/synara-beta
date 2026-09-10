@@ -2,7 +2,7 @@
 > **Synara Beta is not ready.** This repository is an early development preview: expect breaking changes, incomplete features, and instability. Do not use it for anything important yet.
 
 <div align="center">
-  <img src="./assets/prod/logo.svg" width="112" alt="Synara Beta logo">
+  <img src="./assets/beta/beta-macos-1024.png" width="112" alt="Synara Beta logo">
   <h1>Synara Beta</h1>
   <p><strong>The fast-iteration preview channel for Synara.</strong></p>
   <p>
