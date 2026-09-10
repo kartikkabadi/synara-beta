@@ -523,6 +523,7 @@ import { ComposerExtrasMenu } from "./chat/ComposerExtrasMenu";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { ComposerInputBanners } from "./chat/ComposerInputBanners";
 import { ComposerBranchMismatchBanner } from "./chat/ComposerBranchMismatchBanner";
+import { TitleSuggestionSlot } from "./TitleSuggestionBanner";
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
 import { ComposerVoiceButton } from "./chat/ComposerVoiceButton";
 import { ComposerVoiceRecorderBar } from "./chat/ComposerVoiceRecorderBar";
@@ -11820,6 +11821,14 @@ export default function ChatView({
                     queuedComposerTurns.length > 0
                   }
                 />
+              ) : null}
+              {activeThread?.pendingSuggestedTitle && activeThread ? (
+                <div className="pb-2">
+                  <TitleSuggestionSlot
+                    threadId={activeThread.id}
+                    candidate={activeThread.pendingSuggestedTitle}
+                  />
+                </div>
               ) : null}
               {settledThreadBranchMismatch ? (
                 <div className="pb-2">
