@@ -96,6 +96,9 @@ jobs:
         run: bun run lint
 
       - name: Anti-slop ratchet
+        # Sync branches merge upstream wholesale; upstream debt is already baselined
+        # and the touched rule would fail on every synced file by construction.
+        if: github.head_ref == '' || !startsWith(github.head_ref, 'sync/')
         env:
           SYNARA_ANTI_SLOP_BASE_REF: ${{ github.base_ref != '' && format('origin/{0}', github.base_ref) || (github.event_name == 'push' && github.event.before || 'origin/main') }}
         run: bun run lint:anti-slop
