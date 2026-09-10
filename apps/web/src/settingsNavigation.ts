@@ -18,6 +18,7 @@ export const SETTINGS_SECTION_IDS = [
   "skills",
   "usage",
   "integrations",
+  "diagnostics",
   "advanced",
 ] as const;
 
@@ -159,6 +160,14 @@ export const SETTINGS_NAV_ITEMS: readonly SettingsNavItem[] = [
     description: "Review and clean up isolated workspaces created by Synara.",
     icon: "branch-simple",
     eyebrow: "Workspace management",
+  },
+  {
+    id: "diagnostics",
+    group: "system",
+    label: "Diagnostics",
+    description: "Opt in to anonymous usage diagnostics and see exactly what gets sent.",
+    icon: "analytics",
+    eyebrow: "Diagnostics",
   },
   {
     id: "advanced",
