@@ -260,6 +260,7 @@ export function hardenElectronUpdater(
   updater: unknown,
   platform: NodeJS.Platform = process.platform,
   embeddedPublisherSubjects?: ReadonlyArray<string> | null,
+  options: { readonly allowUnsignedUpdates?: boolean } = {},
 ): void {
   if (platform !== "win32") {
     return;
@@ -305,6 +306,18 @@ export function hardenElectronUpdater(
         embeddedPublisherSubjects,
       );
       if (allowedPublisherNames.length === 0) {
+        // Unsigned builds (beta flavor without signing secrets) have no
+        // publisher DN to check against. The update still travels over HTTPS
+        // and is SHA-512-verified against the release manifest, matching the
+        // one-line installer's trust model. Signed flavors keep the gate.
+        // A build that embedded a pin but whose pin cannot be parsed is NOT
+        // unsigned-by-design: fail closed rather than silently dropping the
+        // only identity check the build carries.
+        const hasEmbeddedPin =
+          embeddedPublisherSubjects?.some((subject) => subject.trim().length > 0) === true;
+        if (options.allowUnsignedUpdates === true && !hasEmbeddedPin) {
+          return Promise.resolve(null);
+        }
         return Promise.resolve(
           "Windows update signature verification blocked: no valid embedded publisher subject DN.",
         );

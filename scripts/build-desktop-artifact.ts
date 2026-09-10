@@ -1028,11 +1028,40 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   };
   const bundledClientEntry = path.join(distDirs.serverDist, "client/index.html");
 
+  const buildEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    SYNARA_DESKTOP_SIGNED: options.signed ? "1" : "0",
+  };
+  for (const [key, value] of Object.entries(buildEnv)) {
+    if (value === "") {
+      delete buildEnv[key];
+    }
+  }
+  if (!options.signed) {
+    buildEnv.CSC_IDENTITY_AUTO_DISCOVERY = "false";
+    delete buildEnv.CSC_LINK;
+    delete buildEnv.CSC_KEY_PASSWORD;
+    delete buildEnv.APPLE_API_KEY;
+    delete buildEnv.APPLE_API_KEY_ID;
+    delete buildEnv.APPLE_API_ISSUER;
+  }
+
+  if (process.platform === "win32") {
+    const python = resolvePythonForNodeGyp();
+    if (python) {
+      buildEnv.PYTHON = python;
+      buildEnv.npm_config_python = python;
+    }
+    buildEnv.npm_config_msvs_version = buildEnv.npm_config_msvs_version ?? "2022";
+    buildEnv.GYP_MSVS_VERSION = buildEnv.GYP_MSVS_VERSION ?? "2022";
+  }
+
   if (!options.skipBuild) {
     yield* Effect.log("[desktop-artifact] Building desktop/server/web artifacts...");
     yield* runCommand(
       ChildProcess.make({
         cwd: repoRoot,
+        env: buildEnv,
         ...commandOutputOptions(options.verbose),
         // Windows needs shell mode to resolve .cmd shims (e.g. bun.cmd).
         shell: process.platform === "win32",
@@ -1129,33 +1158,6 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
   if (options.platform === "linux") {
     yield* verifyStagedNodePty(stageAppDir, options.verbose);
-  }
-
-  const buildEnv: NodeJS.ProcessEnv = {
-    ...process.env,
-  };
-  for (const [key, value] of Object.entries(buildEnv)) {
-    if (value === "") {
-      delete buildEnv[key];
-    }
-  }
-  if (!options.signed) {
-    buildEnv.CSC_IDENTITY_AUTO_DISCOVERY = "false";
-    delete buildEnv.CSC_LINK;
-    delete buildEnv.CSC_KEY_PASSWORD;
-    delete buildEnv.APPLE_API_KEY;
-    delete buildEnv.APPLE_API_KEY_ID;
-    delete buildEnv.APPLE_API_ISSUER;
-  }
-
-  if (process.platform === "win32") {
-    const python = resolvePythonForNodeGyp();
-    if (python) {
-      buildEnv.PYTHON = python;
-      buildEnv.npm_config_python = python;
-    }
-    buildEnv.npm_config_msvs_version = buildEnv.npm_config_msvs_version ?? "2022";
-    buildEnv.GYP_MSVS_VERSION = buildEnv.GYP_MSVS_VERSION ?? "2022";
   }
 
   yield* Effect.log(

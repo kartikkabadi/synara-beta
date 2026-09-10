@@ -3417,6 +3417,9 @@ function configureAutoUpdater(): void {
     autoUpdater,
     process.platform,
     app.isPackaged ? resolveEmbeddedWindowsPublisherSubjects() : null,
+    // Beta builds ship unsigned by design; without this the publisher gate
+    // would block every one-click update on Windows.
+    { allowUnsignedUpdates: desktopFlavor === "beta" },
   );
 
   autoUpdater.autoDownload = false;

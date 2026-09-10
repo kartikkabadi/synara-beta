@@ -12,7 +12,12 @@ import { defineConfig } from "tsdown";
 
 const sourcemapEnv = process.env.SYNARA_DESKTOP_SOURCEMAP?.trim().toLowerCase();
 const buildSourcemap = sourcemapEnv === "1" || sourcemapEnv === "true";
-const windowsUpdaterPublisher = process.env.AZURE_TRUSTED_SIGNING_SUBJECT_DN?.trim() ?? "";
+const windowsSigningConfigured =
+  process.env.SYNARA_DESKTOP_SIGNED?.trim() === "1" ||
+  process.env.SYNARA_DESKTOP_SIGNED?.trim().toLowerCase() === "true";
+const windowsUpdaterPublisher = windowsSigningConfigured
+  ? (process.env.AZURE_TRUSTED_SIGNING_SUBJECT_DN?.trim() ?? "")
+  : "";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const migrationRuntimeSource = fs.readFileSync(
   path.join(repoRoot, "apps/server/src/persistence/Migrations.ts"),
