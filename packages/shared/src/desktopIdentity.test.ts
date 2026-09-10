@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  desktopUpdateChannel,
   resolveSynaraDesktopFlavor,
   SYNARA_BETA_BUNDLE_ID,
   SYNARA_BETA_DESKTOP_ENTRY_URL,
@@ -31,6 +32,13 @@ describe("desktopIdentity", () => {
 
   it("uses the isolated Synara desktop update channel", () => {
     expect(SYNARA_DESKTOP_UPDATE_CHANNEL).toBe("synara");
+  });
+
+  it("matches the beta update channel to prerelease tags and keeps synara otherwise", () => {
+    expect(desktopUpdateChannel("beta")).toBe("beta");
+    expect(desktopUpdateChannel("production")).toBe(SYNARA_DESKTOP_UPDATE_CHANNEL);
+    expect(desktopUpdateChannel("canary")).toBe(SYNARA_DESKTOP_UPDATE_CHANNEL);
+    expect(desktopUpdateChannel("development")).toBe(SYNARA_DESKTOP_UPDATE_CHANNEL);
   });
 
   it("gives Canary a fully separate desktop identity and storage profile", () => {
