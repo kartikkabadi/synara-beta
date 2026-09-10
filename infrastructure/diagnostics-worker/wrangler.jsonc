@@ -1,0 +1,17 @@
+{
+  "name": "synara-beta-diagnostics",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "workers_dev": true,
+  // Daily retention sweep; the scheduled handler deletes events older than 90 days.
+  "triggers": {
+    "crons": ["0 3 * * *"],
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "synara-beta-diagnostics",
+      "database_id": "cfff561b-3c1e-4a9d-9abc-ff3bf9e7f383",
+    },
+  ],
+}

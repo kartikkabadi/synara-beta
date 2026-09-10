@@ -36,6 +36,7 @@ import type {
   MenuItemConstructorOptions,
 } from "electron";
 import * as Effect from "effect/Effect";
+import { Schema } from "effect";
 import type {
   DesktopAppIcon,
   DesktopTheme,
@@ -49,7 +50,9 @@ import {
   type UpdateDownloadedEvent,
 } from "electron-updater";
 
-import type { ContextMenuItem } from "@synara/contracts";
+import type { ContextMenuItem, DiagnosticsEventInput } from "@synara/contracts";
+
+import { createDiagnosticsClient } from "./diagnosticsClient";
 import { isKeyboardShortcutsHelpChord } from "@synara/shared/browserShortcuts";
 import { getMacTrafficLightPosition } from "@synara/shared/desktopChrome";
 import { DEVICE_HELPER_SOURCE_DIR_ENV } from "@synara/shared/deviceHelperCache";
@@ -349,6 +352,7 @@ const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_WINDOW_STATE_PATH = Path.join(STATE_DIR, "desktop-window-state.json");
 const DESKTOP_APP_ICON_PATH = Path.join(STATE_DIR, "desktop-app-icon");
 const DESKTOP_CUSTOM_TITLE_BAR_PATH = Path.join(STATE_DIR, "desktop-custom-title-bar.json");
+const DIAGNOSTICS_STATE_DIR = Path.join(STATE_DIR, "diagnostics");
 const DESKTOP_SCHEME = desktopIdentity.scheme;
 const APP_DISPLAY_NAME = desktopIdentity.displayName;
 const APP_USER_MODEL_ID = desktopIdentity.bundleId;
@@ -547,6 +551,23 @@ const initialUpdateState = (): DesktopUpdateState =>
     desktopRuntimeInfo,
     desktopFlavor === "development" ? "production" : desktopFlavor,
   );
+const diagnosticsClient = createDiagnosticsClient({
+  stateDir: DIAGNOSTICS_STATE_DIR,
+  endpointUrl: process.env.SYNARA_DIAGNOSTICS_ENDPOINT,
+  sanitizeContext: {
+    appVersion: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    // The diagnostics schema only knows release flavors; map development the
+    // same way the update state does so dev-build events are not dropped.
+    flavor: desktopFlavor === "development" ? "production" : desktopFlavor,
+    installId: "pending",
+    now: () => new Date(),
+  },
+});
+function recordDiagnosticsEvent(input: DiagnosticsEventInput): boolean {
+  return diagnosticsClient.record(input);
+}
 
 function logTimestamp(): string {
   return new Date().toISOString();
@@ -1026,6 +1047,7 @@ function armInstallWatchdog(): void {
     const failedHandoff = activeUpdateInstallHandoff;
     clearUpdaterInstallInFlightAfterError();
     const consecutiveFailures = recordInstallMarkerFailure(new Date().toISOString(), failedHandoff);
+    recordDiagnosticsEvent({ kind: "update_failed" });
     setUpdateState({
       ...reduceDesktopUpdateStateOnInstallFailure(
         updateState,
@@ -2622,8 +2644,17 @@ function emitUpdateState(): void {
 }
 
 function setUpdateState(patch: Partial<DesktopUpdateState>): void {
+  const previousStatus = updateState.status;
   updateState = { ...updateState, ...patch };
   emitUpdateState();
+  if (updateState.status === previousStatus) return;
+  if (updateState.status === "available") {
+    recordDiagnosticsEvent({ kind: "update_available" });
+  } else if (updateState.status === "downloaded") {
+    // "downloaded" is not "installed": counting it as an install would credit
+    // users who never restart into the new build.
+    recordDiagnosticsEvent({ kind: "update_downloaded" });
+  }
 }
 
 function shouldEnableAutoUpdates(): boolean {
@@ -2698,6 +2729,7 @@ function processInstallMarkerOnStartup(): void {
     console.info(
       `[desktop-updater] Update to ${marker.toVersion} installed successfully (from ${marker.fromVersion})`,
     );
+    recordDiagnosticsEvent({ kind: "update_installed" });
     try {
       clearInstallMarker(filePath);
     } catch (error) {
@@ -2729,6 +2761,9 @@ function processInstallMarkerOnStartup(): void {
         `[desktop-updater] Failed to persist restart install failure: ${formatErrorMessage(error)}`,
       );
     }
+    // Only a newly observed failure counts. An "already-failed" marker is
+    // re-read on every later restart and must not inflate failure metrics.
+    recordDiagnosticsEvent({ kind: "update_failed" });
   }
 
   automaticUpdateActivitySuppressed = true;
@@ -3058,6 +3093,7 @@ async function downloadAvailableUpdate(): Promise<{
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
+    recordDiagnosticsEvent({ kind: "update_failed" });
     setUpdateState(reduceDesktopUpdateStateOnDownloadFailure(updateState, message));
     console.error(`[desktop-updater] Failed to download update: ${message}`);
     return { accepted: true, completed: false };
@@ -3217,6 +3253,7 @@ async function runDownloadedUpdateInstall(
     downloadedUpdateArtifact = null;
     await clearPendingUpdateCache("downloaded artifact identity is missing or changed");
     const message = "The downloaded update could not be reverified. Download it again.";
+    recordDiagnosticsEvent({ kind: "update_failed" });
     setUpdateState(reduceDesktopUpdateStateOnDownloadFailure(updateState, message));
     console.error(`[desktop-updater] Refusing install handoff: ${message}`);
     return { accepted: false, completed: false };
@@ -3277,6 +3314,7 @@ async function runDownloadedUpdateInstall(
     const consecutiveFailures = markerWritten
       ? recordInstallMarkerFailure(new Date().toISOString(), handoffExpectation)
       : updateState.installFailureCount;
+    recordDiagnosticsEvent({ kind: "update_failed" });
     setUpdateState({
       ...(artifactInvalidated
         ? reduceDesktopUpdateStateOnDownloadFailure(updateState, message)
@@ -3345,6 +3383,7 @@ async function recordDownloadedUpdateIdentity(info: UpdateDownloadedEvent): Prom
     downloadedUpdateArtifact = null;
     clearPendingUpdateCacheWhenSafe("downloaded artifact fingerprint failed");
     const message = `The downloaded update could not be verified: ${formatErrorMessage(error)}`;
+    recordDiagnosticsEvent({ kind: "update_failed" });
     setUpdateState(reduceDesktopUpdateStateOnDownloadFailure(updateState, message));
     console.error(`[desktop-updater] ${message}`);
   }
@@ -4616,6 +4655,44 @@ function registerIpcHandlers(): void {
     requestGracefulAppQuit("custom-title-bar-relaunch");
   });
 
+  ipcMain.removeHandler(IPC.diagnosticsGetState);
+  ipcMain.handle(IPC.diagnosticsGetState, async () => diagnosticsClient.getState());
+
+  const RendererDiagnosticsRecordSchema = Schema.Struct({
+    kind: Schema.Literal("session_started"),
+    provider: Schema.String,
+  });
+
+  ipcMain.removeHandler(IPC.diagnosticsSetEnabled);
+  ipcMain.handle(IPC.diagnosticsSetEnabled, async (_event, rawEnabled) => {
+    if (rawEnabled !== true && rawEnabled !== false) return diagnosticsClient.getState();
+    return diagnosticsClient.setEnabled(rawEnabled);
+  });
+
+  ipcMain.removeHandler(IPC.diagnosticsGetSamplePayload);
+  ipcMain.handle(IPC.diagnosticsGetSamplePayload, async () => diagnosticsClient.getSamplePayload());
+
+  ipcMain.removeHandler(IPC.diagnosticsRecordEvent);
+  ipcMain.handle(IPC.diagnosticsRecordEvent, async (_event, rawInput) => {
+    try {
+      const input = Schema.decodeUnknownSync(RendererDiagnosticsRecordSchema)(rawInput);
+      // The renderer is only trusted to report a provider session start. Every
+      // other diagnostics kind is recorded by the main process itself, so a
+      // compromised renderer cannot forge usage data or exhaust quotas.
+      return recordDiagnosticsEvent(input);
+    } catch {
+      return false;
+    }
+  });
+
+  ipcMain.removeHandler(IPC.diagnosticsSendTestEvent);
+  ipcMain.handle(IPC.diagnosticsSendTestEvent, async () => {
+    const recorded = recordDiagnosticsEvent({ kind: "test" });
+    // Report real delivery, not just queueing: the settings panel presents
+    // this result as "the collector received a test event".
+    return recorded && (await diagnosticsClient.flush());
+  });
+
   ipcMain.removeHandler(IPC.updateGetState);
   ipcMain.handle(IPC.updateGetState, async () => updateState);
 
@@ -5154,6 +5231,7 @@ if (!hasSingleInstanceLock) {
 
 async function bootstrap(): Promise<void> {
   writeDesktopLogHeader("bootstrap start");
+  recordDiagnosticsEvent({ kind: "app_start" });
   if (!(await requireCurrentDesktopMigrationBundle())) {
     return;
   }
@@ -5233,6 +5311,7 @@ app.on("before-quit", (event) => {
         new Date().toISOString(),
         failedHandoff,
       );
+      recordDiagnosticsEvent({ kind: "update_failed" });
       setUpdateState({
         ...reduceDesktopUpdateStateOnInstallFailure(
           updateState,
@@ -5265,6 +5344,46 @@ app.on("before-quit", (event) => {
 
   event.preventDefault();
   void confirmRunningChatsThenQuit("before-quit");
+});
+
+// `will-quit` holds the exit briefly so the final diagnostics batch — the
+// app_quit event itself — can leave before the process dies. The event is
+// already durable: record() writes the queue file synchronously, so a send
+// that misses this window is flushed on the next launch instead of lost.
+const WILL_QUIT_DIAGNOSTICS_FLUSH_BUDGET_MS = 2_000;
+
+// `once` is the whole once-guard: the graceful path below re-enters
+// `will-quit` via its own `app.quit()`, and only the first firing may record
+// app_quit — one successful exit records exactly one event, and the second
+// firing finds no listener. A missed flush window is covered by the durable
+// queue on the next launch, never by re-recording.
+app.once("will-quit", (event) => {
+  recordDiagnosticsEvent({ kind: "app_quit" });
+  const diagnostics = diagnosticsClient.getState();
+  // Hold the exit only for a flushable batch: the updater's quit-and-install
+  // owns its exit, a disabled client has nothing to send, and an empty queue
+  // has no batch. In every other case the queued events survive to the next
+  // launch, so the exit proceeds.
+  if (
+    isUpdaterQuitAndInstallInFlight ||
+    !diagnostics.enabled ||
+    diagnostics.queuedEventCount === 0
+  ) {
+    return;
+  }
+  event.preventDefault();
+  const budget = new Promise<void>((resolve) => {
+    setTimeout(resolve, WILL_QUIT_DIAGNOSTICS_FLUSH_BUDGET_MS).unref();
+  });
+  // flush() chains behind any in-flight request, so the app_quit recorded just
+  // above gets its own send rather than riding a stale batch snapshot.
+  void Promise.race([diagnosticsClient.flush(), budget])
+    .catch(() => undefined)
+    .then(() => {
+      // Re-enter the normal quit flow: before-quit short-circuits on
+      // `desktopShutdownComplete`, and this once-listener is already gone.
+      app.quit();
+    });
 });
 
 if (hasSingleInstanceLock) {
