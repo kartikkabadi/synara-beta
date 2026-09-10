@@ -188,12 +188,12 @@ func drawIcon(_ p: Palette, name: String) {
   ctx.strokePath()
   ctx.restoreGState()
 
-  let font = NSFont.systemFont(ofSize: 320, weight: .bold)
+  let font = NSFont.systemFont(ofSize: 330, weight: .bold)
   let attrs: [NSAttributedString.Key: Any] = [
     .font: font,
     .foregroundColor: NSColor(srgbRed: 0x16 / 255.0, green: 0x68 / 255.0, blue: 0xE2 / 255.0, alpha: 1),
   ]
-  let text = NSAttributedString(string: "B", attributes: attrs)
+  let text = NSAttributedString(string: "β", attributes: attrs)
   let size = text.size()
   let rect = CGRect(x: badgeRect.midX - size.width / 2 + 4, y: badgeRect.midY - size.height / 2, width: size.width, height: size.height)
   NSGraphicsContext.saveGraphicsState()
