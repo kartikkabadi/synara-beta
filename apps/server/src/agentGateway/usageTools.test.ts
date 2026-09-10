@@ -1,7 +1,8 @@
-import type { ServerAgentProviderUsage } from "@synara/contracts";
-import { Duration, Effect } from "effect";
+import { ServerAgentProviderUsage } from "@synara/contracts";
+import { Duration, Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
+import type { McpToolCallResult } from "./protocol";
 import type { ToolContext } from "./toolRuntime";
 import { makeAgentGatewayUsageTools } from "./usageTools";
 
@@ -30,7 +31,7 @@ const usage: ServerAgentProviderUsage = {
   ],
 };
 
-const context = {
+const context: ToolContext = {
   principal: {
     kind: "provider-session",
     sessionKey: "session",
@@ -45,11 +46,18 @@ const context = {
   callerTurnId: "turn",
   assertCallerTurnActive: () => Effect.void,
   jsonRpcRequestId: "request",
-} as ToolContext;
+};
 
-function resultJson(result: unknown) {
-  const text = (result as { content: Array<{ text: string }> }).content[0]?.text ?? "null";
-  return JSON.parse(text) as Record<string, unknown>;
+const usageResultJson = Schema.Struct({ usage: ServerAgentProviderUsage });
+const usageListResultJson = Schema.Struct({ usage: Schema.Array(ServerAgentProviderUsage) });
+
+function resultJson<S extends Schema.Top & { readonly DecodingServices: never }>(
+  result: McpToolCallResult,
+  schema: S,
+): S["Type"] {
+  const first = result.content[0];
+  const text = first?.type === "text" ? first.text : "null";
+  return Schema.decodeUnknownSync(schema)(JSON.parse(text));
 }
 
 describe("makeAgentGatewayUsageTools", () => {
@@ -76,7 +84,7 @@ describe("makeAgentGatewayUsageTools", () => {
     const result = await Effect.runPromise(tool!.handler({}, context));
 
     expect(requestedProvider).toBe("codex");
-    expect(resultJson(result).usage).toEqual(usage);
+    expect(resultJson(result, usageResultJson).usage).toEqual(usage);
   });
 
   it("lists enabled provider results without a caller-selected provider", async () => {
@@ -91,7 +99,7 @@ describe("makeAgentGatewayUsageTools", () => {
     const result = await Effect.runPromise(tools[1]!.handler({}, context));
 
     expect(requestedProvider).toBeUndefined();
-    expect(resultJson(result).usage).toEqual([usage]);
+    expect(resultJson(result, usageListResultJson).usage).toEqual([usage]);
   });
 
   it("returns timed-out unavailable usage when the caller load stalls", async () => {
@@ -101,7 +109,7 @@ describe("makeAgentGatewayUsageTools", () => {
     });
 
     const result = await Effect.runPromise(tool!.handler({}, context));
-    const timedOut = resultJson(result).usage as Record<string, unknown>;
+    const { usage: timedOut } = resultJson(result, usageResultJson);
 
     expect(timedOut.provider).toBe("codex");
     expect(timedOut.availability).toBe("unavailable");
