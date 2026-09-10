@@ -35,6 +35,7 @@ import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Config, Data, Effect, FileSystem, Layer, Logger, Option, Path, Schema } from "effect";
+import type { JsonObject } from "effect/Schema";
 import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
@@ -82,7 +83,7 @@ interface PlatformConfig {
   readonly archChoices: ReadonlyArray<typeof BuildArch.Type>;
 }
 
-const PLATFORM_CONFIG: Record<typeof BuildPlatform.Type, PlatformConfig> = {
+const PLATFORM_CONFIG = {
   mac: {
     cliFlag: "--mac",
     defaultTarget: "dmg",
@@ -98,7 +99,7 @@ const PLATFORM_CONFIG: Record<typeof BuildPlatform.Type, PlatformConfig> = {
     defaultTarget: "nsis",
     archChoices: ["x64", "arm64"],
   },
-};
+} satisfies Record<typeof BuildPlatform.Type, PlatformConfig>;
 
 interface BuildCliInput {
   readonly platform: Option.Option<typeof BuildPlatform.Type>;
@@ -231,12 +232,12 @@ interface StagePackageJson {
   readonly description: string;
   readonly author: string;
   readonly main: string;
-  readonly build: Record<string, unknown>;
-  readonly dependencies: Record<string, unknown>;
+  readonly build: JsonObject;
+  readonly dependencies: JsonObject;
   readonly devDependencies: {
     readonly electron: string;
   };
-  readonly overrides: Record<string, unknown>;
+  readonly overrides: JsonObject;
 }
 
 const AzureTrustedSigningOptionsConfig = Config.all({
@@ -529,9 +530,9 @@ function validateBundledClientAssets(clientDir: string) {
 }
 
 function resolveDesktopRuntimeDependencies(
-  dependencies: Record<string, unknown> | undefined,
-  catalog: Record<string, unknown>,
-): Record<string, unknown> {
+  dependencies: JsonObject | undefined,
+  catalog: JsonObject,
+): JsonObject {
   if (!dependencies || Object.keys(dependencies).length === 0) {
     return {};
   }
@@ -540,7 +541,8 @@ function resolveDesktopRuntimeDependencies(
     Object.entries(dependencies).filter(([dependencyName]) => dependencyName !== "electron"),
   );
 
-  return resolveCatalogDependencies(runtimeDependencies, catalog, "apps/desktop");
+  // SAFETY: resolveCatalogDependencies maps the same JSON entries and only replaces `catalog:` specifiers with version strings from the catalog.
+  return resolveCatalogDependencies(runtimeDependencies, catalog, "apps/desktop") as JsonObject;
 }
 
 function resolveGitHubPublishConfig():
@@ -737,7 +739,17 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   flavor?: typeof BuildFlavor.Type,
 ) {
   const identity = synaraDesktopIdentity(flavor ?? "production");
-  const buildConfig: Record<string, unknown> = {
+  const publishConfig = resolveGitHubPublishConfig();
+  const mockPublishConfig =
+    mockUpdates && !publishConfig
+      ? [
+          {
+            provider: "generic" as const,
+            url: `http://localhost:${mockUpdateServerPort ?? 3000}`,
+          },
+        ]
+      : undefined;
+  const buildConfig = {
     appId: identity.bundleId,
     productName: identity.displayName,
     artifactName: "Synara-${version}-${arch}.${ext}",
@@ -745,18 +757,9 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       buildResources: "apps/desktop/resources",
     },
     forceCodeSigning: signed,
+    ...(publishConfig ? { publish: [publishConfig] } : null),
+    ...(mockPublishConfig ? { publish: mockPublishConfig } : null),
   };
-  const publishConfig = resolveGitHubPublishConfig();
-  if (publishConfig) {
-    buildConfig.publish = [publishConfig];
-  } else if (mockUpdates) {
-    buildConfig.publish = [
-      {
-        provider: "generic",
-        url: `http://localhost:${mockUpdateServerPort ?? 3000}`,
-      },
-    ];
-  }
 
   const windowsSigningConfig =
     platform === "win" && signed ? yield* AzureTrustedSigningOptionsConfig : undefined;
@@ -777,16 +780,15 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     target,
     signed,
     flavor,
-    ...(windowsAzureSignOptions ? { windowsAzureSignOptions } : {}),
+    ...(windowsAzureSignOptions ? { windowsAzureSignOptions } : null),
   } as const;
 
   Object.assign(buildConfig, createDesktopPlatformBuildConfig(platformBuildConfigInput));
-  if (platform === "linux") {
-    buildConfig.npmRebuild = false;
-  }
+  const finalBuildConfig =
+    platform === "linux" ? { ...buildConfig, npmRebuild: false } : buildConfig;
 
   return {
-    buildConfig,
+    buildConfig: finalBuildConfig,
     windowsPublisherSubject: windowsSigningConfig?.subjectDistinguishedName ?? null,
   };
 });
@@ -1083,16 +1085,18 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     author: "Emanuele Di Pietro",
     main: "apps/desktop/dist-electron/main.js",
     build: resolvedBuildConfig.buildConfig,
+    // SAFETY: both maps are built from package.json dependency manifests and hold version strings.
     dependencies: {
       ...resolvedServerDependencies,
       ...resolvedDesktopRuntimeDependencies,
-    },
+    } as JsonObject,
     devDependencies: {
       electron: electronVersion,
     },
+    // SAFETY: overrides come from package.json manifests and only hold JSON-serializable values.
     overrides: {
       ...resolvedOverrides,
-    },
+    } as JsonObject,
   };
 
   yield* installFrozenStageDependencies(
@@ -1158,7 +1162,10 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   }
 
   if (options.platform === "mac") {
-    yield* assertPackagedMacDeviceHelper(stageDistDir, desktopPackageJson.productName ?? "Synara");
+    yield* assertPackagedMacDeviceHelper(
+      stageDistDir,
+      String(resolvedBuildConfig.buildConfig.productName),
+    );
   }
 
   if (options.platform === "mac" && options.target === "dmg" && options.signed) {
