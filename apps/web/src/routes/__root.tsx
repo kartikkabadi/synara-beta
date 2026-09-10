@@ -20,7 +20,16 @@ import {
   useParams,
   useRouterState,
 } from "@tanstack/react-router";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Throttler } from "@tanstack/react-pacer";
 
@@ -29,6 +38,7 @@ import { DesktopWindowControls } from "../components/DesktopWindowControls";
 import { RunningChatsQuitCoordinator } from "../components/RunningChatsQuitCoordinator";
 import { AppSnapCoordinator } from "../components/AppSnapCoordinator";
 import { AppSnapWelcomeDialog } from "../components/AppSnapWelcomeDialog";
+import { useOnboarding } from "../onboarding/useOnboarding";
 import { QueuedComposerDrainCoordinator } from "../components/QueuedComposerDrainCoordinator";
 import { FeedbackDialog } from "../components/FeedbackDialog";
 import { SETTINGS_TARGETS } from "../settingsNavigation";
@@ -79,7 +89,10 @@ import {
 } from "../wsTransportEvents";
 import { providerQueryKeys } from "../lib/providerReactQuery";
 import { invalidateProjectFileQueriesForCwds, projectQueryKeys } from "../lib/projectReactQuery";
-import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
+import {
+  collectActiveTerminalThreadIds,
+  removeOrphanedTerminalRuntimes,
+} from "../lib/terminalStateCleanup";
 import { useProjectRunStore } from "../projectRunStore";
 import { dockTerminalThreadId } from "../lib/dockTerminalScope";
 import { TaskCompletionNotifications } from "../notifications/taskCompletion";
@@ -307,6 +320,7 @@ function RootRouteView() {
           <TaskCompletionNotifications />
           <QueuedComposerDrainCoordinator />
           <AppSnapWelcomeDialog />
+          <GlobalOnboardingDialog />
           <AppSnapCoordinator />
           <DesktopProjectBootstrap />
           <Outlet />
@@ -772,6 +786,34 @@ function GlobalFeedbackDialog() {
   };
 
   return <FeedbackDialog open={isOpen} context={context} onOpenChange={setOpen} />;
+}
+
+// The dialog pulls in the provider sign-in terminal (xterm and addons), so it stays out
+// of the eager router graph and only loads the first time the tour actually opens.
+const OnboardingDialog = lazy(() =>
+  import("../onboarding/OnboardingDialog").then((module) => ({
+    default: module.OnboardingDialog,
+  })),
+);
+
+function GlobalOnboardingDialog() {
+  const onboarding = useOnboarding();
+  // Stay mounted after the first open so the close animation can play and a replay
+  // from Settings does not re-suspend.
+  const [hasOpened, setHasOpened] = useState(false);
+  useEffect(() => {
+    if (onboarding.isOpen) setHasOpened(true);
+  }, [onboarding.isOpen]);
+  if (!hasOpened) return null;
+  return (
+    <Suspense fallback={null}>
+      <OnboardingDialog
+        open={onboarding.isOpen}
+        onOpenChange={onboarding.onOpenChange}
+        onComplete={onboarding.complete}
+      />
+    </Suspense>
+  );
 }
 
 function GlobalWhatsNewSurface() {
@@ -1524,8 +1566,8 @@ function EventRouter() {
       shellSnapshotSequence = snapshot.snapshotSequence;
       syncServerShellSnapshot(snapshot);
       reconcilePromotedDraftsFromShellThreads(snapshot.threads);
-      removeOrphanedTerminalsForCurrentState();
       flushShellBuffer(snapshot.snapshotSequence);
+      removeOrphanedTerminalsForCurrentState();
       reconcileMissingSubscribedThreadProjections(promotedDraftThreadIds);
       return true;
     };
@@ -1664,6 +1706,7 @@ function EventRouter() {
         activeThreadIds.add(dockTerminalThreadId(activeThreadId));
       }
       removeOrphanedTerminalStates(activeThreadIds);
+      removeOrphanedTerminalRuntimes(activeThreadIds);
     };
 
     const flushPendingDomainEvents = () => {
@@ -1967,8 +2010,8 @@ function EventRouter() {
         shellSnapshotSequence = item.snapshot.snapshotSequence;
         syncServerShellSnapshot(item.snapshot);
         reconcilePromotedDraftsFromShellThreads(item.snapshot.threads);
-        removeOrphanedTerminalsForCurrentState();
         flushShellBuffer(item.snapshot.snapshotSequence);
+        removeOrphanedTerminalsForCurrentState();
         reconcileMissingSubscribedThreadProjections(promotedDraftThreadIds);
         return;
       }
@@ -1984,6 +2027,13 @@ function EventRouter() {
       applyShellEvent(item);
       if (item.kind === "thread-upserted") {
         reconcilePromotedDraftsFromShellThreads([item.thread]);
+      }
+      if (
+        item.kind === "thread-removed" ||
+        item.kind === "project-removed" ||
+        (item.kind === "thread-upserted" && item.thread.archivedAt != null)
+      ) {
+        removeOrphanedTerminalsForCurrentState();
       }
       if (
         item.kind === "thread-upserted" &&

@@ -21,7 +21,7 @@ import {
   stripTrailingToolExitCode,
   summarizeToolRawOutput,
 } from "@synara/shared/toolOutputSummary";
-import { pluralize } from "@synara/shared/text";
+import { pluralize, stripTerminalControlSequences } from "@synara/shared/text";
 import { PROVIDER_DESCRIPTORS } from "@synara/shared/providerMetadata";
 import {
   deriveReadableToolTitle,
@@ -53,6 +53,7 @@ const SESSION_CONTEXT_RECAP_PREVIEW_MAX_CHARS = 600;
 export type ProviderContextLifecycleReason =
   | "conversation-rebuilt"
   | "fresh-session"
+  | "interrupt-escalation"
   | "native-history-unavailable"
   | "native-resume-failed";
 
@@ -522,6 +523,7 @@ function isProviderContextLifecycleReason(value: unknown): value is ProviderCont
   return (
     value === "conversation-rebuilt" ||
     value === "fresh-session" ||
+    value === "interrupt-escalation" ||
     value === "native-history-unavailable" ||
     value === "native-resume-failed"
   );
@@ -600,7 +602,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const itemType = extractWorkLogItemType(payload);
   const requestKind = extractWorkLogRequestKind(payload);
   if (payload && typeof payload.detail === "string" && payload.detail.length > 0) {
-    const detail = stripTrailingExitCode(payload.detail).output;
+    const detail = stripTrailingExitCode(stripTerminalControlSequences(payload.detail)).output;
     if (detail) {
       entry.detail = detail;
     }
@@ -608,11 +610,11 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const outputDetail =
     activity.kind === "provider.event.unmapped" ? null : summarizeToolPayloadOutput(payload);
   if (outputDetail && (!entry.detail || toolStatus === "failed")) {
-    entry.detail = outputDetail;
+    entry.detail = stripTerminalControlSequences(outputDetail);
   }
   const collabTaskOutputDetail = extractCollabTaskOutputDetail(payload);
   if (collabTaskOutputDetail) {
-    entry.detail = collabTaskOutputDetail;
+    entry.detail = stripTerminalControlSequences(collabTaskOutputDetail);
   }
   const nativeEventType =
     payload && typeof payload.nativeEventType === "string" && payload.nativeEventType.length > 0
@@ -625,7 +627,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     activity.kind === "runtime.warning" &&
     typeof payload?.message === "string" &&
     payload.message.trim().length > 0
-      ? payload.message.trim()
+      ? stripTerminalControlSequences(payload.message).trim()
       : undefined;
   if (runtimeWarningMessage) {
     entry.detail = runtimeWarningMessage;
@@ -1117,6 +1119,9 @@ function mergeRuntimeWarningEntries(
   return {
     ...previous,
     ...next,
+    id: previous.id,
+    createdAt: previous.createdAt,
+    ...(previous.sequence !== undefined ? { sequence: previous.sequence } : {}),
     runtimeWarningRepeatCount: repeatCount,
     ...(runtimeWarningMessage ? { runtimeWarningMessage } : {}),
     detail: repeatPreview,
@@ -1138,7 +1143,12 @@ function mergeTaskListEntries(
   if (previous.taskListHasTasks && !next.taskListHasTasks) {
     return previous;
   }
-  return { ...next, id: previous.id, createdAt: previous.createdAt };
+  return {
+    ...next,
+    id: previous.id,
+    createdAt: previous.createdAt,
+    ...(previous.sequence !== undefined ? { sequence: previous.sequence } : {}),
+  };
 }
 
 // Ingestion emits compaction progress ("Compacting conversation...") and its
@@ -1238,10 +1248,15 @@ function mergeDerivedWorkLogEntries(
     : (next.toolStatus ?? previous.toolStatus);
   const liveActivity = mergeWorkLogLiveActivity(previous.liveActivity, next.liveActivity);
   const toolDetails = mergeWorkLogToolDetails(previous.toolDetails, next.toolDetails);
+  // Keep the visual anchor below, but let the latest known turn own lifecycle
+  // settlement and live composer state when a background tool spans turns.
   const turnId = next.turnId ?? previous.turnId;
   return {
     ...previous,
     ...next,
+    id: previous.id,
+    createdAt: previous.createdAt,
+    ...(previous.sequence !== undefined ? { sequence: previous.sequence } : {}),
     ...(turnId !== undefined ? { turnId } : {}),
     ...(detail ? { detail } : {}),
     ...(command ? { command } : {}),

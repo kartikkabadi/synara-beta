@@ -1,5 +1,6 @@
 import { ThreadId, type OrchestrationEvent } from "@synara/contracts";
 import { makeDrainableWorker, startDrainableWorkerProducers } from "@synara/shared/DrainableWorker";
+import { terminalScopeIdsForThread } from "@synara/shared/terminalThreads";
 import { Cause, Effect, Layer, Option, Stream } from "effect";
 
 import { ServerConfig } from "../../config";
@@ -83,6 +84,26 @@ export const detachThreadDevice = (threadId: ThreadId) =>
       ),
     ),
   );
+
+export const closeThreadTerminalScopes = (
+  terminalManager: Pick<TerminalManagerShape, "close" | "closeSessionsOpenedAtOrBefore">,
+  threadId: ThreadId,
+  deleteHistory: boolean,
+  openedAtOrBefore?: string,
+) =>
+  Effect.forEach(terminalScopeIdsForThread(threadId), (scopeId) =>
+    cleanupSucceededUnlessInterrupted({
+      effect:
+        openedAtOrBefore === undefined
+          ? terminalManager.close({ threadId: ThreadId.makeUnsafe(scopeId), deleteHistory })
+          : terminalManager.closeSessionsOpenedAtOrBefore({
+              threadId: ThreadId.makeUnsafe(scopeId),
+              openedAtOrBefore,
+            }),
+      message: "thread lifecycle cleanup skipped terminal close",
+      threadId: ThreadId.makeUnsafe(scopeId),
+    }),
+  ).pipe(Effect.map((results) => results.every(Boolean)));
 
 export const waitForTerminalExit = ({
   terminalManager,
@@ -190,18 +211,7 @@ const make = Effect.gen(function* () {
     threadId: ThreadDeletedEvent["payload"]["threadId"],
     deleteHistory: boolean,
     openedAtOrBefore?: string,
-  ) =>
-    cleanupSucceededUnlessInterrupted({
-      effect:
-        openedAtOrBefore === undefined
-          ? terminalManager.close({ threadId, deleteHistory })
-          : terminalManager.closeSessionsOpenedAtOrBefore({
-              threadId,
-              openedAtOrBefore,
-            }),
-      message: "thread lifecycle cleanup skipped terminal close",
-      threadId,
-    });
+  ) => closeThreadTerminalScopes(terminalManager, threadId, deleteHistory, openedAtOrBefore);
 
   const waitForThreadPurgeFence = Effect.fn(function* (
     threadId: ThreadDeletedEvent["payload"]["threadId"],

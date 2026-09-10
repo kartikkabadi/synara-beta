@@ -23,6 +23,7 @@ import {
   type CodexAppServerSendTurnInput,
 } from "../../codexAppServerManager.ts";
 import { ServerConfig } from "../../config.ts";
+import { CodexSessionStartError } from "../../codexErrorClassification.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import { CodexAdapter } from "../Services/CodexAdapter.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
@@ -175,8 +176,43 @@ const validationLayer = it.layer(
 );
 
 validationLayer("CodexAdapterLive validation", (it) => {
+  it.effect(
+    "preserves startup cleanup evidence without reclassifying unknown process failures",
+    () =>
+      Effect.gen(function* () {
+        const adapter = yield* CodexAdapter;
+        for (const cause of [
+          new CodexSessionStartError("Codex stdout closed during initialization."),
+          new Error("Failed to prove Codex app-server process-tree exit."),
+        ]) {
+          validationManager.startSessionImpl.mockRejectedValueOnce(cause);
+          const result = yield* adapter
+            .startSession({
+              provider: "codex",
+              threadId: asThreadId("thread-start-failed"),
+              runtimeMode: "full-access",
+            })
+            .pipe(Effect.result);
+
+          assert.equal(result._tag, "Failure");
+          if (result._tag !== "Failure") throw new Error("Expected startup failure");
+          assert.equal(result.failure._tag, "ProviderAdapterProcessError");
+          if (result.failure._tag !== "ProviderAdapterProcessError") {
+            throw new Error("Expected process failure");
+          }
+          assert.equal(
+            result.failure.reason,
+            cause instanceof CodexSessionStartError ? "startup-failed" : undefined,
+          );
+          assert.equal(result.failure.cause, cause);
+          assert.equal(result.failure.detail, cause.message);
+        }
+      }),
+  );
+
   it.effect("returns validation error for non-codex provider on startSession", () =>
     Effect.gen(function* () {
+      validationManager.startSessionImpl.mockClear();
       const adapter = yield* CodexAdapter;
       const result = yield* adapter
         .startSession({
@@ -732,6 +768,40 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       assert.equal(firstEvent.value.itemId, "msg_1");
       assert.equal(firstEvent.value.turnId, "turn-1");
       assert.equal(firstEvent.value.payload.itemType, "assistant_message");
+    }),
+  );
+
+  it.effect("keeps inspected images out of generated output artifacts", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+      const payload = {
+        item: {
+          type: "imageView",
+          id: "view_1",
+          path: "/attachments/objects/upload.png",
+        },
+      };
+      lifecycleManager.emit("event", {
+        id: asEventId("evt-image-view"),
+        kind: "notification",
+        provider: "codex",
+        createdAt: new Date().toISOString(),
+        method: "item/completed",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-1"),
+        itemId: asItemId("view_1"),
+        payload,
+      } satisfies ProviderEvent);
+
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+      assert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some") return;
+      assert.equal(firstEvent.value.type, "item.completed");
+      if (firstEvent.value.type !== "item.completed") return;
+      assert.equal(firstEvent.value.payload.itemType, "image_view");
+      assert.equal(firstEvent.value.payload.title, "Image view");
+      assert.deepStrictEqual(firstEvent.value.payload.data, payload);
     }),
   );
 
@@ -1514,6 +1584,7 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
             total: {
               inputTokens: 11_833,
               cachedInputTokens: 3456,
+              cacheWriteInputTokens: 500,
               outputTokens: 6,
               reasoningOutputTokens: 0,
               totalTokens: 11_839,
@@ -1542,6 +1613,12 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
 
       assert.deepEqual(firstEvent.value.payload.usage, {
         usedTokens: 126,
+        cumulativeUsage: {
+          inputTokens: 11_833,
+          outputTokens: 6,
+          cachedInputTokens: 3456,
+          cacheCreationInputTokens: 500,
+        },
         totalProcessedTokens: 11_839,
         maxTokens: 258_400,
         inputTokens: 120,

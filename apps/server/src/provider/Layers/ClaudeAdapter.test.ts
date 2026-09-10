@@ -5184,6 +5184,68 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
     );
   });
 
+  it.effect("retains an uninstalled Auto process through failed cleanup and explicit stop", () => {
+    const query = new FakeClaudeQuery();
+    (
+      query as unknown as {
+        supportedModels: () => Promise<
+          Array<{ value: string; displayName: string; supportsAutoMode: boolean }>
+        >;
+      }
+    ).supportedModels = async () => [
+      { value: "claude-sonnet-5", displayName: "Sonnet", supportsAutoMode: false },
+    ];
+    let createCalls = 0;
+    let teardownCalls = 0;
+    const ownedProcess = {
+      pid: 73_314,
+      exitCode: 0,
+      signalCode: null,
+    } as unknown as ClaudeOwnedProcess;
+    const layer = makeClaudeAdapterLive({
+      spawnClaudeCodeProcess: () => ownedProcess,
+      teardownProcessTree: async () => {
+        if (++teardownCalls < 3) throw new Error("descendant remains");
+        return { escalated: true, signalErrors: [] };
+      },
+      createQuery: (input) => {
+        createCalls++;
+        input.options.spawnClaudeCodeProcess?.({
+          command: "claude",
+          args: [],
+          env: {},
+          signal: new AbortController().signal,
+        });
+        return query;
+      },
+    }).pipe(
+      Layer.provideMerge(ServerConfig.layerTest("/tmp/claude-adapter-test", "/tmp")),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const input = {
+        threadId: THREAD_ID,
+        provider: "claudeAgent" as const,
+        runtimeMode: "auto" as const,
+        modelSelection: { provider: "claudeAgent" as const, model: "claude-sonnet-5" },
+      };
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(adapter.startSession(input))));
+      assert.equal(teardownCalls, 1);
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(adapter.startSession(input))));
+      assert.equal(teardownCalls, 2);
+      assert.equal(createCalls, 1);
+      assert.equal(yield* adapter.hasSession(THREAD_ID), false);
+      yield* adapter.stopSession(THREAD_ID);
+      assert.equal(teardownCalls, 3);
+      yield* adapter.stopSession(THREAD_ID);
+      assert.equal(teardownCalls, 3);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(layer),
+    );
+  });
+
   it.effect("blocks a retry when createQuery spawned before failing cleanup", () => {
     const query = new FakeClaudeQuery();
     let allowStart = false;
@@ -7856,6 +7918,74 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
     );
   });
 
+  it.effect(
+    "preserves earlier SDK history and previously returned snapshots after another turn",
+    () => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+
+        const session = yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: "claudeAgent",
+          runtimeMode: "full-access",
+        });
+
+        const runTurn = (input: string, suffix: string) =>
+          Effect.gen(function* () {
+            const turn = yield* adapter.sendTurn({
+              threadId: session.threadId,
+              input,
+              attachments: [],
+            });
+            const completedFiber = yield* Stream.filter(
+              adapter.streamEvents,
+              (event) => event.type === "turn.completed",
+            ).pipe(Stream.runHead, Effect.forkChild);
+            harness.query.emit({
+              type: "assistant",
+              session_id: "sdk-session-retained-items",
+              uuid: `assistant-${suffix}`,
+              parent_tool_use_id: null,
+              message: {
+                id: `assistant-message-${suffix}`,
+                content: [{ type: "text", text: "x".repeat(64 * 1024) }],
+              },
+            } as unknown as SDKMessage);
+            harness.query.emit({
+              type: "result",
+              subtype: "success",
+              is_error: false,
+              errors: [],
+              session_id: "sdk-session-retained-items",
+              uuid: `result-${suffix}`,
+            } as unknown as SDKMessage);
+            const completed = yield* Fiber.join(completedFiber);
+            assert.equal(completed._tag, "Some");
+            return turn;
+          });
+
+        const firstTurn = yield* runTurn("first", "first");
+        const afterFirst = yield* adapter.readThread(session.threadId);
+        assert.equal(afterFirst.turns.length, 1);
+        assert.equal(afterFirst.turns[0]?.items.length, 1);
+
+        const secondTurn = yield* runTurn("second", "second");
+        const afterSecond = yield* adapter.readThread(session.threadId);
+        assert.equal(afterSecond.turns.length, 2);
+        assert.equal(afterSecond.turns[0]?.id, firstTurn.turnId);
+        assert.equal(afterSecond.turns[1]?.id, secondTurn.turnId);
+        assert.deepEqual(afterSecond.turns[0]?.items, afterFirst.turns[0]?.items);
+        assert.equal(afterFirst.turns.length, 1);
+        assert.equal(afterFirst.turns[0]?.items.length, 1);
+        assert.equal(afterSecond.turns[1]?.items.length, 1);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
   it.effect("updates model on sendTurn when model override is provided", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
@@ -8279,7 +8409,136 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
     );
   });
 
-  it.effect("warns once when a turn ingests a large uncached prompt", () => {
+  for (const boundary of [
+    "same query",
+    "new session identity",
+    "conversation reset",
+    "zero reset result",
+    "resumed process",
+  ] as const) {
+    it.effect("keeps result accounting scoped to " + boundary, () => {
+      const harness = makeMultiQueryHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const oldSessionId = "21d6c45d-b52f-4d3b-a7b1-dcb6bc8d8ba1";
+        const newSessionId = "51406530-67fa-4864-9061-871ba03e9aed";
+        const startInput = {
+          threadId: THREAD_ID,
+          provider: "claudeAgent" as const,
+          runtimeMode: "full-access" as const,
+        };
+        yield* adapter.startSession(startInput);
+        let query = harness.queries[0]!;
+        const collectCompletion = () =>
+          adapter.streamEvents.pipe(
+            Stream.takeUntil((event) => event.type === "turn.completed"),
+            Stream.runCollect,
+            Effect.forkChild,
+          );
+        const emitResult = (
+          sessionId: string,
+          uuid: string,
+          input: number,
+          output: number,
+          reads: number,
+          writes: number,
+          cost: number,
+        ) =>
+          query.emit({
+            type: "result",
+            subtype: "success",
+            is_error: false,
+            errors: [],
+            session_id: sessionId,
+            uuid,
+            total_cost_usd: cost,
+            modelUsage: {
+              "claude-sonnet-5": {
+                inputTokens: input,
+                outputTokens: output,
+                cacheReadInputTokens: reads,
+                cacheCreationInputTokens: writes,
+                costUSD: cost,
+                contextWindow: 200000,
+                maxOutputTokens: 64000,
+                webSearchRequests: 0,
+              },
+            },
+          } as unknown as SDKMessage);
+        const first = yield* collectCompletion();
+        yield* adapter.sendTurn({ threadId: THREAD_ID, input: "first", attachments: [] });
+        emitResult(oldSessionId, "first-accounting-result", 100, 100, 100, 100, 1);
+        yield* Fiber.join(first);
+
+        if (boundary === "resumed process") {
+          const resumeCursor = (yield* adapter.listSessions())[0]!.resumeCursor;
+          yield* adapter.stopSession(THREAD_ID);
+          yield* adapter.startSession({ ...startInput, resumeCursor });
+          query = harness.queries[1]!;
+          assert.equal(harness.createInputs[1]!.options.resume, oldSessionId);
+        }
+        if (boundary === "conversation reset" || boundary === "zero reset result") {
+          // Reset is authoritative even if a message still carries the old identity.
+          query.emit({
+            type: "conversation_reset",
+            new_conversation_id: newSessionId,
+            session_id: oldSessionId,
+            uuid: "fcb9a8a0-a7d8-4c73-96a2-2a29ea26b515",
+          });
+        }
+        if (boundary === "zero reset result") {
+          const cleared = yield* collectCompletion();
+          yield* adapter.sendTurn({ threadId: THREAD_ID, input: "/clear", attachments: [] });
+          emitResult(newSessionId, "zero-accounting-result", 0, 0, 0, 0, 0);
+          yield* Fiber.join(cleared);
+        }
+        const next = yield* collectCompletion();
+        yield* adapter.sendTurn({ threadId: THREAD_ID, input: "next", attachments: [] });
+        const sameQuery = boundary === "same query";
+        const sessionId =
+          boundary === "new session identity" || boundary === "zero reset result"
+            ? newSessionId
+            : oldSessionId;
+        emitResult(
+          sessionId,
+          "next-accounting-result",
+          150,
+          sameQuery ? 120 : 20,
+          sameQuery ? 150 : 50,
+          200,
+          2,
+        );
+        const events = Array.from(yield* Fiber.join(next));
+        const completed = events.find((event) => event.type === "turn.completed");
+        assert.equal(completed?.type, "turn.completed");
+        if (completed?.type === "turn.completed") {
+          assert.equal(completed.payload.totalCostUsd, sameQuery ? 1 : 2);
+          assert.deepEqual(completed.payload.modelUsage?.["claude-sonnet-5"], {
+            inputTokens: sameQuery ? 50 : 150,
+            outputTokens: 20,
+            cacheReadInputTokens: 50,
+            cacheCreationInputTokens: sameQuery ? 100 : 200,
+            costUSD: sameQuery ? 1 : 2,
+            contextWindow: 200000,
+            maxOutputTokens: 64000,
+            webSearchRequests: 0,
+          });
+        }
+        assert.isFalse(
+          events.some(
+            (event) =>
+              event.type === "runtime.warning" &&
+              event.payload.message.includes("conversation_reset"),
+          ),
+        );
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    });
+  }
+
+  it.effect("does not warn about uncached ingestion when most input is cache creation", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
@@ -8301,7 +8560,7 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
         attachments: [],
       });
 
-      // Synthetic low-cache-ratio result: ~60k of 61k prompt tokens uncached.
+      // Cache writes are separate from ordinary uncached input.
       const uncachedUsage = {
         input_tokens: 5_000,
         cache_creation_input_tokens: 55_000,
@@ -8334,10 +8593,7 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
       const warningMessages = runtimeEvents.flatMap((event) =>
         event.type === "runtime.warning" ? [event.payload.message] : [],
       );
-      // Emitted once per session even though two responses crossed the bar.
-      assert.equal(warningMessages.length, 1);
-      assert.ok(warningMessages[0]?.includes("uncached prompt tokens"));
-      assert.ok(warningMessages[0]?.includes("resume"));
+      assert.equal(warningMessages.length, 0);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
