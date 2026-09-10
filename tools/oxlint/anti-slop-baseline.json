@@ -7285,12 +7285,6 @@
       "e2cf831c": 3
     }
   },
-  "anti-slop(no-known-value-widening):scripts/release-smoke.ts": {
-    "total": 1,
-    "messages": {
-      "d95fe614": 1
-    }
-  },
   "anti-slop(no-known-value-widening):scripts/update-release-package-versions.ts": {
     "total": 2,
     "messages": {
@@ -24588,12 +24582,6 @@
     "total": 1,
     "messages": {
       "f30e00e9": 1
-    }
-  },
-  "anti-slop(require-safety-comment-for-type-assertion):scripts/release-smoke.ts": {
-    "total": 1,
-    "messages": {
-      "6f2dd041": 1
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):scripts/smoke-mac-update-artifact.ts": {
