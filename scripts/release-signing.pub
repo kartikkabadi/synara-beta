@@ -1,0 +1,10 @@
+# Allowed signers for Synara Beta release artifacts.
+#
+# The private half of this key lives in the SYNARA_RELEASE_SIGNING_KEY
+# repository secret and signs SHA256SUMS during the beta release workflow.
+# Installers embed this line and verify the signature with
+# `ssh-keygen -Y verify` before trusting any checksum.
+#
+# To rotate: generate a new pair (`ssh-keygen -t ed25519 -C synara-beta-release-signing`),
+# update the secret, and replace the line below in the same release.
+synara-beta-releases ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINi8kB8J9c2PSQ7D+UGgCp1LsQZg75r6rT31sb+l5ik0 synara-beta-release-signing

@@ -51,7 +51,7 @@ function copyWorkspaceManifestFixture(targetRoot: string): void {
   });
 }
 
-function writeMacManifestFixtures(targetRoot: string): { arm64Path: string; x64Path: string } {
+function writeMacManifestFixtures(targetRoot: string) {
   const assetDirectory = resolve(targetRoot, "release-assets");
   mkdirSync(assetDirectory, { recursive: true });
 
@@ -130,6 +130,7 @@ function assertNotContains(haystack: string, needle: string, message: string): v
 }
 
 function verifyCanonicalIdentity(): void {
+  // SAFETY: repo-owned manifest; the name and bin fields are asserted immediately below.
   const serverPackage = JSON.parse(
     readFileSync(resolve(repoRoot, "apps/server/package.json"), "utf8"),
   ) as { name?: string; bin?: Record<string, string> };
@@ -417,7 +418,7 @@ function verifyDesktopStageLockAuthority(): void {
   );
   assertContains(
     buildScript,
-    "buildConfig.npmRebuild = false",
+    "npmRebuild: false",
     "Desktop staging must disable electron-builder's broad native dependency rebuild.",
   );
   assertNotContains(

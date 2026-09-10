@@ -79,7 +79,7 @@ describe("providerConfigOverlay", () => {
   it("falls back to copying regular files when file symlink fails", async () => {
     await writeFile(path.join(sourceDir, "config.json"), '{"theme":"dark"}');
 
-    const failingSymlink = async () => {
+    const failingSymlink: typeof import("node:fs/promises").symlink = async () => {
       const error = new Error("A required privilege is not held by the client.");
       Object.assign(error, { code: "EPERM" });
       throw error;
@@ -89,7 +89,7 @@ describe("providerConfigOverlay", () => {
       sourceConfigDir: sourceDir,
       targetRootDir: targetDir,
       linker: {
-        symlink: failingSymlink as unknown as typeof import("node:fs/promises").symlink,
+        symlink: failingSymlink,
       },
     });
 
@@ -104,7 +104,7 @@ describe("providerConfigOverlay", () => {
     await writeFile(path.join(sourceDir, "config.json"), '{"theme":"dark"}');
     await writeFile(path.join(targetDir, "config.json"), '{"theme":"light"}');
 
-    const eexistSymlink = async () => {
+    const eexistSymlink: typeof import("node:fs/promises").symlink = async () => {
       const error = new Error("file already exists");
       Object.assign(error, { code: "EEXIST" });
       throw error;
@@ -114,7 +114,7 @@ describe("providerConfigOverlay", () => {
       sourceConfigDir: sourceDir,
       targetRootDir: targetDir,
       linker: {
-        symlink: eexistSymlink as unknown as typeof import("node:fs/promises").symlink,
+        symlink: eexistSymlink,
       },
     });
 
@@ -126,7 +126,7 @@ describe("providerConfigOverlay", () => {
     const outsideFile = path.join(tmpRoot, "outside.json");
     await writeFile(outsideFile, "keep");
 
-    const failingSymlink = async () => {
+    const failingSymlink: typeof import("node:fs/promises").symlink = async () => {
       const error = new Error("A required privilege is not held by the client.");
       Object.assign(error, { code: "EPERM" });
       throw error;
@@ -137,7 +137,7 @@ describe("providerConfigOverlay", () => {
       sourceConfigDir: sourceDir,
       targetRootDir: targetDir,
       linker: {
-        symlink: failingSymlink as unknown as typeof import("node:fs/promises").symlink,
+        symlink: failingSymlink,
       },
     });
 

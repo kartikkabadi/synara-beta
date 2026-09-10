@@ -1175,16 +1175,17 @@ describe("deriveWorkLogEntries", () => {
         second: number,
         kind: OrchestrationThreadActivity["kind"],
         turnId: TurnId | null,
-      ) =>
-        makeActivity({
+      ) => {
+        const overrides = {
           id,
           createdAt: at(second),
           sequence: second,
           kind,
-          ...(turnId !== null ? { turnId } : {}),
           summary: "Read file",
           payload: { itemType: "dynamic_tool_call", data: { toolCallId: "background-tool" } },
-        });
+        };
+        return makeActivity(turnId === null ? overrides : { ...overrides, turnId });
+      };
       const activities = [
         tool("tool-start", 1, "tool.started", oldTurn),
         makeActivity({

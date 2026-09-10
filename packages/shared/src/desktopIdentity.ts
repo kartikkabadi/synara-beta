@@ -20,6 +20,15 @@ export const SYNARA_DESKTOP_SMOKE_USER_DATA_ENV = "SYNARA_DESKTOP_SMOKE_USER_DAT
 
 export type SynaraDesktopFlavor = "production" | "development" | "canary" | "beta";
 
+/**
+ * electron-updater matches the update channel against the release tag's
+ * prerelease identifier, so the beta flavor must use the `beta` channel to see
+ * `vX.Y.Z-beta.N` releases. Every other flavor keeps the `synara` channel.
+ */
+export function desktopUpdateChannel(flavor: SynaraDesktopFlavor): string {
+  return flavor === "beta" ? "beta" : SYNARA_DESKTOP_UPDATE_CHANNEL;
+}
+
 export interface SynaraDesktopIdentity {
   readonly flavor: SynaraDesktopFlavor;
   readonly displayName: string;

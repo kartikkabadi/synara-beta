@@ -2,7 +2,7 @@
 > **Synara Beta is not ready.** This repository is an early development preview: expect breaking changes, incomplete features, and instability. Do not use it for anything important yet.
 
 <div align="center">
-  <img src="./assets/prod/logo.svg" width="112" alt="Synara Beta logo">
+  <img src="./assets/beta/beta-readme-logo.png" width="112" alt="Synara Beta logo">
   <h1>Synara Beta</h1>
   <p><strong>The fast-iteration preview channel for Synara.</strong></p>
   <p>
@@ -28,6 +28,144 @@
 <p align="center">
   <img src="./assets/prod/readme-hero-light.png" alt="Synara Beta Desktop Interface" width="100%">
 </p>
+
+---
+
+## Installation
+
+### Give this to your agent
+
+Copy the block below into Claude Code, Cursor, Codex, or any agent with shell access. It installs Synara Beta for you, fixes the usual first-install snags, and tells you the installed version.
+
+```text
+Install Synara Beta (https://github.com/kartikkabadi/synara-beta) on this machine.
+
+1. macOS and Linux: run: curl -fsSL https://raw.githubusercontent.com/kartikkabadi/synara-beta/main/scripts/install.sh | bash
+   It resolves the newest -beta.* release, downloads the right artifact for this OS
+   and CPU, verifies the release signature and checksum, and installs the app
+   (it also opens the app on macOS).
+2. Windows (PowerShell): run:
+   $t = ((Invoke-RestMethod "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" -UseBasicParsing -ErrorAction Stop) | Where-Object { $_.tag_name -match '^v\d+\.\d+\.\d+-beta\.\d+$' } | Select-Object -First 1).tag_name
+   if (-not $t) { throw "Could not resolve the latest Synara Beta release." }
+   $f = Join-Path $env:TEMP $("synara-beta-install-$([Guid]::NewGuid()).ps1")
+   try {
+     Invoke-WebRequest "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-windows.ps1" -UseBasicParsing -OutFile $f -ErrorAction Stop
+     Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+     Unblock-File -Path $f
+     & $f -Tag $t
+   } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue }
+3. Fix these if they come up, then run the install again:
+   - ssh-keygen is missing: install the OpenSSH client (apt install openssh-client, dnf install openssh-clients).
+   - macOS says the app "is damaged": clear the quarantine flag with
+     xattr -dr com.apple.quarantine "/Applications/Synara Beta.app"
+   - /Applications is not writable: approve the admin prompt the installer raises.
+   - Low disk space: keep about 1 GB free; the DMG or AppImage downloads to your temp dir.
+4. Verify the newest vX.Y.Z-beta.N release is installed and "Synara Beta" launches.
+5. Tell me the installed version and what you had to work around, if anything.
+
+Do not change Gatekeeper or system security settings.
+```
+
+### Fast one-line terminal install
+
+Install Synara Beta with one release-pinned command for your operating system. The downloaded release artifacts (DMG/AppImage/exe) are checksum-verified against an SSH-signed `SHA256SUMS`; the platform installer scripts are fetched over HTTPS from the pinned release tag and the universal `install.sh` bootstrap from `main`, and no installer script is signature-verified (see the [Installation Guide](./docs/install.md) for the full trust model).
+
+**macOS (Apple Silicon & Intel)**
+
+```bash
+t=$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep '"tag_name"' | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$' | head -1); if [ -z "$t" ]; then echo "Could not resolve the latest Synara Beta release." >&2; (exit 1); else f=$(mktemp /tmp/synara-beta-install.XXXXXX) && curl -fsSL -o "$f" "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-macos.sh" && bash "$f" --tag "$t"; rc=$?; rm -f "${f:-/tmp/synara-beta-install-none}"; (exit $rc); fi
+```
+
+**Linux (x86_64 & arm64)**
+
+```bash
+t=$(curl -fsSL "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" | grep '"tag_name"' | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$' | head -1); if [ -z "$t" ]; then echo "Could not resolve the latest Synara Beta release." >&2; (exit 1); else f=$(mktemp /tmp/synara-beta-install.XXXXXX) && curl -fsSL -o "$f" "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-linux.sh" && bash "$f" --tag "$t"; rc=$?; rm -f "${f:-/tmp/synara-beta-install-none}"; (exit $rc); fi
+```
+
+**Windows (PowerShell)**
+
+```powershell
+$t = ((Invoke-RestMethod "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" -UseBasicParsing -ErrorAction Stop) | Where-Object { $_.tag_name -match '^v\d+\.\d+\.\d+-beta\.\d+$' } | Select-Object -First 1).tag_name; if ($t) { $f = Join-Path $env:TEMP $("synara-beta-install-$([Guid]::NewGuid()).ps1"); Invoke-WebRequest "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-windows.ps1" -UseBasicParsing -OutFile $f -ErrorAction Stop; Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; Unblock-File -Path $f; try { & $f -Tag $t } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue } } else { throw "Could not resolve the latest Synara Beta release." }
+```
+
+For more options and script details, see the [Installation Guide](./docs/install.md).
+
+### Desktop application downloads
+
+Direct installer downloads will be available on [trysynara.com](https://www.trysynara.com/) and [GitHub Releases](https://github.com/kartikkabadi/synara-beta/releases).
+
+Supported native platforms:
+
+- **macOS:** Apple Silicon (`arm64`) & Intel (`x64`)
+- **Windows:** x64
+- **Linux:** x64 and arm64 (`.AppImage`)
+
+#### Linux AppImage troubleshooting
+
+Choose the asset that matches `uname -m`: `x86_64` uses the x64 AppImage and
+`aarch64` uses the arm64 AppImage. The normal AppImage launch path requires
+FUSE support; on Arch-based systems, install the `fuse2` package if it is
+missing.
+
+If FUSE is unavailable, run the AppImage in extraction mode:
+
+```bash
+chmod +x Synara-*-x86_64.AppImage
+./Synara-*-x86_64.AppImage --appimage-extract-and-run
+```
+
+For nested VMs using Wayland, add Electron compatibility flags when needed:
+
+```bash
+./Synara-*-x86_64.AppImage \
+  --appimage-extract-and-run \
+  --no-sandbox \
+  --disable-gpu \
+  --ozone-platform=x11
+```
+
+### Running from Source
+
+You can build and run Synara Beta locally using [Bun](https://bun.sh/) and [Node.js](https://nodejs.org/).
+
+#### Prerequisites
+
+- [Bun](https://bun.sh/) (v1.4.2 or newer)
+- [Node.js](https://nodejs.org/) (v24.13.1 or newer recommended)
+- [Git](https://git-scm.com/)
+- Install and authenticate the agent runtime you intend to use before starting a session. For Codex sessions, follow the [Codex CLI setup](https://github.com/openai/codex).
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/kartikkabadi/synara-beta.git
+cd synara-beta
+
+# 2. Install workspace dependencies
+bun install
+
+# 3. Start the local development server (Web + Server)
+bun run dev
+```
+
+To launch the native desktop shell during development:
+
+```bash
+bun run dev:desktop
+```
+
+`bun run typecheck` checks all seven workspaces with TypeScript 7 and the native
+Effect checker. CI and each workspace's `typecheck` script use the same compiler.
+`bun run typecheck:native` remains an alias for the default check.
+
+The native Effect checker does not enforce every legacy rule: in particular,
+`importFromBarrel` errors are currently missed. `bun run typecheck:legacy` keeps
+the TypeScript 5 check available for explicit comparisons; it is not run by CI.
+The existing compiler also remains installed for build and declaration tools
+that require its JavaScript API. Native and legacy checks use separate caches.
+
+Use these named scripts rather than a bare `tsc`, whose version depends on the
+current directory. Normal installation patches the native compiler for Effect;
+the root `typecheck` command also ensures that patch is applied before checking.
 
 ---
 
@@ -136,87 +274,6 @@ Synara organizes your workflows into clear, modular layers:
 | **Thread**             | Task-specific conversation, ephemeral state, files, and transcript history. |
 | **Provider Session**   | The local, authenticated coding-agent process executing the instructions.   |
 | **Execution Surfaces** | Diff review, embedded terminal, Chromium browser, file tree, and Git tools. |
-
----
-
-## Installation
-
-### Desktop Application
-
-Pre-built binaries for Synara Beta will be published on [trysynara.com](https://www.trysynara.com/) and on the [GitHub Releases](https://github.com/kartikkabadi/synara-beta/releases) page.
-
-Supported native platforms:
-
-- **macOS:** Apple Silicon (`arm64`) & Intel (`x64`)
-- **Windows:** x64
-- **Linux:** x64 and arm64 (`.AppImage`)
-
-#### Linux AppImage troubleshooting
-
-Choose the asset that matches `uname -m`: `x86_64` uses the x64 AppImage and
-`aarch64` uses the arm64 AppImage. The normal AppImage launch path requires
-FUSE support; on Arch-based systems, install the `fuse2` package if it is
-missing.
-
-If FUSE is unavailable, run the AppImage in extraction mode:
-
-```bash
-chmod +x Synara-*-x86_64.AppImage
-./Synara-*-x86_64.AppImage --appimage-extract-and-run
-```
-
-For nested VMs using Wayland, add Electron compatibility flags when needed:
-
-```bash
-./Synara-*-x86_64.AppImage \
-  --appimage-extract-and-run \
-  --no-sandbox \
-  --disable-gpu \
-  --ozone-platform=x11
-```
-
-### Running from Source
-
-You can build and run Synara Beta locally using [Bun](https://bun.sh/) and [Node.js](https://nodejs.org/).
-
-#### Prerequisites
-
-- [Bun](https://bun.sh/) (v1.4.2 or newer)
-- [Node.js](https://nodejs.org/) (v24.13.1 or newer recommended)
-- [Git](https://git-scm.com/)
-- Install and authenticate the agent runtime you intend to use before starting a session. For Codex sessions, follow the [Codex CLI setup](https://github.com/openai/codex).
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/kartikkabadi/synara-beta.git
-cd synara-beta
-
-# 2. Install workspace dependencies
-bun install
-
-# 3. Start the local development server (Web + Server)
-bun run dev
-```
-
-To launch the native desktop shell during development:
-
-```bash
-bun run dev:desktop
-```
-
-`bun run typecheck` checks all seven workspaces with TypeScript 7 and the native
-Effect checker. CI and each workspace's `typecheck` script use the same compiler.
-`bun run typecheck:native` remains an alias for the default check.
-
-The native Effect checker does not enforce every legacy rule: in particular,
-`importFromBarrel` errors are currently missed. `bun run typecheck:legacy` keeps
-the TypeScript 5 check available for explicit comparisons; it is not run by CI.
-The existing compiler also remains installed for build and declaration tools
-that require its JavaScript API. Native and legacy checks use separate caches.
-
-Use these named scripts rather than a bare `tsc`, whose version depends on the
-current directory. Normal installation patches the native compiler for Effect;
-the root `typecheck` command also ensures that patch is applied before checking.
 
 ---
 
