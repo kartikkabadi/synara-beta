@@ -14,6 +14,7 @@ import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import { stripTerminalControlSequences } from "@synara/shared/text";
+import { ThreadId, TurnId } from "@synara/contracts";
 import {
   cleanPiUiNoticeText,
   cleanPiUiText,
@@ -83,9 +84,11 @@ describe("Pi native Synara gateway tools", () => {
       type: "object",
       properties: { limit: { type: "number" } },
     });
+    // SAFETY: execute's fifth parameter is the TUI ExtensionContext, which the gateway tool never reads in this test.
     await expect(
       first[0]?.execute("call-a", { owner: "thread-a" }, undefined, undefined, {} as never),
     ).resolves.toMatchObject({ content: [{ type: "text", text: "thread-a" }] });
+    // SAFETY: execute's fifth parameter is the TUI ExtensionContext, which the gateway tool never reads in this test.
     await expect(
       second[0]?.execute("call-b", { owner: "thread-b" }, undefined, undefined, {} as never),
     ).resolves.toMatchObject({ content: [{ type: "text", text: "thread-b" }] });
@@ -98,6 +101,7 @@ describe("Pi native Synara gateway tools", () => {
     expect(requests[2]?.body.params.arguments).toEqual({ owner: "thread-a" });
     expect(requests[3]?.body.params.arguments).toEqual({ owner: "thread-b" });
     Object.assign(firstConnection, { bearerToken: "token-c" });
+    // SAFETY: execute's fifth parameter is the TUI ExtensionContext, which the gateway tool never reads in this test.
     await first[0]?.execute("call-c", {}, undefined, undefined, {} as never);
     expect(requests[4]?.token).toBe("Bearer token-c");
   });
@@ -141,6 +145,7 @@ describe("Pi native Synara gateway tools", () => {
       fetch,
     });
     const controller = new AbortController();
+    // SAFETY: execute's fifth parameter is the TUI ExtensionContext, which the gateway tool never reads in this test.
     const execution = tools[0]?.execute("call-a", {}, controller.signal, undefined, {} as never);
 
     controller.abort();
@@ -151,16 +156,29 @@ describe("Pi native Synara gateway tools", () => {
   });
 });
 
+type MutableExitChild = ChildProcess & { exitCode: number | null };
+
 describe("Pi Bash process supervision", () => {
   it("keeps an aborted command pending until process-tree exit is proven", async () => {
-    const child = Object.assign(new EventEmitter(), {
+    const child: MutableExitChild = Object.assign(new EventEmitter(), {
       pid: 64_201,
-      exitCode: null as number | null,
-      signalCode: null as NodeJS.Signals | null,
+      exitCode: null,
+      signalCode: null,
       stdin: new PassThrough(),
       stdout: new PassThrough(),
       stderr: new PassThrough(),
-    }) as unknown as ChildProcess;
+      stdio: [null, null, null, null, null] satisfies ChildProcess["stdio"],
+      killed: false,
+      connected: false,
+      spawnargs: [],
+      spawnfile: "",
+      kill: () => true,
+      send: () => true,
+      disconnect: () => undefined,
+      ref: () => child,
+      unref: () => child,
+      [Symbol.dispose]: () => undefined,
+    });
     let proveExit!: () => void;
     const exitProof = new Promise<void>((resolve) => {
       proveExit = resolve;
@@ -175,7 +193,7 @@ describe("Pi Bash process supervision", () => {
       teardownProcessTree: async (input) => {
         observeTeardown();
         await exitProof;
-        (child as ChildProcess & { exitCode: number | null }).exitCode = 0;
+        child.exitCode = 0;
         child.emit("exit", 0, null);
         await input.rootExited;
         return { escalated: false, signalErrors: [] };
@@ -211,14 +229,14 @@ function makePiModel(input: {
   reasoning: boolean;
   thinkingLevelMap?: Model<Api>["thinkingLevelMap"];
 }): Pick<Model<Api>, "reasoning" | "thinkingLevelMap"> {
-  return {
-    reasoning: input.reasoning,
-    ...(input.thinkingLevelMap !== undefined ? { thinkingLevelMap: input.thinkingLevelMap } : {}),
-  };
+  return input.thinkingLevelMap !== undefined
+    ? { reasoning: input.reasoning, thinkingLevelMap: input.thinkingLevelMap }
+    : { reasoning: input.reasoning };
 }
 
 describe("getPiDiscoverableModels", () => {
   it("normalizes the malformed Pi extension model metadata before returning it through RPC", () => {
+    // SAFETY: the code under test reads provider, id, and name from this fixture; the other Model fields are intentionally absent.
     const descriptor = toPiProviderModelDescriptor(
       {
         provider: "openrouter",
@@ -238,6 +256,7 @@ describe("getPiDiscoverableModels", () => {
   });
 
   it("omits models whose normalized identity would no longer resolve in the registry", () => {
+    // SAFETY: the code under test reads provider, id, and name from this fixture; the other Model fields are intentionally absent.
     expect(
       toPiProviderModelDescriptor(
         {
@@ -249,6 +268,7 @@ describe("getPiDiscoverableModels", () => {
         () => "OpenRouter",
       ),
     ).toBeNull();
+    // SAFETY: the code under test reads provider, id, and name from this fixture; the other Model fields are intentionally absent.
     expect(
       toPiProviderModelDescriptor(
         {
@@ -479,7 +499,7 @@ describe("ensurePiAnthropicCatalogModels", () => {
       provider: "anthropic",
       baseUrl: "https://api.anthropic.com",
       reasoning: true,
-      input: ["text", "image"] as Array<"text" | "image">,
+      input: ["text", "image"] satisfies Array<"text" | "image">,
       cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
       contextWindow: 1_000_000,
       maxTokens: 128_000,
@@ -592,8 +612,8 @@ describe("Pi extension UI helpers", () => {
   it("stamps events from the lifecycle generation captured by the session context", () => {
     const eventBase = makePiRuntimeEventBase({
       lifecycleGeneration: "generation-pi-7",
-      session: { threadId: "thread-pi" as never },
-      activeTurnId: "turn-pi" as never,
+      session: { threadId: ThreadId.makeUnsafe("thread-pi") },
+      activeTurnId: TurnId.makeUnsafe("turn-pi"),
     });
 
     expect(eventBase).toMatchObject({
@@ -645,8 +665,8 @@ describe("Pi extension UI helpers", () => {
 
   it("resets progress caches when the turn changes", () => {
     const tracker = makePiExtensionProgressTracker();
-    const turnA = "turn-a" as never;
-    const turnB = "turn-b" as never;
+    const turnA = TurnId.makeUnsafe("turn-a");
+    const turnB = TurnId.makeUnsafe("turn-b");
     expect(syncPiExtensionProgressTurn(tracker, turnA)).toBe(true);
     tracker.workingMessage = "Moonwalking...";
     tracker.statusTexts.set("caveman", "FULL");
