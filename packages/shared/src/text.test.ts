@@ -36,9 +36,9 @@ describe("stripTerminalControlSequences", () => {
     ).toBe("Transmuting...");
   });
 
-  it("cleans CSI sequences that lost their escape prefix", () => {
-    expect(stripTerminalControlSequences("[38;2;215;119;87mCaveman level: FULL[0m")).toBe(
-      "Caveman level: FULL",
+  it("keeps ordinary bracketed text", () => {
+    expect(stripTerminalControlSequences("Window [10m] closes; install [m] package")).toBe(
+      "Window [10m] closes; install [m] package",
     );
   });
 });

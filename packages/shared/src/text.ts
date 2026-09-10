@@ -42,11 +42,12 @@ export function nonEmptyTrimmed(value: string | null | undefined): string | unde
 }
 
 // Removes terminal formatting/control sequences from provider text before it
-// reaches chat or durable activity storage. The optional escape prefix handles
-// old rows where transport stripped ESC but left the visible CSI body behind.
+// reaches chat or durable activity storage. A real ESC or C1 prefix must be
+// present: bare bracketed text like `[10m]` is ordinary content, not a
+// control sequence, and must survive.
 export function stripTerminalControlSequences(value: string): string {
   return value
-    .replace(/(?:\u001B|\u009B)?\[[0-?]*[ -/]*[@-~]/gu, "")
+    .replace(/(?:\u001B\[|\u009B)[0-?]*[ -/]*[@-~]/gu, "")
     .replace(/(?:\u001B\]|\u009D)[^\u0007]*(?:\u0007|\u001B\\)/gu, "");
 }
 
