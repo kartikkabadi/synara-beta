@@ -21,8 +21,10 @@ import {
   stripTrailingToolExitCode,
   summarizeToolRawOutput,
 } from "@synara/shared/toolOutputSummary";
-import { pluralize } from "@synara/shared/text";
+import { pluralize, stripTerminalControlSequences } from "@synara/shared/text";
 import { PROVIDER_DESCRIPTORS } from "@synara/shared/providerMetadata";
+import { Predicate } from "effect";
+import type { Json, JsonObject } from "effect/Schema";
 import {
   deriveReadableToolTitle,
   deriveSynaraMcpToolTitle,
@@ -398,44 +400,38 @@ function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): bool
     return false;
   }
 
-  const payload =
-    activity.payload && typeof activity.payload === "object"
-      ? (activity.payload as Record<string, unknown>)
-      : null;
+  const payload = asRecord(activity.payload);
   return (
-    typeof payload?.detail === "string" &&
+    Predicate.isString(payload?.detail) &&
     toolArgumentSummaryToolName(payload.detail) === "ExitPlanMode"
   );
 }
 
-function extractWorkLogAutomation(
-  payload: Record<string, unknown> | null,
-): WorkLogAutomation | null {
+function extractWorkLogAutomation(payload: JsonObject | null): WorkLogAutomation | null {
   if (!payload) {
     return null;
   }
-  const id = typeof payload.automationId === "string" ? payload.automationId : null;
-  const name = typeof payload.automationName === "string" ? payload.automationName : null;
+  const id = Predicate.isString(payload.automationId) ? payload.automationId : null;
+  const name = Predicate.isString(payload.automationName) ? payload.automationName : null;
   if (!id || !name) {
     return null;
   }
-  const cadenceLabel = typeof payload.cadenceLabel === "string" ? payload.cadenceLabel : "";
+  const cadenceLabel = Predicate.isString(payload.cadenceLabel) ? payload.cadenceLabel : "";
   const proposalState =
     payload.proposalState === "pending" ||
     payload.proposalState === "accepted" ||
     payload.proposalState === "dismissed"
       ? payload.proposalState
       : undefined;
-  return {
-    id,
-    name,
-    cadenceLabel,
-    ...(proposalState ? { proposalState } : {}),
-  };
+  const automation: WorkLogAutomation = { id, name, cadenceLabel };
+  if (proposalState) {
+    automation.proposalState = proposalState;
+  }
+  return automation;
 }
 
 function extractWorkLogSynaraThreadCreation(
-  payload: Record<string, unknown> | null,
+  payload: JsonObject | null,
 ): WorkLogSynaraThreadCreation | null {
   if (!payload) {
     return null;
@@ -471,11 +467,11 @@ function extractWorkLogSynaraThreadCreation(
     return null;
   }
   const requestedCount =
-    typeof payload.requestedCount === "number" && Number.isInteger(payload.requestedCount)
+    Predicate.isNumber(payload.requestedCount) && Number.isInteger(payload.requestedCount)
       ? payload.requestedCount
       : threads.length;
   const createdCount =
-    typeof payload.createdCount === "number" && Number.isInteger(payload.createdCount)
+    Predicate.isNumber(payload.createdCount) && Number.isInteger(payload.createdCount)
       ? payload.createdCount
       : threads.length;
   return { operationId, requestedCount, createdCount, threads };
@@ -491,25 +487,27 @@ export interface TaskListTaskSnapshot {
 // non-empty list where every entry is malformed); an explicit empty snapshot
 // parses to an empty array. Consumed here for transcript rows and by
 // session-logic's composer task-list card state.
-export function parseTaskListTasks(payload: unknown): TaskListTaskSnapshot[] | null {
-  const record =
-    payload && typeof payload === "object" ? (payload as Record<string, unknown>) : null;
-  const rawTasks = record?.tasks;
+//
+// The input stays generic because callers hold the payload under different
+// static types (activity JSON here, a type-erased record in session-logic); the
+// shape is decoded at runtime and unreadable input returns null.
+export function parseTaskListTasks<Input>(payload: Input): TaskListTaskSnapshot[] | null {
+  if (!isJsonObject(payload)) {
+    return null;
+  }
+  const rawTasks = payload.tasks;
   if (!Array.isArray(rawTasks)) {
     return null;
   }
   const tasks = rawTasks
     .map((entry): TaskListTaskSnapshot | null => {
-      if (!entry || typeof entry !== "object") return null;
-      const taskRecord = entry as Record<string, unknown>;
-      if (typeof taskRecord.task !== "string") {
+      if (!isJsonObject(entry)) return null;
+      if (!Predicate.isString(entry.task)) {
         return null;
       }
       const status =
-        taskRecord.status === "completed" || taskRecord.status === "inProgress"
-          ? taskRecord.status
-          : "pending";
-      return { task: taskRecord.task, status };
+        entry.status === "completed" || entry.status === "inProgress" ? entry.status : "pending";
+      return { task: entry.task, status };
     })
     .filter((task): task is TaskListTaskSnapshot => task !== null);
   if (rawTasks.length > 0 && tasks.length === 0) {
@@ -518,7 +516,9 @@ export function parseTaskListTasks(payload: unknown): TaskListTaskSnapshot[] | n
   return tasks;
 }
 
-function isProviderContextLifecycleReason(value: unknown): value is ProviderContextLifecycleReason {
+function isProviderContextLifecycleReason(
+  value: Json | undefined,
+): value is ProviderContextLifecycleReason {
   return (
     value === "conversation-rebuilt" ||
     value === "fresh-session" ||
@@ -528,7 +528,7 @@ function isProviderContextLifecycleReason(value: unknown): value is ProviderCont
 }
 
 function extractProviderContextLifecycleInfo(
-  payload: Record<string, unknown> | null,
+  payload: JsonObject | null,
 ): ProviderContextLifecycleInfo | null {
   const provider = PROVIDER_DESCRIPTORS.find(
     (descriptor) => descriptor.kind === payload?.provider,
@@ -544,18 +544,18 @@ function extractProviderContextLifecycleInfo(
     !provider ||
     (nativeHistory !== "available" && nativeHistory !== "unavailable") ||
     !isProviderContextLifecycleReason(restartReason) ||
-    typeof sessionRestarted !== "boolean" ||
-    typeof recapInjected !== "boolean" ||
-    typeof recapCharacters !== "number" ||
+    !Predicate.isBoolean(sessionRestarted) ||
+    !Predicate.isBoolean(recapInjected) ||
+    !Predicate.isNumber(recapCharacters) ||
     !Number.isInteger(recapCharacters) ||
     recapCharacters < 0 ||
-    (recapPreview !== null && typeof recapPreview !== "string") ||
-    typeof recapPreviewTruncated !== "boolean"
+    (recapPreview !== null && !Predicate.isString(recapPreview)) ||
+    !Predicate.isBoolean(recapPreviewTruncated)
   ) {
     return null;
   }
   const boundedPreview =
-    typeof recapPreview === "string" &&
+    Predicate.isString(recapPreview) &&
     recapPreview.length > SESSION_CONTEXT_RECAP_PREVIEW_MAX_CHARS
       ? `…${recapPreview.slice(-(SESSION_CONTEXT_RECAP_PREVIEW_MAX_CHARS - 1)).trimStart()}`
       : recapPreview;
@@ -569,15 +569,12 @@ function extractProviderContextLifecycleInfo(
     recapPreview: boundedPreview,
     recapPreviewTruncated:
       recapPreviewTruncated ||
-      (typeof recapPreview === "string" && recapPreview.length > (boundedPreview?.length ?? 0)),
+      (Predicate.isString(recapPreview) && recapPreview.length > (boundedPreview?.length ?? 0)),
   };
 }
 
 function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWorkLogEntry {
-  const payload =
-    activity.payload && typeof activity.payload === "object"
-      ? (activity.payload as Record<string, unknown>)
-      : null;
+  const payload = asRecord(activity.payload);
   const commandAction = extractPrimaryCommandAction(payload);
   const commandPreview = extractToolCommand(payload, commandAction);
   const changedFiles = extractChangedFiles(payload);
@@ -588,19 +585,29 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const entry: DerivedWorkLogEntry = {
     id: activity.id,
     createdAt: activity.createdAt,
-    ...(activity.sequence !== undefined ? { sequence: activity.sequence } : {}),
-    ...(activity.turnId !== null ? { turnId: activity.turnId } : {}),
     label: activity.summary,
     tone: activity.tone === "approval" ? "info" : activity.tone,
     activityKind: activity.kind,
-    ...(toolName ? { toolName } : {}),
-    ...(toolCallId ? { toolCallId } : {}),
-    ...(toolStatus ? { toolStatus } : {}),
   };
+  if (activity.sequence !== undefined) {
+    entry.sequence = activity.sequence;
+  }
+  if (activity.turnId !== null) {
+    entry.turnId = activity.turnId;
+  }
+  if (toolName) {
+    entry.toolName = toolName;
+  }
+  if (toolCallId) {
+    entry.toolCallId = toolCallId;
+  }
+  if (toolStatus) {
+    entry.toolStatus = toolStatus;
+  }
   const itemType = extractWorkLogItemType(payload);
   const requestKind = extractWorkLogRequestKind(payload);
-  if (payload && typeof payload.detail === "string" && payload.detail.length > 0) {
-    const detail = stripTrailingExitCode(payload.detail).output;
+  if (payload && Predicate.isString(payload.detail) && payload.detail.length > 0) {
+    const detail = stripTrailingExitCode(stripTerminalControlSequences(payload.detail)).output;
     if (detail) {
       entry.detail = detail;
     }
@@ -608,14 +615,14 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const outputDetail =
     activity.kind === "provider.event.unmapped" ? null : summarizeToolPayloadOutput(payload);
   if (outputDetail && (!entry.detail || toolStatus === "failed")) {
-    entry.detail = outputDetail;
+    entry.detail = stripTerminalControlSequences(outputDetail);
   }
   const collabTaskOutputDetail = extractCollabTaskOutputDetail(payload);
   if (collabTaskOutputDetail) {
-    entry.detail = collabTaskOutputDetail;
+    entry.detail = stripTerminalControlSequences(collabTaskOutputDetail);
   }
   const nativeEventType =
-    payload && typeof payload.nativeEventType === "string" && payload.nativeEventType.length > 0
+    payload && Predicate.isString(payload.nativeEventType) && payload.nativeEventType.length > 0
       ? payload.nativeEventType
       : undefined;
   if (nativeEventType) {
@@ -623,7 +630,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   }
   const runtimeWarningMessage =
     activity.kind === "runtime.warning" &&
-    typeof payload?.message === "string" &&
+    Predicate.isString(payload?.message) &&
     payload.message.trim().length > 0
       ? payload.message.trim()
       : undefined;
@@ -769,7 +776,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
 
 function deriveProviderRuntimeReconciliationCollapseKey(
   activity: OrchestrationThreadActivity,
-  payload: Record<string, unknown> | null,
+  payload: JsonObject | null,
 ): string | undefined {
   if (activity.kind !== "provider.runtime.reconciled") {
     return undefined;
@@ -805,7 +812,7 @@ function deriveProviderRuntimeReconciliationCollapseKey(
 
 function deriveToolLifecycleStatus(
   activityKind: OrchestrationThreadActivity["kind"],
-  payload: Record<string, unknown> | null,
+  payload: JsonObject | null,
 ): SynaraMcpToolStatus | undefined {
   if (!isRenderableToolLifecycleActivity(activityKind)) return undefined;
   if (isFailedToolLifecyclePayload(payload)) return "failed";
@@ -815,7 +822,7 @@ function deriveToolLifecycleStatus(
 
 function deriveWorkLogLiveActivity(
   activity: OrchestrationThreadActivity,
-  payload: Record<string, unknown> | null,
+  payload: JsonObject | null,
   entry: WorkLogEntry,
 ): WorkLogLiveActivity | undefined {
   if (!isRenderableToolLifecycleActivity(activity.kind)) {
@@ -826,7 +833,7 @@ function deriveWorkLogLiveActivity(
   const stateRecord = asRecord(data?.state);
   const rawOutput = asRecord(data?.rawOutput);
   const rawStatus = [payload?.status, data?.status, stateRecord?.status, rawOutput?.status].find(
-    (value): value is string => typeof value === "string" && value.trim().length > 0,
+    (value): value is string => Predicate.isString(value) && value.trim().length > 0,
   );
   const normalizedStatus = rawStatus?.trim().toLowerCase();
   const state: WorkLogLiveActivityState = isFailedToolLifecyclePayload(payload)
@@ -848,20 +855,29 @@ function deriveWorkLogLiveActivity(
   const progress = deriveWorkLogLiveActivityProgress(payload, data);
   const elapsedSeconds = firstFiniteNumber(payload?.elapsedSeconds, data?.elapsedSeconds);
 
-  return {
+  const liveActivity: WorkLogLiveActivity = {
     state,
     label: entry.toolTitle ?? entry.label,
     lastActivityAt: activity.createdAt,
-    ...(activity.kind === "tool.started" ? { startedAt: activity.createdAt } : {}),
-    ...(detail ? { detail } : {}),
-    ...(progress !== undefined ? { progress } : {}),
-    ...(elapsedSeconds !== undefined ? { elapsedSeconds } : {}),
   };
+  if (activity.kind === "tool.started") {
+    liveActivity.startedAt = activity.createdAt;
+  }
+  if (detail) {
+    liveActivity.detail = detail;
+  }
+  if (progress !== undefined) {
+    liveActivity.progress = progress;
+  }
+  if (elapsedSeconds !== undefined) {
+    liveActivity.elapsedSeconds = elapsedSeconds;
+  }
+  return liveActivity;
 }
 
 function deriveWorkLogLiveActivityProgress(
-  payload: Record<string, unknown> | null,
-  data: Record<string, unknown> | null,
+  payload: JsonObject | null,
+  data: JsonObject | null,
 ): number | undefined {
   const progress = firstFiniteNumber(payload?.progress, data?.progress);
   if (progress !== undefined) {
@@ -872,7 +888,7 @@ function deriveWorkLogLiveActivityProgress(
   return percent === undefined ? undefined : percent / 100;
 }
 
-function isFailedToolLifecyclePayload(payload: Record<string, unknown> | null): boolean {
+function isFailedToolLifecyclePayload(payload: JsonObject | null): boolean {
   const data = asRecord(payload?.data);
   const state = asRecord(data?.state);
   const rawOutput = asRecord(data?.rawOutput);
@@ -880,7 +896,7 @@ function isFailedToolLifecyclePayload(payload: Record<string, unknown> | null): 
   if (
     statuses.some(
       (status) =>
-        typeof status === "string" && ["error", "failed", "failure"].includes(status.toLowerCase()),
+        Predicate.isString(status) && ["error", "failed", "failure"].includes(status.toLowerCase()),
     )
   ) {
     return true;
@@ -895,25 +911,25 @@ function isFailedToolLifecyclePayload(payload: Record<string, unknown> | null): 
   ].some((flag) => flag === true || flag === 1 || flag === "true");
 }
 
-function isCancelledToolLifecyclePayload(payload: Record<string, unknown> | null): boolean {
+function isCancelledToolLifecyclePayload(payload: JsonObject | null): boolean {
   const data = asRecord(payload?.data);
   const state = asRecord(data?.state);
   const rawOutput = asRecord(data?.rawOutput);
   return [payload?.status, data?.status, state?.status, rawOutput?.status].some(
     (status) =>
-      typeof status === "string" &&
+      Predicate.isString(status) &&
       ["cancelled", "canceled", "declined", "interrupted", "killed", "stopped", "aborted"].includes(
         status.trim().toLowerCase(),
       ),
   );
 }
 
-function summarizeToolPayloadOutput(payload: Record<string, unknown> | null): string | null {
+function summarizeToolPayloadOutput(payload: JsonObject | null): string | null {
   const data = asRecord(payload?.data);
   return summarizeToolRawOutput(data?.rawOutput) ?? null;
 }
 
-function extractCollabTaskOutputDetail(payload: Record<string, unknown> | null): string | null {
+function extractCollabTaskOutputDetail(payload: JsonObject | null): string | null {
   if (extractWorkLogItemType(payload) !== "collab_agent_tool_call") {
     return null;
   }
@@ -937,7 +953,7 @@ function extractCollabTaskOutputDetail(payload: Record<string, unknown> | null):
   return null;
 }
 
-function extractCollabActionTitle(payload: Record<string, unknown> | null): string | null {
+function extractCollabActionTitle(payload: JsonObject | null): string | null {
   if (extractWorkLogItemType(payload) !== "collab_agent_tool_call") {
     return null;
   }
@@ -960,7 +976,7 @@ function extractCollabActionTitle(payload: Record<string, unknown> | null): stri
   return null;
 }
 
-function extractCollabTaskText(value: unknown): string | null {
+function extractCollabTaskText(value: Json | undefined): string | null {
   if (Array.isArray(value)) {
     const parts = value
       .map((entry) => extractCollabTaskText(entry))
@@ -1114,14 +1130,17 @@ function mergeRuntimeWarningEntries(
   const repeatPreview = runtimeWarningMessage
     ? `${repeatCount} notices - ${runtimeWarningMessage}`
     : `${repeatCount} notices`;
-  return {
+  const merged: DerivedWorkLogEntry = {
     ...previous,
     ...next,
     runtimeWarningRepeatCount: repeatCount,
-    ...(runtimeWarningMessage ? { runtimeWarningMessage } : {}),
     detail: repeatPreview,
     preview: repeatPreview,
   };
+  if (runtimeWarningMessage) {
+    merged.runtimeWarningMessage = runtimeWarningMessage;
+  }
+  return merged;
 }
 
 // A later task-list snapshot supersedes the earlier one wholesale (providers
@@ -1239,28 +1258,62 @@ function mergeDerivedWorkLogEntries(
   const liveActivity = mergeWorkLogLiveActivity(previous.liveActivity, next.liveActivity);
   const toolDetails = mergeWorkLogToolDetails(previous.toolDetails, next.toolDetails);
   const turnId = next.turnId ?? previous.turnId;
-  return {
-    ...previous,
-    ...next,
-    ...(turnId !== undefined ? { turnId } : {}),
-    ...(detail ? { detail } : {}),
-    ...(command ? { command } : {}),
-    ...(rawCommand ? { rawCommand } : {}),
-    ...(preview ? { preview } : {}),
-    ...(changedFiles.length > 0 ? { changedFiles } : {}),
-    ...(toolTitle ? { toolTitle } : {}),
-    ...(itemType ? { itemType } : {}),
-    ...(requestKind ? { requestKind } : {}),
-    ...(subagents ? { subagents } : {}),
-    ...(subagentAction ? { subagentAction } : {}),
-    ...(synaraThreadCreation ? { synaraThreadCreation } : {}),
-    ...(collapseKey ? { collapseKey } : {}),
-    ...(toolName ? { toolName } : {}),
-    ...(toolCallId ? { toolCallId } : {}),
-    ...(toolStatus ? { toolStatus } : {}),
-    ...(liveActivity ? { liveActivity } : {}),
-    ...(toolDetails ? { toolDetails } : {}),
-  };
+  const merged: DerivedWorkLogEntry = { ...previous, ...next };
+  if (turnId !== undefined) {
+    merged.turnId = turnId;
+  }
+  if (detail) {
+    merged.detail = detail;
+  }
+  if (command) {
+    merged.command = command;
+  }
+  if (rawCommand) {
+    merged.rawCommand = rawCommand;
+  }
+  if (preview) {
+    merged.preview = preview;
+  }
+  if (changedFiles.length > 0) {
+    merged.changedFiles = changedFiles;
+  }
+  if (toolTitle) {
+    merged.toolTitle = toolTitle;
+  }
+  if (itemType) {
+    merged.itemType = itemType;
+  }
+  if (requestKind) {
+    merged.requestKind = requestKind;
+  }
+  if (subagents) {
+    merged.subagents = subagents;
+  }
+  if (subagentAction) {
+    merged.subagentAction = subagentAction;
+  }
+  if (synaraThreadCreation) {
+    merged.synaraThreadCreation = synaraThreadCreation;
+  }
+  if (collapseKey) {
+    merged.collapseKey = collapseKey;
+  }
+  if (toolName) {
+    merged.toolName = toolName;
+  }
+  if (toolCallId) {
+    merged.toolCallId = toolCallId;
+  }
+  if (toolStatus) {
+    merged.toolStatus = toolStatus;
+  }
+  if (liveActivity) {
+    merged.liveActivity = liveActivity;
+  }
+  if (toolDetails) {
+    merged.toolDetails = toolDetails;
+  }
+  return merged;
 }
 
 function mergeWorkLogLiveActivity(
@@ -1270,13 +1323,16 @@ function mergeWorkLogLiveActivity(
   if (!previous) return next;
   if (!next) return previous;
   if (!isInProgressLiveActivityState(previous.state) && isInProgressLiveActivityState(next.state)) {
-    return {
-      ...previous,
-      ...(next.detail || previous.detail ? { detail: next.detail ?? previous.detail } : {}),
-      ...(next.progress !== undefined || previous.progress !== undefined
-        ? { progress: next.progress ?? previous.progress }
-        : {}),
-    };
+    const inProgress: WorkLogLiveActivity = { ...previous };
+    const detail = next.detail ?? previous.detail;
+    if (next.detail || previous.detail) {
+      inProgress.detail = detail ?? "";
+    }
+    const progress = next.progress ?? previous.progress;
+    if (progress !== undefined) {
+      inProgress.progress = progress;
+    }
+    return inProgress;
   }
   const startedAt = previous.startedAt ?? next.startedAt;
   const lifecycleElapsedSeconds = startedAt
@@ -1301,21 +1357,31 @@ function mergeWorkLogLiveActivity(
         ? Math.max(0, ...elapsedCandidates)
         : undefined
       : undefined;
-  return {
+  const merged: WorkLogLiveActivity = {
     state: next.state,
     label: next.label || previous.label,
     lastActivityAt: next.lastActivityAt,
-    ...(startedAt ? { startedAt } : {}),
-    ...(next.detail || previous.detail ? { detail: next.detail ?? previous.detail } : {}),
-    ...(next.progress !== undefined || previous.progress !== undefined
-      ? { progress: next.progress ?? previous.progress }
-      : {}),
-    ...(terminalElapsedSeconds !== undefined
-      ? { elapsedSeconds: terminalElapsedSeconds }
-      : next.elapsedSeconds !== undefined || carriedElapsedSeconds !== undefined
-        ? { elapsedSeconds: next.elapsedSeconds ?? carriedElapsedSeconds }
-        : {}),
   };
+  if (startedAt) {
+    merged.startedAt = startedAt;
+  }
+  const detail = next.detail ?? previous.detail;
+  if (next.detail || previous.detail) {
+    merged.detail = detail ?? "";
+  }
+  const progress = next.progress ?? previous.progress;
+  if (progress !== undefined) {
+    merged.progress = progress;
+  }
+  if (terminalElapsedSeconds !== undefined) {
+    merged.elapsedSeconds = terminalElapsedSeconds;
+  } else {
+    const elapsedSeconds = next.elapsedSeconds ?? carriedElapsedSeconds;
+    if (elapsedSeconds !== undefined) {
+      merged.elapsedSeconds = elapsedSeconds;
+    }
+  }
+  return merged;
 }
 
 function reconcileSettledLiveActivities(
@@ -1553,21 +1619,25 @@ function areToolLifecycleChangedFilesCompatible(
   return previous.some((path) => nextSet.has(path));
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+function isJsonObject<T>(value: T): value is T & JsonObject {
+  return Predicate.isObject(value);
 }
 
-function asTrimmedString(value: unknown): string | null {
-  if (typeof value !== "string") {
+function asRecord(value: Json | undefined): JsonObject | null {
+  return isJsonObject(value) ? value : null;
+}
+
+function asTrimmedString(value: Json | undefined): string | null {
+  if (!Predicate.isString(value)) {
     return null;
   }
-  const trimmed = value.trim();
+  const trimmed = stripTerminalControlSequences(value).trim();
   return trimmed.length > 0 ? trimmed : null;
 }
 
 function firstFiniteNumber(...values: unknown[]): number | undefined {
   return values.find(
-    (value): value is number => typeof value === "number" && Number.isFinite(value),
+    (value): value is number => Predicate.isNumber(value) && Number.isFinite(value),
   );
 }
 
@@ -1578,14 +1648,12 @@ function normalizeCollabIdentifier(value: string | null | undefined): string | n
   return value.trim().toLowerCase().replaceAll("_", "").replaceAll("-", "");
 }
 
-function collabPayloadItem(
-  payload: Record<string, unknown> | null,
-): Record<string, unknown> | null {
+function collabPayloadItem(payload: JsonObject | null): JsonObject | null {
   const data = asRecord(payload?.data);
   return asRecord(data?.item) ?? data;
 }
 
-function inferSubagentActionTool(item: Record<string, unknown> | null): string | null {
+function inferSubagentActionTool(item: JsonObject | null): string | null {
   const directTool = asTrimmedString(item?.tool ?? item?.name);
   if (directTool) {
     return directTool;
@@ -1625,7 +1693,7 @@ function summarizeSubagentAction(tool: string, count: number): string {
 }
 
 function extractCollabAction(
-  payload: Record<string, unknown> | null,
+  payload: JsonObject | null,
   subagents: ReadonlyArray<WorkLogSubagent>,
 ): WorkLogSubagentAction | undefined {
   const itemType = extractWorkLogItemType(payload);
@@ -1659,18 +1727,21 @@ function extractCollabAction(
     return undefined;
   }
 
-  return {
+  const action: WorkLogSubagentAction = {
     tool: tool ?? "spawnAgent",
     status,
     summaryText: summarizeSubagentAction(tool ?? "spawnAgent", count),
-    ...(model ? { model } : {}),
-    ...(prompt ? { prompt } : {}),
   };
+  if (model) {
+    action.model = model;
+  }
+  if (prompt) {
+    action.prompt = prompt;
+  }
+  return action;
 }
 
-function extractCollabSubagents(
-  payload: Record<string, unknown> | null,
-): ReadonlyArray<WorkLogSubagent> {
+function extractCollabSubagents(payload: JsonObject | null): ReadonlyArray<WorkLogSubagent> {
   const itemType = extractWorkLogItemType(payload);
   if (itemType !== "collab_agent_tool_call") {
     return [];
@@ -1705,18 +1776,19 @@ function extractCollabSubagents(
     }
     for (const [threadId, state] of Object.entries(agentStates)) {
       const previous = mergedByThreadId.get(threadId);
-      mergedByThreadId.set(threadId, {
+      const merged: WorkLogSubagent = {
         threadId,
         providerThreadId: previous?.providerThreadId ?? threadId,
         ...previous,
-        ...(state.agentId ? { agentId: state.agentId } : {}),
-        ...(state.nickname ? { nickname: state.nickname } : {}),
-        ...(state.role ? { role: state.role } : {}),
-        ...(state.model ? { model: state.model } : {}),
-        ...(state.prompt ? { prompt: state.prompt } : {}),
-        ...(state.status ? { rawStatus: state.status } : {}),
-        ...(state.message ? { latestUpdate: state.message } : {}),
-      });
+      };
+      if (state.agentId) merged.agentId = state.agentId;
+      if (state.nickname) merged.nickname = state.nickname;
+      if (state.role) merged.role = state.role;
+      if (state.model) merged.model = state.model;
+      if (state.prompt) merged.prompt = state.prompt;
+      if (state.status) merged.rawStatus = state.status;
+      if (state.message) merged.latestUpdate = state.message;
+      mergedByThreadId.set(threadId, merged);
     }
     return [...mergedByThreadId.values()];
   }
@@ -1733,21 +1805,20 @@ function extractCollabSubagents(
     if (!fallbackIdentity?.providerThreadId) {
       return [];
     }
-    return [
-      {
-        threadId: fallbackIdentity.providerThreadId,
-        providerThreadId: fallbackIdentity.providerThreadId,
-        ...(fallbackIdentity.agentId ? { agentId: fallbackIdentity.agentId } : {}),
-        ...(fallbackIdentity.nickname ? { nickname: fallbackIdentity.nickname } : {}),
-        ...(fallbackIdentity.role ? { role: fallbackIdentity.role } : {}),
-        ...(fallbackIdentity.model ? { model: fallbackIdentity.model } : {}),
-        ...(fallbackIdentity.effort ? { effort: fallbackIdentity.effort } : {}),
-        ...(fallbackIdentity.background ? { background: fallbackIdentity.background } : {}),
-        ...(fallbackIdentity.prompt ? { prompt: fallbackIdentity.prompt } : {}),
-        ...(fallbackIdentity.status ? { rawStatus: fallbackIdentity.status } : {}),
-        ...(fallbackIdentity.message ? { latestUpdate: fallbackIdentity.message } : {}),
-      },
-    ];
+    const fallbackAgent: WorkLogSubagent = {
+      threadId: fallbackIdentity.providerThreadId,
+      providerThreadId: fallbackIdentity.providerThreadId,
+    };
+    if (fallbackIdentity.agentId) fallbackAgent.agentId = fallbackIdentity.agentId;
+    if (fallbackIdentity.nickname) fallbackAgent.nickname = fallbackIdentity.nickname;
+    if (fallbackIdentity.role) fallbackAgent.role = fallbackIdentity.role;
+    if (fallbackIdentity.model) fallbackAgent.model = fallbackIdentity.model;
+    if (fallbackIdentity.effort) fallbackAgent.effort = fallbackIdentity.effort;
+    if (fallbackIdentity.background) fallbackAgent.background = fallbackIdentity.background;
+    if (fallbackIdentity.prompt) fallbackAgent.prompt = fallbackIdentity.prompt;
+    if (fallbackIdentity.status) fallbackAgent.rawStatus = fallbackIdentity.status;
+    if (fallbackIdentity.message) fallbackAgent.latestUpdate = fallbackIdentity.message;
+    return [fallbackAgent];
   }
   return [
     {
@@ -1791,7 +1862,7 @@ function extractCollabSubagents(
   ];
 }
 
-function normalizeCommandValue(value: unknown): string | null {
+function normalizeCommandValue(value: Json | undefined): string | null {
   const direct = asTrimmedString(value);
   if (direct) {
     return direct;
@@ -1805,7 +1876,7 @@ function normalizeCommandValue(value: unknown): string | null {
   return parts.length > 0 ? parts.join(" ") : null;
 }
 
-function asCommandArgumentRecord(value: unknown): Record<string, unknown> | null {
+function asCommandArgumentRecord(value: Json | undefined): JsonObject | null {
   const direct = asRecord(value);
   if (direct) {
     return direct;
@@ -1821,7 +1892,7 @@ function asCommandArgumentRecord(value: unknown): Record<string, unknown> | null
   }
 }
 
-function isCommandLikeDetail(payload: Record<string, unknown> | null): boolean {
+function isCommandLikeDetail(payload: JsonObject | null): boolean {
   if (!payload) {
     return false;
   }
@@ -1850,6 +1921,11 @@ interface CommandActionDisplay {
   preview?: string;
 }
 
+interface ExtractedToolCommand {
+  command: string | null;
+  rawCommand: string | null;
+}
+
 function makeCommandActionDisplay(
   title: string,
   preview: string | undefined,
@@ -1858,9 +1934,9 @@ function makeCommandActionDisplay(
 }
 
 function extractToolCommand(
-  payload: Record<string, unknown> | null,
+  payload: JsonObject | null,
   commandAction: CommandAction | null = extractPrimaryCommandAction(payload),
-): { command: string | null; rawCommand: string | null } {
+): ExtractedToolCommand {
   const data = asRecord(payload?.data);
   const item = asRecord(data?.item);
   const itemResult = asRecord(item?.result);
@@ -1871,9 +1947,10 @@ function extractToolCommand(
   const dataInput = asRecord(data?.input);
   const dataArguments = asCommandArgumentRecord(data?.arguments ?? data?.args ?? data?.params);
   const rawInput = asCommandArgumentRecord(data?.rawInput);
+  const detail = payload?.detail;
   const detailCommand =
-    isCommandLikeDetail(payload) && typeof payload?.detail === "string"
-      ? stripTrailingExitCode(payload.detail).output
+    isCommandLikeDetail(payload) && Predicate.isString(detail)
+      ? stripTrailingExitCode(detail).output
       : null;
   const rawCommandCandidates = [
     item?.command,
@@ -1915,13 +1992,11 @@ function extractToolCommand(
   };
 }
 
-function extractToolTitle(payload: Record<string, unknown> | null): string | null {
+function extractToolTitle(payload: JsonObject | null): string | null {
   return asTrimmedString(payload?.title);
 }
 
-function extractPrimaryCommandAction(
-  payload: Record<string, unknown> | null,
-): CommandAction | null {
+function extractPrimaryCommandAction(payload: JsonObject | null): CommandAction | null {
   const data = asRecord(payload?.data);
   const item = asRecord(data?.item);
   const actions = collectCommandActions(payload, data, item);
@@ -1936,13 +2011,12 @@ function extractPrimaryCommandAction(
     const path = asTrimmedString(actionRecord.path) ?? undefined;
     const query = asTrimmedString(actionRecord.query) ?? undefined;
     if (command || name || path || query || type !== "unknown") {
-      return {
-        type,
-        ...(command ? { command } : {}),
-        ...(name ? { name } : {}),
-        ...(path ? { path } : {}),
-        ...(query ? { query } : {}),
-      };
+      const primaryAction: CommandAction = { type };
+      if (command) primaryAction.command = command;
+      if (name) primaryAction.name = name;
+      if (path) primaryAction.path = path;
+      if (query) primaryAction.query = query;
+      return primaryAction;
     }
   }
   return null;
@@ -1951,10 +2025,10 @@ function extractPrimaryCommandAction(
 // Codex has emitted commandActions both on the item and on the surrounding raw
 // payload; scan the nearby envelopes before falling back to generic command text.
 function collectCommandActions(
-  payload: Record<string, unknown> | null,
-  data: Record<string, unknown> | null,
-  item: Record<string, unknown> | null,
-): ReadonlyArray<unknown> {
+  payload: JsonObject | null,
+  data: JsonObject | null,
+  item: JsonObject | null,
+): ReadonlyArray<Json> {
   const candidates = [
     item?.commandActions,
     asCommandArgumentRecord(item?.arguments ?? item?.args ?? item?.params)?.commandActions,
@@ -2047,7 +2121,7 @@ function compactWorkLogPath(value: string | undefined): string | null {
   return parts.slice(-2).join("/");
 }
 
-function extractToolName(payload: Record<string, unknown> | null): string | null {
+function extractToolName(payload: JsonObject | null): string | null {
   const data = asRecord(payload?.data);
   const item = asRecord(data?.item);
   const itemInput = asRecord(item?.input);
@@ -2061,7 +2135,7 @@ function extractToolName(payload: Record<string, unknown> | null): string | null
   return null;
 }
 
-function extractToolCallId(payload: Record<string, unknown> | null): string | null {
+function extractToolCallId(payload: JsonObject | null): string | null {
   const data = asRecord(payload?.data);
   const item = asRecord(data?.item);
   return asTrimmedString(
@@ -2091,25 +2165,23 @@ function extractDetailCollapseHint(detail: string | undefined): string {
   return firstLine.slice(0, colonIndex);
 }
 
-function extractWorkLogItemType(
-  payload: Record<string, unknown> | null,
-): WorkLogEntry["itemType"] | undefined {
+function extractWorkLogItemType(payload: JsonObject | null): WorkLogEntry["itemType"] | undefined {
   const topLevel = payload?.itemType;
-  if (typeof topLevel === "string" && isToolLifecycleItemType(topLevel)) {
+  if (Predicate.isString(topLevel) && isToolLifecycleItemType(topLevel)) {
     return topLevel;
   }
   // Defensive: some provider payloads nest the type inside data or data.item
   const data = asRecord(payload?.data);
   const item = asRecord(data?.item);
   const nested = data?.itemType ?? item?.type ?? item?.kind ?? payload?.type ?? payload?.kind;
-  if (typeof nested === "string" && isToolLifecycleItemType(nested)) {
+  if (Predicate.isString(nested) && isToolLifecycleItemType(nested)) {
     return nested;
   }
   return undefined;
 }
 
 function extractWorkLogRequestKind(
-  payload: Record<string, unknown> | null,
+  payload: JsonObject | null,
 ): WorkLogEntry["requestKind"] | undefined {
   if (
     payload?.requestKind === "command" ||
@@ -2122,7 +2194,7 @@ function extractWorkLogRequestKind(
   return approvalRequestKindFromRequestType(payload?.requestType) ?? undefined;
 }
 
-function pushChangedFile(target: string[], seen: Set<string>, value: unknown) {
+function pushChangedFile(target: string[], seen: Set<string>, value: Json | undefined) {
   const normalized = asTrimmedString(value);
   if (!normalized || !isLikelyFilePath(normalized) || seen.has(normalized)) {
     return;
@@ -2147,7 +2219,12 @@ function isLikelyFilePath(value: string): boolean {
   return /^[^\s/\\]+\.[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(value);
 }
 
-function collectChangedFiles(value: unknown, target: string[], seen: Set<string>, depth: number) {
+function collectChangedFiles(
+  value: Json | undefined,
+  target: string[],
+  seen: Set<string>,
+  depth: number,
+) {
   if (depth > 4 || target.length >= 12) {
     return;
   }
@@ -2203,7 +2280,7 @@ function collectChangedFiles(value: unknown, target: string[], seen: Set<string>
   }
 }
 
-function extractChangedFiles(payload: Record<string, unknown> | null): string[] {
+function extractChangedFiles(payload: JsonObject | null): string[] {
   const changedFiles: string[] = [];
   const seen = new Set<string>();
   collectChangedFiles(asRecord(payload?.data), changedFiles, seen, 0);
@@ -2385,13 +2462,15 @@ export function deriveTimelineEntries(
     createdAt: proposedPlan.createdAt,
     proposedPlan,
   }));
-  const workRows: TimelineEntry[] = workEntries.map((entry) => ({
-    id: entry.id,
-    kind: "work",
-    createdAt: entry.createdAt,
-    ...(entry.sequence !== undefined ? { sequence: entry.sequence } : {}),
-    entry,
-  }));
+  const workRows: TimelineEntry[] = workEntries.map((entry) => {
+    const workRow = {
+      id: entry.id,
+      kind: "work" as const,
+      createdAt: entry.createdAt,
+      entry,
+    };
+    return entry.sequence !== undefined ? { ...workRow, sequence: entry.sequence } : workRow;
+  });
 
   return mergeTimelineEntries(
     mergeTimelineEntries(

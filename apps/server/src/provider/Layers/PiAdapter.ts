@@ -39,7 +39,8 @@ import {
   spawnProcess as spawnPlatformProcess,
   type RuntimeSpawnOptions,
 } from "@synara/shared/processRuntime";
-import { Effect, FileSystem, Layer, Option, Queue, Stream } from "effect";
+import { stripTerminalControlSequences } from "@synara/shared/text";
+import { Effect, FileSystem, Layer, Option, Queue, Schema, Stream } from "effect";
 
 import { takeSynaraHarnessPolicyForProviderSession } from "../../agentGateway/harnessPolicy.ts";
 import {
@@ -94,6 +95,38 @@ import {
 } from "../supervisedProcessTeardown.ts";
 
 const PROVIDER = "pi" as const;
+
+/**
+ * Pi SDK payloads cross the JSON-RPC process boundary untyped. Decode them once
+ * into these named domain types so tool helpers branch on parsed JSON instead
+ * of re-checking `typeof` at each use.
+ */
+type PiJson = typeof Schema.Json.Type;
+const PiJsonObjectSchema = Schema.Record(
+  Schema.String,
+  Schema.Union([Schema.Json, Schema.Undefined]),
+);
+type PiJsonObject = typeof PiJsonObjectSchema.Type;
+
+const toPiJsonOption = Schema.decodeUnknownOption(Schema.Json);
+const toPiJsonObjectOption = Schema.decodeUnknownOption(PiJsonObjectSchema);
+
+function toPiJsonObject(value: PiJson | undefined): PiJsonObject | undefined {
+  return value === undefined ? undefined : Option.getOrUndefined(toPiJsonObjectOption(value));
+}
+
+/** Resume cursors are either a session file path or a record that carries one. */
+const PiResumeCursorSchema = Schema.Union([
+  Schema.String,
+  Schema.Struct({
+    sessionFile: Schema.optional(Schema.String),
+    sessionFilePath: Schema.optional(Schema.String),
+    nativeHandle: Schema.optional(Schema.String),
+    path: Schema.optional(Schema.String),
+  }),
+]);
+type PiResumeCursor = typeof PiResumeCursorSchema.Type;
+const toPiResumeCursorOption = Schema.decodeUnknownOption(PiResumeCursorSchema);
 const DEFAULT_PI_THINKING_LEVEL: ThinkingLevel = "medium";
 const PI_THINKING_OPTIONS: ReadonlyArray<{
   readonly value: ThinkingLevel;
@@ -128,20 +161,19 @@ type PiAnthropicEnsuredModelId = (typeof PI_ANTHROPIC_ENSURED_MODEL_IDS)[number]
  * and omitted Fable 5.1 / Fable 5 / Opus 4.8. Values mirror `@earendil-works/pi-ai`
  * Anthropic models; Fable 5.1 follows Anthropic's published pricing until pi-ai ships it.
  */
-const PI_ANTHROPIC_ENSURED_MODEL_TEMPLATES: Record<
-  PiAnthropicEnsuredModelId,
-  {
-    readonly id: PiAnthropicEnsuredModelId;
-    readonly name: string;
-    readonly reasoning: true;
-    readonly thinkingLevelMap: NonNullable<Model<Api>["thinkingLevelMap"]>;
-    readonly compat: NonNullable<Model<Api>["compat"]>;
-    readonly input: Array<"text" | "image">;
-    readonly cost: Model<Api>["cost"];
-    readonly contextWindow: number;
-    readonly maxTokens: number;
-  }
-> = {
+interface PiAnthropicEnsuredModelTemplate {
+  readonly id: PiAnthropicEnsuredModelId;
+  readonly name: string;
+  readonly reasoning: true;
+  readonly thinkingLevelMap: NonNullable<Model<Api>["thinkingLevelMap"]>;
+  readonly compat: NonNullable<Model<Api>["compat"]>;
+  readonly input: Array<"text" | "image">;
+  readonly cost: Model<Api>["cost"];
+  readonly contextWindow: number;
+  readonly maxTokens: number;
+}
+
+const PI_ANTHROPIC_ENSURED_MODEL_TEMPLATES = {
   "claude-fable-5-1": {
     id: "claude-fable-5-1",
     name: "Claude Fable 5.1",
@@ -175,7 +207,7 @@ const PI_ANTHROPIC_ENSURED_MODEL_TEMPLATES: Record<
     contextWindow: 1_000_000,
     maxTokens: 128_000,
   },
-};
+} satisfies Record<PiAnthropicEnsuredModelId, PiAnthropicEnsuredModelTemplate>;
 
 type PiModelRegistry = Pick<ModelRegistry, "find" | "getAll" | "getAvailable">;
 type PiCodingAgentModule = typeof import("@earendil-works/pi-coding-agent");
@@ -378,32 +410,50 @@ export function makePiRuntimeEventBase(
   },
   options?: { readonly includeTurnId?: boolean },
 ) {
-  return {
+  const base = {
     eventId: EventId.makeUnsafe(crypto.randomUUID()),
     provider: PROVIDER,
     threadId: context.session.threadId,
     createdAt: new Date().toISOString(),
-    ...(context.lifecycleGeneration !== undefined
-      ? { lifecycleGeneration: context.lifecycleGeneration }
-      : {}),
-    ...(options?.includeTurnId !== false && context.activeTurnId
-      ? { turnId: context.activeTurnId }
-      : {}),
   };
-}
-
-interface PiStoredTurn {
-  readonly id: TurnId;
-  readonly items: unknown[];
-  leafId?: string | null;
+  const withLifecycle =
+    context.lifecycleGeneration !== undefined
+      ? { ...base, lifecycleGeneration: context.lifecycleGeneration }
+      : base;
+  return options?.includeTurnId !== false && context.activeTurnId
+    ? { ...withLifecycle, turnId: context.activeTurnId }
+    : withLifecycle;
 }
 
 interface PiTrackedToolCall {
   readonly toolCallId: string;
   readonly toolName: string;
-  readonly args: unknown;
+  readonly args: PiJson | undefined;
   readonly itemId: RuntimeItemId;
   readonly itemType: "command_execution" | "file_change" | "dynamic_tool_call" | "web_search";
+}
+
+/** Transcript rows recorded per turn before they are projected into snapshots. */
+interface PiStoredItem {
+  readonly type: string;
+  readonly status?: string | undefined;
+  readonly text?: string | undefined;
+  readonly delta?: string | undefined;
+  readonly callId?: string | undefined;
+  readonly toolName?: string | undefined;
+  readonly itemType?: PiTrackedToolCall["itemType"] | undefined;
+  readonly title?: string | undefined;
+  readonly args?: PiJson | undefined;
+  readonly output?: string | undefined;
+  readonly result?: PiJson | undefined;
+  readonly isError?: boolean | undefined;
+  readonly data?: PiToolLifecycleData | undefined;
+}
+
+interface PiStoredTurn {
+  readonly id: TurnId;
+  readonly items: PiStoredItem[];
+  leafId?: string | null;
 }
 
 interface PiPendingUserInput {
@@ -423,40 +473,39 @@ export interface PiAdapterLiveOptions {
   readonly agentGatewayFetch?: AgentGatewayMcpFetch;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function piGatewayToolResult(result: unknown): AgentToolResult<unknown> {
-  if (isRecord(result) && result.isError === true) {
-    const message = Array.isArray(result.content)
-      ? result.content
-          .flatMap((item) =>
-            isRecord(item) && item.type === "text" && typeof item.text === "string"
-              ? [item.text]
-              : [],
-          )
-          .join("\n")
-      : "";
+function piGatewayToolResult(result: PiJson | undefined): AgentToolResult<PiJson | undefined> {
+  const record = toPiJsonObject(result);
+  const contentItems =
+    record !== undefined && Schema.is(Schema.Array(Schema.Json))(record.content)
+      ? record.content
+      : [];
+  if (record?.isError === true) {
+    const message = contentItems
+      .flatMap((item) => {
+        const itemRecord = toPiJsonObject(item);
+        const text = itemRecord?.text;
+        return itemRecord?.type === "text" && Schema.is(Schema.String)(text) ? [text] : [];
+      })
+      .join("\n");
     throw new Error(message || "Synara gateway tool failed.");
   }
-  const content =
-    isRecord(result) && Array.isArray(result.content)
-      ? result.content.flatMap((item): Array<TextContent | ImageContent> => {
-          if (isRecord(item) && item.type === "text" && typeof item.text === "string") {
-            return [{ type: "text", text: item.text }];
-          }
-          if (
-            isRecord(item) &&
-            item.type === "image" &&
-            typeof item.data === "string" &&
-            typeof item.mimeType === "string"
-          ) {
-            return [{ type: "image", data: item.data, mimeType: item.mimeType }];
-          }
-          return [];
-        })
-      : [];
+  const content = contentItems.flatMap((item): Array<TextContent | ImageContent> => {
+    const itemRecord = toPiJsonObject(item);
+    const text = itemRecord?.text;
+    if (itemRecord?.type === "text" && Schema.is(Schema.String)(text)) {
+      return [{ type: "text", text }];
+    }
+    const data = itemRecord?.data;
+    const mimeType = itemRecord?.mimeType;
+    if (
+      itemRecord?.type === "image" &&
+      Schema.is(Schema.String)(data) &&
+      Schema.is(Schema.String)(mimeType)
+    ) {
+      return [{ type: "image", data, mimeType }];
+    }
+    return [];
+  });
   return {
     content:
       content.length > 0
@@ -476,10 +525,11 @@ export async function buildPiAgentGatewayCustomTools(input: {
   readonly defineTool: (tool: ToolDefinition) => ToolDefinition;
   readonly fetch?: AgentGatewayMcpFetch;
 }): Promise<ReadonlyArray<ToolDefinition>> {
-  const tools = await listAgentGatewayMcpTools({
-    connection: input.connection,
-    ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
-  });
+  const tools = await listAgentGatewayMcpTools(
+    input.fetch === undefined
+      ? { connection: input.connection }
+      : { connection: input.connection, fetch: input.fetch },
+  );
   if (tools.length === 0) {
     throw new Error("Synara MCP returned an empty tool catalog.");
   }
@@ -488,17 +538,22 @@ export async function buildPiAgentGatewayCustomTools(input: {
       name: tool.name,
       label: tool.name,
       description: tool.description,
+      // SAFETY: the agent gateway sanitizes its JSON Schema tool inputs, and Pi accepts that schema object as a TypeBox TSchema at this tool boundary.
       parameters: tool.inputSchema as ToolDefinition["parameters"],
-      execute: async (_toolCallId, params, signal) =>
-        piGatewayToolResult(
-          await callAgentGatewayMcpTool({
-            connection: input.connection,
-            name: tool.name,
-            arguments: params as Record<string, unknown>,
-            ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
-            ...(signal === undefined ? {} : { signal }),
-          }),
-        ),
+      execute: async (_toolCallId, params, signal) => {
+        const callArguments = Option.getOrUndefined(toPiJsonObjectOption(params)) ?? {};
+        const callBase = {
+          connection: input.connection,
+          name: tool.name,
+          arguments: callArguments,
+        };
+        const withFetch =
+          input.fetch === undefined ? callBase : { ...callBase, fetch: input.fetch };
+        const callInput = signal === undefined ? withFetch : { ...withFetch, signal };
+        return piGatewayToolResult(
+          Option.getOrUndefined(toPiJsonOption(await callAgentGatewayMcpTool(callInput))),
+        );
+      },
     }),
   );
 }
@@ -511,8 +566,75 @@ function toMessage(cause: unknown, fallback: string): string {
 }
 
 function trimToUndefined(value: string | null | undefined): string | undefined {
-  const trimmed = typeof value === "string" ? value.trim() : "";
+  const trimmed =
+    value === null || value === undefined ? "" : stripTerminalControlSequences(value).trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+// Pi extensions send TUI text with ANSI colors and running timers
+// (e.g. "Moonwalking... (1m 23s)"). Clean before compare/emit so the
+// timeline shows one readable row instead of 200+ raw rows.
+export function cleanPiUiText(value: string): string {
+  return cleanPiUiNoticeText(value)
+    .replace(/\s*\(\d+\s*m(?:\s+\d+\s*s)?\)?(?=\s*$)/g, "")
+    .replace(/(^|\s)\.(?=\s|$)/g, "$1")
+    .replace(/[·•●○◌◍◎◦]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanPiUiTextToUndefined(value: string | null | undefined): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  const cleaned = cleanPiUiText(value);
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+// Strip terminal escape sequences only. A bare "[10m]" is ordinary text, so
+// matching brackets without a real escape byte would corrupt it.
+export function cleanPiUiNoticeText(value: string): string {
+  return value
+    .replace(/\[[0-9;]*[A-Za-z]/g, "")
+    .replace(/\([A-B0-9]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanPiUiNoticeTextToUndefined(value: string | null | undefined): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  const cleaned = cleanPiUiNoticeText(value);
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+// Per-turn progress caches for the extension UI bridge. Repeats fold within
+// a turn; everything resets on turn change so a later turn re-emits.
+export interface PiExtensionProgressTracker {
+  turnId: TurnId | undefined;
+  workingMessage: string | undefined;
+  statusTexts: Map<string, string>;
+  lastSummary: string | undefined;
+}
+
+export function makePiExtensionProgressTracker(): PiExtensionProgressTracker {
+  return {
+    turnId: undefined,
+    workingMessage: undefined,
+    statusTexts: new Map<string, string>(),
+    lastSummary: undefined,
+  };
+}
+
+// Reset per-turn caches when the turn changes. Returns true on reset. Call
+// before any equality check so a later turn re-emits identical text.
+export function syncPiExtensionProgressTurn(
+  tracker: PiExtensionProgressTracker,
+  turnId: TurnId | undefined,
+): boolean {
+  if (tracker.turnId === turnId) return false;
+  tracker.turnId = turnId;
+  tracker.workingMessage = undefined;
+  tracker.statusTexts.clear();
+  tracker.lastSummary = undefined;
+  return true;
 }
 
 function isPiThinkingLevel(value: string | null | undefined): value is ThinkingLevel {
@@ -542,7 +664,7 @@ function getLocalSupportedThinkingLevels(
   if (thinkingLevelMap && Object.keys(thinkingLevelMap).length > 0) {
     return new Set(
       PI_THINKING_OPTIONS.filter((option) => {
-        const mapped = thinkingLevelMap[option.value as keyof typeof thinkingLevelMap];
+        const mapped = thinkingLevelMap[option.value];
         if (mapped === null) {
           return false;
         }
@@ -632,28 +754,27 @@ export function toPiProviderModelDescriptor(
 
   const slug = `${provider}/${modelId}`;
   const supportedThinkingOptions = getPiSupportedThinkingOptions(model);
-  return {
+  const base = {
     slug,
     name: trimToUndefined(model.name) ?? slug,
     upstreamProviderId: provider,
     upstreamProviderName: trimToUndefined(getProviderDisplayName(model.provider)) ?? provider,
-    ...(supportedThinkingOptions.length > 0
-      ? {
-          supportedReasoningEfforts: supportedThinkingOptions.map((option) => ({
-            value: option.value,
-            label: option.label,
-            description: option.description,
-          })),
-          ...(supportedThinkingOptions.some((option) => option.value === DEFAULT_PI_THINKING_LEVEL)
-            ? { defaultReasoningEffort: DEFAULT_PI_THINKING_LEVEL }
-            : {}),
-        }
-      : {}),
   };
+  if (supportedThinkingOptions.length === 0) {
+    return base;
+  }
+  const supportedReasoningEfforts = supportedThinkingOptions.map((option) => ({
+    value: option.value,
+    label: option.label,
+    description: option.description,
+  }));
+  return supportedThinkingOptions.some((option) => option.value === DEFAULT_PI_THINKING_LEVEL)
+    ? { ...base, supportedReasoningEfforts, defaultReasoningEffort: DEFAULT_PI_THINKING_LEVEL }
+    : { ...base, supportedReasoningEfforts };
 }
 
 function isPiAnthropicEnsuredModelId(modelId: string): modelId is PiAnthropicEnsuredModelId {
-  return (PI_ANTHROPIC_ENSURED_MODEL_IDS as ReadonlyArray<string>).includes(modelId);
+  return PI_ANTHROPIC_ENSURED_MODEL_IDS.some((id) => id === modelId);
 }
 
 function parseModelReference(
@@ -707,19 +828,19 @@ function createProviderModelFallback(
       baseUrl: providerDefault.baseUrl,
     };
   }
-  return {
+  const base = {
     id: parsed.id,
     name: parsed.id,
     api: providerDefault.api,
     provider: parsed.provider,
     baseUrl: providerDefault.baseUrl,
     reasoning: false,
-    input: ["text"],
+    input: ["text"] satisfies Array<"text" | "image">,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128_000,
     maxTokens: 16_384,
-    ...(providerDefault.compat ? { compat: providerDefault.compat } : {}),
   };
+  return providerDefault.compat ? { ...base, compat: providerDefault.compat } : base;
 }
 
 export function findModelInRegistry(
@@ -741,17 +862,16 @@ export function findModelInRegistry(
     .find((model) => model.id === parsed.id || `${model.provider}/${model.id}` === parsed.id);
 }
 
-function extractResumeSessionFile(resumeCursor: unknown): string | undefined {
-  if (typeof resumeCursor === "string" && resumeCursor.trim().length > 0) {
-    return resumeCursor;
-  }
-  if (!resumeCursor || typeof resumeCursor !== "object") {
+function extractResumeSessionFile(resumeCursor: PiResumeCursor | undefined): string | undefined {
+  if (resumeCursor === undefined) {
     return undefined;
   }
-  const record = resumeCursor as Record<string, unknown>;
-  for (const key of ["sessionFile", "sessionFilePath", "nativeHandle", "path"]) {
-    const value = record[key];
-    if (typeof value === "string" && value.trim().length > 0) {
+  if (Schema.is(Schema.String)(resumeCursor)) {
+    return resumeCursor.trim().length > 0 ? resumeCursor : undefined;
+  }
+  for (const key of ["sessionFile", "sessionFilePath", "nativeHandle", "path"] as const) {
+    const value = resumeCursor[key];
+    if (value !== undefined && value.trim().length > 0) {
       return value;
     }
   }
@@ -764,19 +884,28 @@ function getSessionFile(session: PiAgentSession): string | undefined {
 
 function makeSessionSnapshot(context: PiSessionContext): ProviderSession {
   const resumeCursor = getSessionFile(context.runtime.session);
-  return {
+  const status: ProviderSession["status"] = context.stopped
+    ? "closed"
+    : context.activeTurnId
+      ? "running"
+      : "ready";
+  const base = {
     provider: PROVIDER,
-    status: context.stopped ? "closed" : context.activeTurnId ? "running" : "ready",
+    status,
     runtimeMode: context.session.runtimeMode,
     threadId: context.session.threadId,
     createdAt: context.session.createdAt,
     updatedAt: new Date().toISOString(),
-    ...(context.session.cwd ? { cwd: context.session.cwd } : {}),
-    ...(context.session.model ? { model: context.session.model } : {}),
-    ...(resumeCursor ? { resumeCursor } : {}),
-    ...(context.activeTurnId ? { activeTurnId: context.activeTurnId } : {}),
-    ...(context.session.lastError ? { lastError: context.session.lastError } : {}),
   };
+  const withCwd = context.session.cwd ? { ...base, cwd: context.session.cwd } : base;
+  const withModel = context.session.model ? { ...withCwd, model: context.session.model } : withCwd;
+  const withResume = resumeCursor ? { ...withModel, resumeCursor } : withModel;
+  const withActiveTurn = context.activeTurnId
+    ? { ...withResume, activeTurnId: context.activeTurnId }
+    : withResume;
+  return context.session.lastError
+    ? { ...withActiveTurn, lastError: context.session.lastError }
+    : withActiveTurn;
 }
 
 function normalizeTokenUsage(
@@ -821,19 +950,22 @@ function normalizeTokenUsage(
   ) {
     return undefined;
   }
-  return {
+  const base = {
     usedTokens,
-    ...(usedPercent !== undefined ? { usedPercent } : {}),
-    ...(totalProcessedTokens > usedTokens ? { totalProcessedTokens } : {}),
     inputTokens,
     cachedInputTokens,
     outputTokens,
-    ...(maxTokens !== undefined ? { maxTokens } : {}),
     lastUsedTokens: usedTokens,
     lastInputTokens: inputTokens,
     lastCachedInputTokens: cachedInputTokens,
     lastOutputTokens: outputTokens,
   };
+  const withUsedPercent = usedPercent !== undefined ? { ...base, usedPercent } : base;
+  const withTotalProcessed =
+    totalProcessedTokens > usedTokens
+      ? { ...withUsedPercent, totalProcessedTokens }
+      : withUsedPercent;
+  return maxTokens !== undefined ? { ...withTotalProcessed, maxTokens } : withTotalProcessed;
 }
 
 function isPiReloadCommand(text: string): boolean {
@@ -881,19 +1013,17 @@ function classifyPiRuntimeError(
   return "unknown";
 }
 
-function runtimeErrorDetail(cause: unknown): unknown {
+function runtimeErrorDetail(cause: unknown): PiJson | undefined {
   if (cause instanceof Error) {
-    return {
-      name: cause.name,
-      message: cause.message,
-      ...(cause.stack ? { stack: cause.stack } : {}),
-    };
+    return cause.stack
+      ? { name: cause.name, message: cause.message, stack: cause.stack }
+      : { name: cause.name, message: cause.message };
   }
-  return cause;
+  return Option.getOrUndefined(toPiJsonOption(cause));
 }
 
 function textFromContent(content: string | (TextContent | ImageContent)[]): string {
-  if (typeof content === "string") {
+  if (Schema.is(Schema.String)(content)) {
     return content;
   }
   return content
@@ -902,31 +1032,25 @@ function textFromContent(content: string | (TextContent | ImageContent)[]): stri
     .join("\n\n");
 }
 
-function toolRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
 function firstStringValue(
-  record: Record<string, unknown> | undefined,
+  record: PiJsonObject | undefined,
   keys: readonly string[],
 ): string | undefined {
   if (!record) return undefined;
   for (const key of keys) {
     const value = record[key];
-    if (typeof value === "string" && value.trim().length > 0) {
+    if (Schema.is(Schema.String)(value) && value.trim().length > 0) {
       return value;
     }
   }
   return undefined;
 }
 
-function textFromToolResult(result: unknown): string | undefined {
-  if (typeof result === "string") {
+function textFromToolResult(result: PiJson | undefined): string | undefined {
+  if (Schema.is(Schema.String)(result)) {
     return result;
   }
-  const record = toolRecord(result);
+  const record = toPiJsonObject(result);
   if (!record) {
     return undefined;
   }
@@ -942,57 +1066,53 @@ function textFromToolResult(result: unknown): string | undefined {
   if (directText) {
     return directText;
   }
-  const content = Array.isArray(record.content) ? record.content : [];
+  const content = Schema.is(Schema.Array(Schema.Json))(record.content) ? record.content : [];
   const parts = content.flatMap((block) => {
-    const blockRecord = toolRecord(block);
-    return blockRecord?.type === "text" && typeof blockRecord.text === "string"
-      ? [blockRecord.text]
-      : [];
+    const blockRecord = toPiJsonObject(block);
+    const text = blockRecord?.text;
+    return blockRecord?.type === "text" && Schema.is(Schema.String)(text) ? [text] : [];
   });
   return parts.length > 0 ? parts.join("\n") : undefined;
 }
 
-function toolExitCode(result: unknown): number | null | undefined {
-  const record = toolRecord(result);
+function toolExitCode(result: PiJson | undefined): number | null | undefined {
+  const record = toPiJsonObject(result);
   if (!record) return undefined;
   const exitCode = record.exitCode;
-  if (typeof exitCode === "number" && Number.isFinite(exitCode)) return exitCode;
+  if (Schema.is(Schema.Finite)(exitCode)) return exitCode;
   const code = record.code;
-  if (typeof code === "number" && Number.isFinite(code)) return code;
+  if (Schema.is(Schema.Finite)(code)) return code;
   return null;
 }
 
-function toolRawOutput(result: unknown): Record<string, unknown> | undefined {
+function toolRawOutput(result: PiJson | undefined): PiJsonObject | undefined {
   if (result === undefined) return undefined;
   const text = textFromToolResult(result);
   const exitCode = toolExitCode(result);
-  if (typeof result === "string") {
+  if (Schema.is(Schema.String)(result)) {
     return { stdout: result, content: result };
   }
   if (result === null) {
     return {};
   }
-  const record = toolRecord(result);
+  const record = toPiJsonObject(result);
   if (!record) {
     return text ? { stdout: text, content: text } : undefined;
   }
-  return {
-    ...record,
-    ...(text ? { stdout: text, content: text } : {}),
-    ...(exitCode !== undefined ? { exitCode } : {}),
-  };
+  const withText = text ? { ...record, stdout: text, content: text } : record;
+  return exitCode !== undefined ? { ...withText, exitCode } : withText;
 }
 
-function toolPath(args: unknown): string | undefined {
-  return firstStringValue(toolRecord(args), ["path", "filePath", "file", "relativePath"]);
+function toolPath(args: PiJson | undefined): string | undefined {
+  return firstStringValue(toPiJsonObject(args), ["path", "filePath", "file", "relativePath"]);
 }
 
-function toolCommand(args: unknown): string | undefined {
-  return firstStringValue(toolRecord(args), ["command", "cmd"]);
+function toolCommand(args: PiJson | undefined): string | undefined {
+  return firstStringValue(toPiJsonObject(args), ["command", "cmd"]);
 }
 
-function toolSearchQuery(toolName: string, args: unknown): string | undefined {
-  const record = toolRecord(args);
+function toolSearchQuery(toolName: string, args: PiJson | undefined): string | undefined {
+  const record = toPiJsonObject(args);
   if (!record) return undefined;
   if (toolName === "grep" || toolName === "find") {
     return firstStringValue(record, ["pattern", "query"]);
@@ -1000,26 +1120,22 @@ function toolSearchQuery(toolName: string, args: unknown): string | undefined {
   return firstStringValue(record, ["query", "pattern"]);
 }
 
-function toolEditEntries(args: unknown): ReadonlyArray<Record<string, unknown>> | undefined {
-  const record = toolRecord(args);
+function toolEditEntries(args: PiJson | undefined): ReadonlyArray<PiJsonObject> | undefined {
+  const record = toPiJsonObject(args);
   if (!record) return undefined;
-  if (Array.isArray(record.edits)) {
-    return record.edits.flatMap((edit) => {
-      const editRecord = toolRecord(edit);
+  const edits = record.edits;
+  if (Schema.is(Schema.Array(Schema.Json))(edits)) {
+    return edits.flatMap((edit) => {
+      const editRecord = toPiJsonObject(edit);
       return editRecord ? [editRecord] : [];
     });
   }
   const oldText = firstStringValue(record, ["oldText", "old_string", "oldString"]);
   const newText = firstStringValue(record, ["newText", "new_string", "newString"]);
-  if (oldText !== undefined || newText !== undefined) {
-    return [
-      {
-        ...(oldText !== undefined ? { oldText } : {}),
-        ...(newText !== undefined ? { newText } : {}),
-      },
-    ];
+  if (oldText === undefined) {
+    return newText === undefined ? undefined : [{ newText }];
   }
-  return undefined;
+  return newText === undefined ? [{ oldText }] : [{ oldText, newText }];
 }
 
 function toolItemType(toolName: string): PiTrackedToolCall["itemType"] {
@@ -1037,7 +1153,7 @@ function toolItemType(toolName: string): PiTrackedToolCall["itemType"] {
   }
 }
 
-function toolTitle(toolName: string, args: unknown): string {
+function toolTitle(toolName: string, args: PiJson | undefined): string {
   const command = toolName === "bash" ? toolCommand(args) : undefined;
   if (command) return command;
   const filePath = toolPath(args);
@@ -1054,24 +1170,60 @@ function toolTitle(toolName: string, args: unknown): string {
   return toolName;
 }
 
+interface PiToolLifecycleData {
+  toolCallId: string;
+  callId: string;
+  toolName: string;
+  name: string;
+  tool: string;
+  kind: string;
+  args: PiJson | undefined;
+  input: PiJson | undefined;
+  rawInput: PiJson | undefined;
+  rawOutput?: PiJsonObject;
+  partialResult?: PiJson;
+  result?: PiJson;
+  isError?: boolean;
+  command?: string;
+  exitCode?: PiJson;
+  path?: string;
+  filePath?: string;
+  files?: ReadonlyArray<PiJsonObject>;
+  changes?: ReadonlyArray<PiJsonObject>;
+  commandActions?: ReadonlyArray<PiJsonObject>;
+  query?: string;
+  content?: string;
+  edits?: ReadonlyArray<PiJsonObject>;
+  unifiedDiff?: string;
+  searchKind?: string;
+}
+
+interface PiItemPayload {
+  itemType: PiTrackedToolCall["itemType"];
+  status: "inProgress" | "completed" | "failed";
+  title: string;
+  data: PiToolLifecycleData;
+}
+
 function toolLifecycleData(input: {
   toolCallId: string;
   toolName: string;
-  args: unknown;
-  result?: unknown;
-  partialResult?: unknown;
-  isError?: boolean;
-}): Record<string, unknown> {
+  args: PiJson | undefined;
+  result?: PiJson | undefined;
+  partialResult?: PiJson | undefined;
+  isError?: boolean | undefined;
+}): PiToolLifecycleData {
   const { toolCallId, toolName, args } = input;
   const rawOutput = toolRawOutput(input.result ?? input.partialResult);
   const path = toolPath(args);
   const query = toolSearchQuery(toolName, args);
   const command = toolCommand(args);
   const edits = toolEditEntries(args);
-  const content = toolRecord(args)?.content;
-  const outputDetails = toolRecord(rawOutput?.details);
+  const rawContent = toPiJsonObject(args)?.content;
+  const content = Schema.is(Schema.String)(rawContent) ? rawContent : undefined;
+  const outputDetails = toPiJsonObject(rawOutput?.details);
   const unifiedDiff = firstStringValue(outputDetails, ["diff"]);
-  const base: Record<string, unknown> = {
+  const data: PiToolLifecycleData = {
     toolCallId,
     callId: toolCallId,
     toolName,
@@ -1081,90 +1233,84 @@ function toolLifecycleData(input: {
     args,
     input: args,
     rawInput: args,
-    ...(rawOutput ? { rawOutput } : {}),
-    ...(input.partialResult !== undefined ? { partialResult: input.partialResult } : {}),
-    ...(input.result !== undefined ? { result: input.result } : {}),
-    ...(input.isError !== undefined ? { isError: input.isError } : {}),
   };
+  if (rawOutput !== undefined) data.rawOutput = rawOutput;
+  if (input.partialResult !== undefined) data.partialResult = input.partialResult;
+  if (input.result !== undefined) data.result = input.result;
+  if (input.isError !== undefined) data.isError = input.isError;
 
   switch (toolName) {
     case "bash":
-      return {
-        ...base,
-        kind: "execute",
-        ...(command ? { command } : {}),
-        ...(rawOutput?.exitCode !== undefined ? { exitCode: rawOutput.exitCode } : {}),
-      };
+      data.kind = "execute";
+      if (command) data.command = command;
+      if (rawOutput?.exitCode !== undefined) data.exitCode = rawOutput.exitCode;
+      return data;
     case "read":
-      return {
-        ...base,
-        kind: "read",
-        ...(path
-          ? {
-              path,
-              filePath: path,
-              files: [{ path }],
-              commandActions: [{ type: "read", name: "read", path }],
-            }
-          : {}),
-      };
+      data.kind = "read";
+      if (path) {
+        data.path = path;
+        data.filePath = path;
+        data.files = [{ path }];
+        data.commandActions = [{ type: "read", name: "read", path }];
+      }
+      return data;
     case "edit":
-      return {
-        ...base,
-        kind: "edit",
-        ...(path ? { path, filePath: path, files: [{ path }], changes: [{ path }] } : {}),
-        ...(edits ? { edits: edits.map((edit) => ({ ...edit, ...(path ? { path } : {}) })) } : {}),
-        ...(unifiedDiff ? { unifiedDiff } : {}),
-      };
+      data.kind = "edit";
+      if (path) {
+        data.path = path;
+        data.filePath = path;
+        data.files = [{ path }];
+        data.changes = [{ path }];
+      }
+      if (edits) {
+        data.edits = path ? edits.map((edit) => ({ ...edit, path })) : edits;
+      }
+      if (unifiedDiff) data.unifiedDiff = unifiedDiff;
+      return data;
     case "write":
-      return {
-        ...base,
-        kind: "write",
-        ...(path ? { path, filePath: path, files: [{ path }], changes: [{ path }] } : {}),
-        ...(typeof content === "string" ? { content } : {}),
-      };
+      data.kind = "write";
+      if (path) {
+        data.path = path;
+        data.filePath = path;
+        data.files = [{ path }];
+        data.changes = [{ path }];
+      }
+      if (content !== undefined) data.content = content;
+      return data;
     case "find":
-      return {
-        ...base,
-        kind: "search",
-        searchKind: "find",
-        ...(query ? { query } : {}),
-        ...(path ? { path } : {}),
-        ...(query || path
-          ? { commandActions: [{ type: "search", name: "find", query, path }] }
-          : {}),
-      };
+      data.kind = "search";
+      data.searchKind = "find";
+      if (query) data.query = query;
+      if (path) data.path = path;
+      if (query || path) {
+        data.commandActions = [{ type: "search", name: "find", query, path }];
+      }
+      return data;
     case "grep":
-      return {
-        ...base,
-        kind: "search",
-        searchKind: "grep",
-        ...(query ? { query } : {}),
-        ...(path ? { path } : {}),
-        ...(query || path
-          ? { commandActions: [{ type: "search", name: "grep", query, path }] }
-          : {}),
-      };
+      data.kind = "search";
+      data.searchKind = "grep";
+      if (query) data.query = query;
+      if (path) data.path = path;
+      if (query || path) {
+        data.commandActions = [{ type: "search", name: "grep", query, path }];
+      }
+      return data;
     case "ls":
-      return {
-        ...base,
-        kind: "listFiles",
-        ...(path
-          ? {
-              path,
-              query: path,
-              commandActions: [{ type: "listFiles", name: "ls", path }],
-            }
-          : {}),
-      };
+      data.kind = "listFiles";
+      if (path) {
+        data.path = path;
+        data.query = path;
+        data.commandActions = [{ type: "listFiles", name: "ls", path }];
+      }
+      return data;
     default:
-      return base;
+      return data;
   }
 }
 
-function mapMessageHistory(session: PiAgentSession): unknown[] {
-  const items: unknown[] = [];
-  const pendingTools = new Map<string, { toolName: string; args: unknown }>();
+function mapMessageHistory(session: PiAgentSession): PiStoredItem[] {
+  const items: PiStoredItem[] = [];
+  const pendingTools = new Map<string, { toolName: string; args: PiJson | undefined }>();
   for (const message of session.messages) {
     if (message.role === "user") {
       const text = textFromContent(message.content);
@@ -1182,19 +1328,20 @@ function mapMessageHistory(session: PiAgentSession): unknown[] {
           continue;
         }
         if (content.type === "toolCall") {
-          pendingTools.set(content.id, { toolName: content.name, args: content.arguments });
+          const args = Option.getOrUndefined(toPiJsonOption(content.arguments));
+          pendingTools.set(content.id, { toolName: content.name, args });
           items.push({
             type: "tool_call",
             status: "started",
             callId: content.id,
             toolName: content.name,
             itemType: toolItemType(content.name),
-            title: toolTitle(content.name, content.arguments),
-            args: content.arguments,
+            title: toolTitle(content.name, args),
+            args,
             data: toolLifecycleData({
               toolCallId: content.id,
               toolName: content.name,
-              args: content.arguments,
+              args,
             }),
           });
         }
@@ -1206,7 +1353,7 @@ function mapMessageHistory(session: PiAgentSession): unknown[] {
       pendingTools.delete(message.toolCallId);
       const toolName = pending?.toolName ?? message.toolName;
       const args = pending?.args;
-      const result = { content: message.content };
+      const result = Option.getOrUndefined(toPiJsonOption({ content: message.content }));
       items.push({
         type: "tool_call",
         status: message.isError ? "failed" : "completed",
@@ -1322,53 +1469,61 @@ function firstPiUserInputAnswer(
   questionId: string,
 ): string | undefined {
   const answer = answers[questionId];
-  if (typeof answer === "string") {
+  if (Schema.is(Schema.String)(answer)) {
     return trimToUndefined(answer);
   }
-  if (Array.isArray(answer)) {
-    return trimToUndefined(answer.find((entry) => typeof entry === "string"));
+  if (Schema.is(Schema.Array(Schema.Json))(answer)) {
+    const firstString = answer.find((entry): entry is string => Schema.is(Schema.String)(entry));
+    return trimToUndefined(firstString);
   }
   return undefined;
 }
 
-export const PLAIN_PI_EXTENSION_THEME = {
-  fg(_color: string, text: string) {
-    return text;
-  },
-  bg(_color: string, text: string) {
-    return text;
-  },
-  bold(text: string) {
-    return text;
-  },
-  italic(text: string) {
-    return text;
-  },
-  underline(text: string) {
-    return text;
-  },
-  inverse(text: string) {
-    return text;
-  },
-  strikethrough(text: string) {
-    return text;
-  },
-  getFgAnsi() {
-    return "";
-  },
-  getBgAnsi() {
-    return "";
-  },
-  getColorMode() {
-    return "truecolor";
-  },
-  getThinkingBorderColor() {
-    return (text: string) => text;
-  },
-  getBashModeBorderColor() {
-    return (text: string) => text;
-  },
-} as unknown as ExtensionUIContext["theme"];
+type PlainPiTheme = ExtensionUIContext["theme"];
+
+function makePlainPiTheme(): PlainPiTheme {
+  // SAFETY: Theme carries private color maps that extensions cannot reach; this plain-text implementation of every public method is the whole theme contract.
+  return {
+    fg(_color: Parameters<PlainPiTheme["fg"]>[0], text: string) {
+      return text;
+    },
+    bg(_color: Parameters<PlainPiTheme["bg"]>[0], text: string) {
+      return text;
+    },
+    bold(text: string) {
+      return text;
+    },
+    italic(text: string) {
+      return text;
+    },
+    underline(text: string) {
+      return text;
+    },
+    inverse(text: string) {
+      return text;
+    },
+    strikethrough(text: string) {
+      return text;
+    },
+    getFgAnsi(_color: Parameters<PlainPiTheme["getFgAnsi"]>[0]) {
+      return "";
+    },
+    getBgAnsi(_color: Parameters<PlainPiTheme["getBgAnsi"]>[0]) {
+      return "";
+    },
+    getColorMode() {
+      return "truecolor" as const;
+    },
+    getThinkingBorderColor(_level: Parameters<PlainPiTheme["getThinkingBorderColor"]>[0]) {
+      return (text: string) => text;
+    },
+    getBashModeBorderColor() {
+      return (text: string) => text;
+    },
+  } as PlainPiTheme;
+}
+
+export const PLAIN_PI_EXTENSION_THEME = makePlainPiTheme();
 
 const makePiAdapter = (options?: PiAdapterLiveOptions) =>
   Effect.gen(function* () {
@@ -1433,20 +1588,29 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         readonly messageType?: string;
       },
     ) => {
+      const payload = {
+        message: input.message,
+        class: classifyPiRuntimeError(input.message),
+      };
+      const rawBase = {
+        source: "pi.sdk.event" as const,
+        method: input.method,
+      };
+      const raw = input.messageType
+        ? {
+            ...rawBase,
+            messageType: input.messageType,
+            payload: input.cause ?? { message: input.message },
+          }
+        : { ...rawBase, payload: input.cause ?? { message: input.message } };
       offerRuntimeEvent({
         ...makeEventBase(context, { includeTurnId: false }),
         type: "runtime.error",
-        payload: {
-          message: input.message,
-          class: classifyPiRuntimeError(input.message),
-          ...(input.cause !== undefined ? { detail: runtimeErrorDetail(input.cause) } : {}),
-        },
-        raw: {
-          source: "pi.sdk.event",
-          method: input.method,
-          ...(input.messageType ? { messageType: input.messageType } : {}),
-          payload: input.cause ?? { message: input.message },
-        },
+        payload:
+          input.cause !== undefined
+            ? { ...payload, detail: runtimeErrorDetail(input.cause) }
+            : payload,
+        raw,
       } satisfies ProviderRuntimeEvent);
     };
 
@@ -1467,7 +1631,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         readonly method: string;
         readonly question: UserInputQuestion;
         readonly opts?: Parameters<ExtensionUIContext["select"]>[2];
-        readonly rawPayload?: Record<string, unknown>;
+        readonly rawPayload?: PiJsonObject;
       },
     ): Promise<ProviderUserInputAnswers> => {
       if (context.stopped || input.opts?.signal?.aborted) {
@@ -1510,8 +1674,9 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         abort = () => finish({});
 
         context.pendingUserInputs.set(requestId, { resolve: finish });
-        if (typeof input.opts?.timeout === "number" && input.opts.timeout > 0) {
-          timeoutId = setTimeout(abort, input.opts.timeout);
+        const timeout = input.opts?.timeout;
+        if (timeout !== undefined && timeout > 0) {
+          timeoutId = setTimeout(abort, timeout);
         }
         input.opts?.signal?.addEventListener("abort", abort, { once: true });
 
@@ -1533,8 +1698,6 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
     // pending user-input flow; terminal/TUI-only APIs remain no-op by design.
     const makePiExtensionUIContext = (context: PiSessionContext): ExtensionUIContext => {
       const unsupportedWarnings = new Set<string>();
-      const statusTexts = new Map<string, string>();
-      let workingMessage: string | undefined;
       const warnUnsupported = (method: string) => {
         if (unsupportedWarnings.has(method)) return;
         unsupportedWarnings.add(method);
@@ -1552,21 +1715,6 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           },
         } satisfies ProviderRuntimeEvent);
       };
-      const emitPluginProgress = (summary: string) => {
-        const normalized = trimToUndefined(summary);
-        if (!normalized) return;
-        offerRuntimeEvent({
-          ...makeEventBase(context),
-          type: "tool.progress",
-          payload: { toolName: "Pi plugin", summary: normalized },
-          raw: {
-            source: "pi.sdk.event",
-            method: "extension/ui-progress",
-            payload: { summary: normalized },
-          },
-        } satisfies ProviderRuntimeEvent);
-      };
-
       const uiContext: ExtensionUIContext = {
         async select(title, options, opts) {
           const questionId = "selection";
@@ -1618,44 +1766,33 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           return firstPiUserInputAnswer(answers, questionId);
         },
         notify(message, type) {
-          const normalized = trimToUndefined(message);
-          if (!normalized) return;
           if (type === "warning" || type === "error") {
+            const notice = cleanPiUiNoticeTextToUndefined(message);
+            if (!notice) return;
             offerRuntimeEvent({
               ...makeEventBase(context),
               type: "runtime.warning",
-              payload: { message: normalized, detail: { type: type ?? "info" } },
+              payload: { message: notice, detail: { type: type ?? "info" } },
               raw: {
                 source: "pi.sdk.event",
                 method: "extension/ui/notify",
-                payload: { message: normalized, type },
+                payload: { message: notice, type },
               },
             } satisfies ProviderRuntimeEvent);
             return;
           }
-          emitPluginProgress(normalized);
+          // Informational notifications are terminal UI chrome, not transcript
+          // content. Warning/error notifications remain visible as warnings.
         },
         onTerminalInput() {
           warnUnsupported("onTerminalInput");
           return () => undefined;
         },
-        setStatus(key, text) {
-          const normalizedKey = trimToUndefined(key) ?? "status";
-          const normalizedText = trimToUndefined(text);
-          if (!normalizedText) {
-            statusTexts.delete(normalizedKey);
-            return;
-          }
-          if (statusTexts.get(normalizedKey) === normalizedText) return;
-          statusTexts.set(normalizedKey, normalizedText);
-          emitPluginProgress(`${normalizedKey}: ${normalizedText}`);
-        },
-        setWorkingMessage(message) {
-          const normalizedMessage = trimToUndefined(message);
-          if (!normalizedMessage || normalizedMessage === workingMessage) return;
-          workingMessage = normalizedMessage;
-          emitPluginProgress(normalizedMessage);
-        },
+        // Pi extensions use status and working-message callbacks for terminal
+        // chrome. Synara has its own working header; neither belongs in the
+        // transcript as a fake tool call.
+        setStatus() {},
+        setWorkingMessage() {},
         setWorkingVisible() {},
         setWorkingIndicator() {},
         setHiddenThinkingLabel() {},
@@ -1668,11 +1805,12 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         setHeader() {
           warnUnsupported("setHeader");
         },
-        setTitle(title) {
-          if (title) emitPluginProgress(title);
-        },
+        // The browser owns document/thread chrome; do not turn terminal title
+        // changes into transcript rows.
+        setTitle() {},
         async custom() {
           warnUnsupported("custom");
+          // SAFETY: the SDK types custom<T>() as Promise<T>, but Synara never opens the TUI overlay, so the promise intentionally resolves undefined.
           return undefined as never;
         },
         pasteToEditor() {
@@ -1743,7 +1881,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       } satisfies ProviderRuntimeEvent);
     };
 
-    const recordItem = (context: PiSessionContext, item: unknown) => {
+    const recordItem = (context: PiSessionContext, item: PiStoredItem) => {
       const turn = context.activeTurnId
         ? context.turns.find((candidate) => candidate.id === context.activeTurnId)
         : context.turns.at(-1);
@@ -1870,40 +2008,41 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             raw: { source: "pi.sdk.event", messageType: event.type, payload: event },
           } satisfies ProviderRuntimeEvent);
           return;
-        case "turn_start":
+        case "turn_start": {
+          const sessionModel = context.runtime.session.model;
           offerRuntimeEvent({
             ...makeEventBase(context),
             type: "turn.started",
-            payload: {
-              ...(context.runtime.session.model
-                ? {
-                    model: `${context.runtime.session.model.provider}/${context.runtime.session.model.id}`,
-                  }
-                : {}),
-              effort: context.runtime.session.thinkingLevel,
-            },
+            payload: sessionModel
+              ? {
+                  model: `${sessionModel.provider}/${sessionModel.id}`,
+                  effort: context.runtime.session.thinkingLevel,
+                }
+              : { effort: context.runtime.session.thinkingLevel },
             raw: { source: "pi.sdk.event", messageType: event.type, payload: event },
           } satisfies ProviderRuntimeEvent);
           return;
+        }
         case "message_update":
           handleMessageUpdate(context, event);
           return;
         case "tool_execution_start": {
+          const args = Option.getOrUndefined(toPiJsonOption(event.args));
           const itemId = RuntimeItemId.makeUnsafe(`pi-tool-${event.toolCallId}`);
           const tracked: PiTrackedToolCall = {
             toolCallId: event.toolCallId,
             toolName: event.toolName,
-            args: event.args,
+            args,
             itemId,
             itemType: toolItemType(event.toolName),
           };
           context.activeToolItems.set(event.toolCallId, tracked);
-          const title = toolTitle(event.toolName, event.args);
+          const title = toolTitle(event.toolName, args);
           recordItem(context, {
             type: "tool_call",
             status: "started",
             toolName: event.toolName,
-            args: event.args,
+            args,
           });
           offerRuntimeEvent({
             ...makeEventBase(context),
@@ -1917,7 +2056,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               data: toolLifecycleData({
                 toolCallId: event.toolCallId,
                 toolName: event.toolName,
-                args: event.args,
+                args,
               }),
             },
             raw: { source: "pi.sdk.event", messageType: event.type, payload: event },
@@ -1927,30 +2066,31 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         case "tool_execution_update": {
           const tracked = context.activeToolItems.get(event.toolCallId);
           if (!tracked) return;
-          const detail = textFromToolResult(event.partialResult);
+          const partialResult = Option.getOrUndefined(toPiJsonOption(event.partialResult));
+          const detail = textFromToolResult(partialResult);
           recordItem(context, {
             type: "tool_call",
             status: "updated",
             toolName: event.toolName,
             output: detail,
           });
+          const payload = {
+            itemType: tracked.itemType,
+            status: "inProgress",
+            title: toolTitle(event.toolName, tracked.args),
+            data: toolLifecycleData({
+              toolCallId: event.toolCallId,
+              toolName: event.toolName,
+              args: tracked.args,
+              partialResult,
+            }),
+          } satisfies PiItemPayload;
           offerRuntimeEvent({
             ...makeEventBase(context),
             itemId: tracked.itemId,
             providerRefs: { providerItemId: ProviderItemId.makeUnsafe(event.toolCallId) },
             type: "item.updated",
-            payload: {
-              itemType: tracked.itemType,
-              status: "inProgress",
-              title: toolTitle(event.toolName, tracked.args),
-              ...(detail ? { detail } : {}),
-              data: toolLifecycleData({
-                toolCallId: event.toolCallId,
-                toolName: event.toolName,
-                args: tracked.args,
-                partialResult: event.partialResult,
-              }),
-            },
+            payload: detail ? { ...payload, detail } : payload,
             raw: { source: "pi.sdk.event", messageType: event.type, payload: event },
           } satisfies ProviderRuntimeEvent);
           return;
@@ -1964,32 +2104,33 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             itemType: toolItemType(event.toolName),
           };
           context.activeToolItems.delete(event.toolCallId);
-          const detail = textFromToolResult(event.result);
+          const result = Option.getOrUndefined(toPiJsonOption(event.result));
+          const detail = textFromToolResult(result);
           recordItem(context, {
             type: "tool_call",
             status: event.isError ? "failed" : "completed",
             toolName: event.toolName,
             output: detail,
-            result: event.result,
+            result,
           });
+          const payload = {
+            itemType: tracked.itemType,
+            status: event.isError ? "failed" : "completed",
+            title: toolTitle(event.toolName, tracked.args),
+            data: toolLifecycleData({
+              toolCallId: event.toolCallId,
+              toolName: event.toolName,
+              args: tracked.args,
+              result,
+              isError: event.isError,
+            }),
+          } satisfies PiItemPayload;
           offerRuntimeEvent({
             ...makeEventBase(context),
             itemId: tracked.itemId,
             providerRefs: { providerItemId: ProviderItemId.makeUnsafe(event.toolCallId) },
             type: "item.completed",
-            payload: {
-              itemType: tracked.itemType,
-              status: event.isError ? "failed" : "completed",
-              title: toolTitle(event.toolName, tracked.args),
-              ...(detail ? { detail } : {}),
-              data: toolLifecycleData({
-                toolCallId: event.toolCallId,
-                toolName: event.toolName,
-                args: tracked.args,
-                result: event.result,
-                isError: event.isError,
-              }),
-            },
+            payload: detail ? { ...payload, detail } : payload,
             raw: { source: "pi.sdk.event", messageType: event.type, payload: event },
           } satisfies ProviderRuntimeEvent);
           return;
@@ -2170,21 +2311,21 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         const shellPath = services.settingsManager.getShellPath();
         const commandPrefix = services.settingsManager.getShellCommandPrefix();
         input.processSupervisor.setShellPath(shellPath);
+        const bashOptionsBase = { operations: input.processSupervisor.operations };
+        const bashOptionsWithPrefix =
+          commandPrefix === undefined ? bashOptionsBase : { ...bashOptionsBase, commandPrefix };
+        const bashOptions =
+          shellPath === undefined ? bashOptionsWithPrefix : { ...bashOptionsWithPrefix, shellPath };
+        const sessionInput = sessionStartEvent
+          ? { services, sessionManager, sessionStartEvent }
+          : { services, sessionManager };
+        const sessionInputWithModel = model ? { ...sessionInput, model } : sessionInput;
         return {
           ...(await input.sdk.createAgentSessionFromServices({
-            services,
-            sessionManager,
-            ...(sessionStartEvent ? { sessionStartEvent } : {}),
-            ...(model ? { model } : {}),
+            ...sessionInputWithModel,
             thinkingLevel: input.thinkingLevel ?? DEFAULT_PI_THINKING_LEVEL,
             customTools: [
-              input.sdk.defineTool(
-                input.sdk.createBashToolDefinition(cwd, {
-                  operations: input.processSupervisor.operations,
-                  ...(commandPrefix === undefined ? {} : { commandPrefix }),
-                  ...(shellPath === undefined ? {} : { shellPath }),
-                }),
-              ),
+              input.sdk.defineTool(input.sdk.createBashToolDefinition(cwd, bashOptions)),
               ...(input.gatewayTools ?? []),
             ],
           })),
@@ -2207,15 +2348,19 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       Effect.gen(function* () {
         const cwd = trimToUndefined(input.cwd) ?? serverConfig.cwd;
         const piSdk = yield* loadPiSdk("session/start");
-        const processSupervisor = makePiBashProcessSupervisor({
-          getShellConfig: () => piSdk.getShellConfig(),
-          ...(options?.spawnProcess ? { spawnProcess: options.spawnProcess } : {}),
-          ...(options?.teardownProcessTree
-            ? { teardownProcessTree: options.teardownProcessTree }
-            : {}),
-        });
+        const supervisorOptions = { getShellConfig: () => piSdk.getShellConfig() };
+        const supervisorWithSpawn = options?.spawnProcess
+          ? { ...supervisorOptions, spawnProcess: options.spawnProcess }
+          : supervisorOptions;
+        const processSupervisor = makePiBashProcessSupervisor(
+          options?.teardownProcessTree
+            ? { ...supervisorWithSpawn, teardownProcessTree: options.teardownProcessTree }
+            : supervisorWithSpawn,
+        );
         const agentDir = makeAgentDir(input.providerOptions?.pi?.agentDir, piSdk);
-        const sessionFile = extractResumeSessionFile(input.resumeCursor);
+        const sessionFile = extractResumeSessionFile(
+          Option.getOrUndefined(toPiResumeCursorOption(input.resumeCursor)),
+        );
         const sessionManager = sessionFile
           ? piSdk.SessionManager.open(sessionFile, undefined, cwd)
           : piSdk.SessionManager.create(cwd);
@@ -2251,14 +2396,21 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           ? yield* releaseAgentGatewaySessionLeaseOnInterrupt(
               agentGatewaySessionLease,
               Effect.tryPromise({
-                try: () =>
-                  buildPiAgentGatewayCustomTools({
-                    connection: agentGatewayConnection,
-                    defineTool: (tool) => piSdk.defineTool(tool),
-                    ...(options?.agentGatewayFetch === undefined
-                      ? {}
-                      : { fetch: options.agentGatewayFetch }),
-                  }),
+                try: () => {
+                  const gatewayFetch = options?.agentGatewayFetch;
+                  return buildPiAgentGatewayCustomTools(
+                    gatewayFetch === undefined
+                      ? {
+                          connection: agentGatewayConnection,
+                          defineTool: (tool) => piSdk.defineTool(tool),
+                        }
+                      : {
+                          connection: agentGatewayConnection,
+                          defineTool: (tool) => piSdk.defineTool(tool),
+                          fetch: gatewayFetch,
+                        },
+                  );
+                },
                 catch: (cause) => cause,
               }),
             ).pipe(
@@ -2270,7 +2422,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                       cause,
                     ),
                   ),
-                  Effect.as([] as ReadonlyArray<ToolDefinition>),
+                  Effect.as([] satisfies ReadonlyArray<ToolDefinition>),
                 ),
               ),
             )
@@ -2282,18 +2434,24 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         const { runtime, modelRegistry } = yield* releaseAgentGatewaySessionLeaseOnInterrupt(
           agentGatewaySessionLease,
           Effect.tryPromise({
-            try: (signal) =>
-              createSdkRuntime({
+            try: (signal) => {
+              const runtimeInput = {
                 signal,
                 sdk: piSdk,
                 cwd,
                 agentDir,
                 sessionManager,
-                ...(modelId ? { modelId } : {}),
-                ...(thinkingLevel ? { thinkingLevel } : {}),
                 processSupervisor,
-                ...(gatewayControlAvailable ? { gatewayTools } : {}),
-              }),
+              };
+              const runtimeInputWithModel = modelId ? { ...runtimeInput, modelId } : runtimeInput;
+              const runtimeInputWithThinking = thinkingLevel
+                ? { ...runtimeInputWithModel, thinkingLevel }
+                : runtimeInputWithModel;
+              const runtimeInputWithGatewayTools = gatewayControlAvailable
+                ? { ...runtimeInputWithThinking, gatewayTools }
+                : runtimeInputWithThinking;
+              return createSdkRuntime(runtimeInputWithGatewayTools);
+            },
             catch: (cause) =>
               new ProviderAdapterRequestError({
                 provider: PROVIDER,
@@ -2314,29 +2472,22 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           ? `${runtime.session.model.provider}/${runtime.session.model.id}`
           : modelId;
         const resumeCursor = getSessionFile(runtime.session);
-        const session: ProviderSession = {
+        const sessionBase = {
           provider: PROVIDER,
-          status: "ready",
+          status: "ready" as const,
           runtimeMode: input.runtimeMode,
           cwd,
           threadId: input.threadId,
           createdAt: now,
           updatedAt: now,
-          ...(model ? { model } : {}),
-          ...(resumeCursor ? { resumeCursor } : {}),
         };
-        const context: PiSessionContext = {
-          ...(input.lifecycleGeneration !== undefined
-            ? { lifecycleGeneration: input.lifecycleGeneration }
-            : {}),
+        const sessionWithModel = model ? { ...sessionBase, model } : sessionBase;
+        const session: ProviderSession = resumeCursor
+          ? { ...sessionWithModel, resumeCursor }
+          : sessionWithModel;
+        const contextBase = {
           runtime,
           gatewayControlAvailable,
-          ...(gatewayControlAvailable && agentGatewaySessionLease
-            ? {
-                gatewaySessionLease: agentGatewaySessionLease,
-                gatewayConnection: agentGatewayConnection!,
-              }
-            : {}),
           processSupervisor,
           modelRegistry,
           session,
@@ -2344,12 +2495,24 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           activeTurnId: undefined,
           activeAssistantItemId: undefined,
           activeReasoningItemId: undefined,
-          activeToolItems: new Map(),
-          pendingUserInputs: new Map(),
+          activeToolItems: new Map<string, PiTrackedToolCall>(),
+          pendingUserInputs: new Map<ApprovalRequestId, PiPendingUserInput>(),
           stopped: false,
           lastKnownTokenUsage: undefined,
           unsubscribe: undefined,
         };
+        const contextWithLifecycle =
+          input.lifecycleGeneration !== undefined
+            ? { ...contextBase, lifecycleGeneration: input.lifecycleGeneration }
+            : contextBase;
+        const context: PiSessionContext =
+          gatewayControlAvailable && agentGatewaySessionLease
+            ? {
+                ...contextWithLifecycle,
+                gatewaySessionLease: agentGatewaySessionLease,
+                gatewayConnection: agentGatewaySessionLease.connection,
+              }
+            : contextWithLifecycle;
         context.unsubscribe = runtime.session.subscribe((event) =>
           handleSessionEvent(context, event),
         );
@@ -2392,7 +2555,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             type: "runtime.warning",
             payload: {
               message:
-                "Pi extensions are loaded with Synara's limited UI bridge. select/confirm/input/notify/status are supported; TUI-only widgets and editor hooks are ignored.",
+                "Pi extensions are loaded with Synara's limited UI bridge. select/confirm/input and warning/error notifications are supported; terminal status, widgets, and editor hooks are ignored.",
               detail: {
                 extensionCount: loadedExtensions.length,
                 extensions: extensionNames,
@@ -2525,17 +2688,16 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         context.turns.push({ id: turnId, items: [] });
         context.session = makeSessionSnapshot(context);
         if (payload.images.length === 0 && isPiReloadCommand(payload.text)) {
+          const sessionModel = context.runtime.session.model;
           offerRuntimeEvent({
             ...makeEventBase(context),
             type: "turn.started",
-            payload: {
-              ...(context.runtime.session.model
-                ? {
-                    model: `${context.runtime.session.model.provider}/${context.runtime.session.model.id}`,
-                  }
-                : {}),
-              effort: context.runtime.session.thinkingLevel,
-            },
+            payload: sessionModel
+              ? {
+                  model: `${sessionModel.provider}/${sessionModel.id}`,
+                  effort: context.runtime.session.thinkingLevel,
+                }
+              : { effort: context.runtime.session.thinkingLevel },
             raw: { source: "pi.sdk.event", method: "reload", payload: { command: payload.text } },
           } satisfies ProviderRuntimeEvent);
           yield* Effect.tryPromise({
@@ -2747,14 +2909,13 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           : []),
         ...(activeTurn ? [{ id: activeTurn.id, items: [...activeTurn.items] }] : []),
       ];
-      return {
-        threadId: context.session.threadId,
-        ...(context.session.cwd ? { cwd: context.session.cwd } : {}),
-        turns:
-          turns.length > 0
-            ? turns
-            : context.turns.map((turn) => ({ id: turn.id, items: [...turn.items] })),
-      };
+      const turnsSnapshot =
+        turns.length > 0
+          ? turns
+          : context.turns.map((turn) => ({ id: turn.id, items: [...turn.items] }));
+      return context.session.cwd
+        ? { threadId: context.session.threadId, cwd: context.session.cwd, turns: turnsSnapshot }
+        : { threadId: context.session.threadId, turns: turnsSnapshot };
     };
 
     const readThread: PiAdapterShape["readThread"] = (threadId) =>
@@ -2864,13 +3025,16 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             skills: result.skills.map((skill) => {
               const description = trimToUndefined(skill.description);
               const scope = trimToUndefined(skill.sourceInfo.source);
-              return {
+              const skillBase = {
                 name: skill.name,
-                ...(description ? { description } : {}),
                 path: skill.filePath,
                 enabled: !skill.disableModelInvocation,
-                ...(scope ? { scope } : {}),
               };
+              const skillWithDescription = Object.assign(
+                skillBase,
+                description ? { description } : {},
+              );
+              return scope ? Object.assign(skillWithDescription, { scope }) : skillWithDescription;
             }),
             source: "pi.sdk",
             cached: false,

@@ -2,7 +2,7 @@
 // Purpose: Small, dependency-free text helpers shared across server and web so
 // repeated string semantics (count pluralization, etc.) live in one place.
 // Layer: Shared runtime utility
-// Exports: pluralize, nonEmptyTrimmed, splitsSurrogatePair, unicodeSafeEndOffset
+// Exports: pluralize, nonEmptyTrimmed, splitsSurrogatePair, stripTerminalControlSequences, unicodeSafeEndOffset
 
 // Reports whether a UTF-16 offset falls between the high and low surrogate of
 // one Unicode code point. JavaScript string lengths and slice offsets count
@@ -36,9 +36,18 @@ export function unicodeSafeEndOffset(text: string, requestedEndOffsetChars: numb
 // constructors validate without normalizing, so an untrimmed value throws.
 // Use this wherever a string travels from provider output into a command.
 export function nonEmptyTrimmed(value: string | null | undefined): string | undefined {
-  if (typeof value !== "string") return undefined;
+  if (value === null || value === undefined) return undefined;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+// Removes terminal formatting/control sequences from provider text before it
+// reaches chat or durable activity storage. The optional escape prefix handles
+// old rows where transport stripped ESC but left the visible CSI body behind.
+export function stripTerminalControlSequences(value: string): string {
+  return value
+    .replace(/(?:\u001B|\u009B)?\[[0-?]*[ -/]*[@-~]/gu, "")
+    .replace(/(?:\u001B\]|\u009D)[^\u0007]*(?:\u0007|\u001B\\)/gu, "");
 }
 
 // Returns the singular or plural form of a noun based on `count`. The plural
