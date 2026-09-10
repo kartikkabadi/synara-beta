@@ -1,18 +1,5 @@
-// Beta icon generator — square artwork (the system applies the dock mask), colors sampled
-// pixel-exact from the installed Xcode 26 icon.
-//
-// Design: full-bleed square. Vertical cyan-to-royal gradient (#0FC3FD -> #186FFA at
-// x=300) measured within a few units of Xcode's own stops; a clean 5x5 grid like
-// Xcode 26; two guide circles and a squircle inset guide like the classic Xcode Beta;
-// faint cardinal axes and diagonals; the Synara mark solid and unshadowed; a white
-// SF Pro BETA pill bottom-right with a soft lift shadow.
-//
-// Usage: swift assets/beta/generate-beta-icon.swift   (from the repo root)
-// Outputs the two square masters; derive the rest with sips:
-//   beta-macos-legacy-1024.png, beta-universal-1024.png   <- copy of beta-macos-1024.png
-//   beta-web-apple-touch-180.png                          <- sips -z 180 180
-//   beta-web-favicon-16x16.png / -32x32.png               <- sips -z 16 16 / -z 32 32
-//   beta-windows.ico (256) / beta-web-favicon.ico (48)    <- sips -s format ico
+// Beta icon generator v7 — square artwork (dock applies the mask), Apple-extracted colors.
+// Colors sampled pixel-exact from the installed Xcode 26 icon: vertical #0FC3FD -> #186FFA.
 import AppKit
 import CoreGraphics
 import Foundation
@@ -30,9 +17,9 @@ struct Palette {
 }
 
 // Light: exact Xcode 26 stop colors.
-let light = Palette(top: 0x0FC3FD, upperMid: 0x12A4FA, lowerMid: 0x1683FA, bottom: 0x186FFA, mark: 0x000000)
+let light = Palette(top: 0x18A9EE, upperMid: 0x1895EA, lowerMid: 0x1778E4, bottom: 0x1560DC, mark: 0xFFFFFF)
 // Dark appearance: deeper sibling of the same ramp.
-let dark = Palette(top: 0x1470D0, upperMid: 0x1062C2, lowerMid: 0x0D53B4, bottom: 0x0A47A6, mark: 0xFFFFFF)
+let dark = Palette(top: 0x14549E, upperMid: 0x11489C, lowerMid: 0x0C3A8C, bottom: 0x072E6B, mark: 0xFFFFFF)
 
 func cg(_ hex: UInt32, _ a: CGFloat = 1) -> CGColor {
   CGColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: a)
@@ -110,6 +97,18 @@ func drawIcon(_ p: Palette, name: String) {
     ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 0), end: CGPoint(x: 0, y: D), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
   }
 
+  // Depth layer 1: soft light pool top-left, vignette bottom-right
+  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF, 0.17), cg(0xFFFFFF, 0)] as CFArray, locations: [0, 1]) {
+    ctx.drawRadialGradient(g, startCenter: CGPoint(x: 300, y: 220), startRadius: 0, endCenter: CGPoint(x: 300, y: 220), endRadius: 900, options: [])
+  }
+  if let g = CGGradient(colorsSpace: cs, colors: [cg(0x06255C, 0.17), cg(0x06255C, 0)] as CFArray, locations: [0, 1]) {
+    ctx.drawRadialGradient(g, startCenter: CGPoint(x: 850, y: 900), startRadius: 0, endCenter: CGPoint(x: 850, y: 900), endRadius: 780, options: [])
+  }
+
+  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF, 0.10), cg(0xFFFFFF, 0)] as CFArray, locations: [0, 1]) {
+    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 0), end: CGPoint(x: 0, y: 130), options: [])
+  }
+
   // Blueprint shell: clean 5x5 grid (Xcode 26), guide circles and squircle inset (classic beta)
   ctx.setLineWidth(2.5)
   ctx.setStrokeColor(cg(0xFFFFFF, 0.14))
@@ -148,26 +147,53 @@ func drawIcon(_ p: Palette, name: String) {
   ctx.addPath(CGPath(roundedRect: CGRect(x: 72, y: 72, width: D - 144, height: D - 144), cornerWidth: 160, cornerHeight: 160, transform: nil))
   ctx.strokePath()
 
-  // Solid mark (flat, no baked lighting)
-  ctx.setFillColor(cg(p.mark))
+  if let g = CGGradient(colorsSpace: cs, colors: [cg(0x021233, 0.12), cg(0x021233, 0)] as CFArray, locations: [0, 1]) {
+    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 0), end: CGPoint(x: 0, y: 52), options: [])
+  }
+
+  // Depth layer 3: glass rim on the tile edge
+  ctx.setLineWidth(3)
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.30))
+  ctx.stroke(CGRect(x: 1.5, y: 1.5, width: D - 3, height: D - 3))
+
+  // Solid mark (layered: lift shadow + gentle vertical volume)
+  ctx.saveGState()
+  ctx.setShadow(offset: CGSize(width: 12, height: -28), blur: 56, color: cg(0x021233, 0.48))
   addMark(to: ctx)
-  ctx.fillPath()
+  ctx.clip()
+  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF), cg(0xEDF3FA)] as CFArray, locations: [0, 1]) {
+    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 280), end: CGPoint(x: 0, y: 785), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+  }
+  ctx.restoreGState()
 
   ctx.restoreGState()
 
   // BETA pill: inside the dock mask, bottom right
   let pillRect = CGRect(x: 1010, y: 128, width: 860, height: 300)
   ctx.saveGState()
-  ctx.setShadow(offset: CGSize(width: 0, height: -12), blur: 28, color: cg(0x03183A, 0.22))
+  ctx.setShadow(offset: CGSize(width: 8, height: -20), blur: 46, color: cg(0x03183A, 0.32))
   ctx.addPath(CGPath(roundedRect: pillRect, cornerWidth: 150, cornerHeight: 150, transform: nil))
   ctx.setFillColor(cg(0xFFFFFF))
   ctx.fillPath()
+  ctx.restoreGState()
+  ctx.saveGState()
+  ctx.addPath(CGPath(roundedRect: pillRect, cornerWidth: 150, cornerHeight: 150, transform: nil))
+  ctx.clip()
+  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF), cg(0xE9F0F9)] as CFArray, locations: [0, 1]) {
+    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: pillRect.maxY), end: CGPoint(x: 0, y: pillRect.minY), options: [])
+  }
+  ctx.restoreGState()
+  ctx.saveGState()
+  ctx.addPath(CGPath(roundedRect: pillRect.insetBy(dx: 1, dy: 1), cornerWidth: 149, cornerHeight: 149, transform: nil))
+  ctx.setStrokeColor(cg(0xD7E0EC, 0.9))
+  ctx.setLineWidth(2)
+  ctx.strokePath()
   ctx.restoreGState()
 
   let font = NSFont.systemFont(ofSize: 200, weight: .bold)
   let attrs: [NSAttributedString.Key: Any] = [
     .font: font,
-    .foregroundColor: NSColor(srgbRed: 0x1A / 255.0, green: 0x73 / 255.0, blue: 0xE8 / 255.0, alpha: 1),
+    .foregroundColor: NSColor(srgbRed: 0x16 / 255.0, green: 0x68 / 255.0, blue: 0xE2 / 255.0, alpha: 1),
     .kern: 20,
   ]
   let text = NSAttributedString(string: "BETA", attributes: attrs)
