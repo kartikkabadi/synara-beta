@@ -692,6 +692,25 @@ describe("deriveWorkLogEntries", () => {
     });
   });
 
+  it("strips terminal formatting from runtime warning messages", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "warning-ansi",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "runtime.warning",
+        summary: "Provider issue",
+        tone: "info",
+        payload: {
+          message: "\u001b[31mProvider request failed; retrying.\u001b[0m",
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.detail).toBe("Provider request failed; retrying.");
+  });
+
   it("does not collapse identical runtime warnings across turn boundaries", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

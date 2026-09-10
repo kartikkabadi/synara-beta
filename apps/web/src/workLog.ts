@@ -21,7 +21,7 @@ import {
   stripTrailingToolExitCode,
   summarizeToolRawOutput,
 } from "@synara/shared/toolOutputSummary";
-import { pluralize, stripTerminalControlSequences } from "@synara/shared/text";
+import { nonEmptyTrimmed, pluralize, stripTerminalControlSequences } from "@synara/shared/text";
 import { PROVIDER_DESCRIPTORS } from "@synara/shared/providerMetadata";
 import { Predicate } from "effect";
 import type { Json, JsonObject } from "effect/Schema";
@@ -629,10 +629,8 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     entry.nativeEventType = nativeEventType;
   }
   const runtimeWarningMessage =
-    activity.kind === "runtime.warning" &&
-    Predicate.isString(payload?.message) &&
-    payload.message.trim().length > 0
-      ? payload.message.trim()
+    activity.kind === "runtime.warning" && Predicate.isString(payload?.message)
+      ? nonEmptyTrimmed(stripTerminalControlSequences(payload.message))
       : undefined;
   if (runtimeWarningMessage) {
     entry.detail = runtimeWarningMessage;
