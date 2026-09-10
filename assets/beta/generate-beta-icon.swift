@@ -1,4 +1,4 @@
-// Beta icon generator v7 — square artwork (dock applies the mask), Apple-extracted colors.
+// Beta icon generator v8 — square artwork (dock applies the mask), Apple-extracted colors.
 // Colors sampled pixel-exact from the installed Xcode 26 icon: vertical #0FC3FD -> #186FFA.
 import AppKit
 import CoreGraphics
@@ -16,8 +16,8 @@ struct Palette {
   let mark: UInt32
 }
 
-// Light: exact Xcode 26 stop colors.
-let light = Palette(top: 0x18A9EE, upperMid: 0x1895EA, lowerMid: 0x1778E4, bottom: 0x1560DC, mark: 0xFFFFFF)
+// Light: deep vivid blue; +8% mark; enlarged inner guide; white wireframes.
+let light = Palette(top: 0x1AA9F2, upperMid: 0x158CE8, lowerMid: 0x1269DC, bottom: 0x0E4FCB, mark: 0xFFFFFF)
 
 func cg(_ hex: UInt32, _ a: CGFloat = 1) -> CGColor {
   CGColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: a)
@@ -74,8 +74,10 @@ let markPath: CGPath = {
   return p
 }()
 
+let markScale: CGFloat = 1.08
+let markCenter = CGPoint(x: 235, y: 252)
 func addMark(to ctx: CGContext) {
-  var t = CGAffineTransform(translationX: 274, y: 280)
+  var t = CGAffineTransform(translationX: 274 + markCenter.x * (1 - markScale), y: 280 + markCenter.y * (1 - markScale)).scaledBy(x: markScale, y: markScale)
   if let moved = markPath.copy(using: &t) { ctx.addPath(moved) }
 }
 
@@ -108,8 +110,8 @@ func drawIcon(_ p: Palette, name: String) {
   }
 
   // Blueprint shell: clean 5x5 grid (Xcode 26), guide circles and squircle inset (classic beta)
-  ctx.setLineWidth(3)
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.22))
+  ctx.setLineWidth(3.2)
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.32))
   for step in 1...4 {
     let v = CGFloat(step) * D / 5
     ctx.move(to: CGPoint(x: v, y: 0)); ctx.addLine(to: CGPoint(x: v, y: D))
@@ -119,29 +121,29 @@ func drawIcon(_ p: Palette, name: String) {
 
   // Faint cardinal axes
   ctx.setLineWidth(2.5)
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.14))
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.22))
   ctx.move(to: CGPoint(x: 512, y: 0)); ctx.addLine(to: CGPoint(x: 512, y: D))
   ctx.move(to: CGPoint(x: 0, y: 512)); ctx.addLine(to: CGPoint(x: D, y: 512))
   ctx.strokePath()
 
   // Diagonals
   ctx.setLineWidth(2)
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.12))
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.20))
   ctx.move(to: CGPoint(x: 0, y: 0)); ctx.addLine(to: CGPoint(x: D, y: D))
   ctx.move(to: CGPoint(x: 0, y: D)); ctx.addLine(to: CGPoint(x: D, y: 0))
   ctx.strokePath()
 
   // Concentric guide circles
-  ctx.setLineWidth(3.2)
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.30))
-  ctx.strokeEllipse(in: CGRect(x: 512 - 344, y: 512 - 344, width: 688, height: 688))
+  ctx.setLineWidth(3.4)
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.45))
+  ctx.strokeEllipse(in: CGRect(x: 512 - 385, y: 512 - 385, width: 770, height: 770))
   ctx.setLineWidth(2.6)
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.15))
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.25))
   ctx.strokeEllipse(in: CGRect(x: 512 - 470, y: 512 - 470, width: 940, height: 940))
 
   // Squircle inset guide
-  ctx.setLineWidth(3)
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.24))
+  ctx.setLineWidth(3.2)
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.35))
   ctx.addPath(CGPath(roundedRect: CGRect(x: 72, y: 72, width: D - 144, height: D - 144), cornerWidth: 160, cornerHeight: 160, transform: nil))
   ctx.strokePath()
 
