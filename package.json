@@ -1,5 +1,6 @@
 {
   "name": "@synara/monorepo",
+  "version": "0.8.3-beta.6",
   "private": true,
   "workspaces": {
     "packages": [
@@ -116,6 +117,5 @@
   "patchedDependencies": {
     "@effect/platform-node-shared@https://pkg.pr.new/Effect-TS/effect-smol/@effect/platform-node-shared@8881a9b606d84a6f5eb6615279138322984f5368": "patches/@effect%2Fplatform-node-shared@8881a9b.patch",
     "@legendapp/list@3.3.3": "patches/@legendapp%2Flist@3.3.3.patch"
-  },
-  "version": "0.8.3-beta.6"
+  }
 }
