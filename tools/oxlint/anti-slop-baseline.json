@@ -158,12 +158,6 @@
       "867cb4cf": 1
     }
   },
-  "anti-slop(no-chained-type-assertions):apps/desktop/src/main.ts": {
-    "total": 1,
-    "messages": {
-      "0febed5c": 1
-    }
-  },
   "anti-slop(no-chained-type-assertions):apps/desktop/src/resumableUpdateDownload.test.ts": {
     "total": 2,
     "messages": {
@@ -1153,20 +1147,6 @@
       "7d2c37af": 2,
       "9bfc44e1": 1,
       "f212265a": 1
-    }
-  },
-  "anti-slop(no-conditional-empty-object-spread):apps/desktop/src/main.ts": {
-    "total": 9,
-    "messages": {
-      "02ac679a": 1,
-      "11cb1afe": 1,
-      "25cd8a42": 1,
-      "3c7df326": 1,
-      "5a269a6a": 1,
-      "9b2ec7c8": 1,
-      "beb2d6ea": 1,
-      "d0f3c38f": 1,
-      "f36c8919": 1
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/marketing/src/app/api/feedback/route.ts": {
@@ -3765,16 +3745,6 @@
       "5d55197b": 1
     }
   },
-  "anti-slop(no-conditional-empty-object-spread):apps/web/src/components/Sidebar.tsx": {
-    "total": 6,
-    "messages": {
-      "61ff7e35": 1,
-      "a544854b": 1,
-      "af07a2e7": 2,
-      "dcc98618": 1,
-      "fc94a36b": 1
-    }
-  },
   "anti-slop(no-conditional-empty-object-spread):apps/web/src/components/Sidebar.uiState.ts": {
     "total": 2,
     "messages": {
@@ -4981,13 +4951,6 @@
       "bbf5f4b6": 1
     }
   },
-  "anti-slop(no-known-value-widening):apps/desktop/src/main.ts": {
-    "total": 2,
-    "messages": {
-      "7abfff5a": 1,
-      "cdd9e6ec": 1
-    }
-  },
   "anti-slop(no-known-value-widening):apps/desktop/src/resumableUpdateDownload.ts": {
     "total": 2,
     "messages": {
@@ -6033,15 +5996,6 @@
       "2ee05426": 5,
       "51344f99": 1,
       "6d7426ef": 1
-    }
-  },
-  "anti-slop(no-known-value-widening):apps/web/src/components/Sidebar.tsx": {
-    "total": 4,
-    "messages": {
-      "40df0feb": 1,
-      "9fba15c1": 1,
-      "ac61b2d3": 1,
-      "efe3e772": 1
     }
   },
   "anti-slop(no-known-value-widening):apps/web/src/components/Sidebar.uiState.ts": {
@@ -8051,35 +8005,6 @@
     "messages": {
       "6c3a0439": 1,
       "b85cdc8b": 1
-    }
-  },
-  "anti-slop(no-runtime-typeof):apps/desktop/src/main.ts": {
-    "total": 25,
-    "messages": {
-      "27921208": 1,
-      "05fca334": 1,
-      "0d75f8f2": 1,
-      "234a62bb": 1,
-      "256d52aa": 1,
-      "33af036d": 1,
-      "3b7a476d": 1,
-      "3fab21bc": 1,
-      "4787d5a9": 1,
-      "4c17fa86": 2,
-      "69f86a34": 1,
-      "6c65a0da": 1,
-      "8f8e8eba": 1,
-      "a4d31f5d": 1,
-      "aa2b997a": 1,
-      "b859e36c": 1,
-      "c18eb9f7": 1,
-      "cbd1204c": 1,
-      "d2a48e9a": 1,
-      "dcc97af7": 1,
-      "ea1de7c7": 1,
-      "f197d2c8": 1,
-      "f74eae7b": 1,
-      "f79a18d6": 1
     }
   },
   "anti-slop(no-runtime-typeof):apps/desktop/src/mediaPermissions.ts": {
@@ -10184,17 +10109,6 @@
     "total": 2,
     "messages": {
       "e81ff120": 2
-    }
-  },
-  "anti-slop(no-runtime-typeof):apps/web/src/components/Sidebar.tsx": {
-    "total": 7,
-    "messages": {
-      "39f82cd1": 1,
-      "53f0c05d": 1,
-      "5d0f43b1": 1,
-      "7888d74e": 1,
-      "8aad7b0b": 1,
-      "f9c00d8a": 2
     }
   },
   "anti-slop(no-runtime-typeof):apps/web/src/components/Sidebar.uiState.ts": {
@@ -12774,30 +12688,6 @@
       "4ea4235e": 1,
       "6e4adcc4": 1,
       "d87bf247": 1
-    }
-  },
-  "anti-slop(no-unknown-parameters):apps/desktop/src/main.ts": {
-    "total": 19,
-    "messages": {
-      "0e1fa950": 1,
-      "182da899": 1,
-      "2251d452": 1,
-      "23198c18": 1,
-      "3a2074ed": 1,
-      "3e5e80d3": 1,
-      "425c25e5": 1,
-      "469699ca": 1,
-      "49b71f15": 1,
-      "4d84b232": 1,
-      "4fc40a8a": 1,
-      "56ffcc7b": 1,
-      "6b250917": 1,
-      "77f542f2": 1,
-      "83febe5f": 1,
-      "8877e065": 1,
-      "bdfa6e9b": 1,
-      "dbccf810": 1,
-      "de5b7527": 1
     }
   },
   "anti-slop(no-unknown-parameters):apps/desktop/src/mediaPermissions.ts": {
@@ -15956,13 +15846,6 @@
       "5ea3d33a": 1
     }
   },
-  "anti-slop(no-unsafe-dictionary-type):apps/desktop/src/main.ts": {
-    "total": 2,
-    "messages": {
-      "51d0fa5d": 1,
-      "7c387ac9": 1
-    }
-  },
   "anti-slop(no-unsafe-dictionary-type):apps/desktop/src/mediaPermissions.ts": {
     "total": 2,
     "messages": {
@@ -17353,12 +17236,6 @@
       "2e131894": 1
     }
   },
-  "anti-slop(no-unsafe-dictionary-type):apps/web/src/components/Sidebar.tsx": {
-    "total": 1,
-    "messages": {
-      "82a07670": 1
-    }
-  },
   "anti-slop(no-unsafe-dictionary-type):apps/web/src/components/Sidebar.uiState.ts": {
     "total": 2,
     "messages": {
@@ -18554,18 +18431,6 @@
     "total": 1,
     "messages": {
       "e09759e4": 1
-    }
-  },
-  "anti-slop(require-safety-comment-for-type-assertion):apps/desktop/src/main.ts": {
-    "total": 8,
-    "messages": {
-      "039a5f2b": 1,
-      "2ee61371": 1,
-      "8bfd2ac3": 2,
-      "9e82450b": 1,
-      "ab62c3b0": 1,
-      "c646e9e9": 1,
-      "ebccce47": 1
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/desktop/src/mediaPermissions.ts": {
@@ -21794,23 +21659,6 @@
     "total": 1,
     "messages": {
       "9780abf4": 1
-    }
-  },
-  "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/components/Sidebar.tsx": {
-    "total": 12,
-    "messages": {
-      "93011134": 1,
-      "10ae2785": 1,
-      "1552731f": 1,
-      "1abcd735": 1,
-      "202ab017": 1,
-      "5990c707": 1,
-      "5d196dc2": 1,
-      "b19174e5": 1,
-      "b9a116e7": 1,
-      "c9f8b968": 1,
-      "cecfe191": 1,
-      "ff420cab": 1
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/components/Sidebar.uiState.ts": {
