@@ -34,7 +34,7 @@ export interface DesktopIconAssetPaths {
   readonly windowsIconIco: string;
 }
 
-/** Beta builds carry their own red/purple brand; every other flavor keeps production. */
+/** Beta builds carry their own vivid-blue + white BETA pill brand; every other flavor keeps production. */
 export function desktopIconAssetPaths(flavor: DesktopBuildFlavor): DesktopIconAssetPaths {
   if (flavor === "beta") {
     return {
@@ -114,7 +114,7 @@ const BETA_PUBLISH_ICON_OVERRIDES: ReadonlyArray<IconOverride> = [
   },
 ];
 
-/** Favicon overrides for a packaged build; beta ships its own red/purple set. */
+/** Favicon overrides for a packaged build; beta ships its own vivid-blue set. */
 export function publishIconOverrides(flavor: DesktopBuildFlavor): ReadonlyArray<IconOverride> {
   return flavor === "beta" ? BETA_PUBLISH_ICON_OVERRIDES : PUBLISH_ICON_OVERRIDES;
 }
