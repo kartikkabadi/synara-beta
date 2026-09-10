@@ -376,7 +376,8 @@ jobs:
             --assets-dir release-publish \
             --platform "${{ matrix.platform }}" \
             --arch "${{ matrix.arch }}" \
-            --version "${{ needs.preflight.outputs.version }}"
+            --version "${{ needs.preflight.outputs.version }}" \
+            --executable-name synara-beta
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
@@ -446,6 +447,9 @@ jobs:
         with:
           node-version-file: package.json
 
+      - name: Check release-signing key sync
+        run: node scripts/check-release-signing-sync.ts
+
       - name: Download all desktop artifacts
         uses: actions/download-artifact@v8
         with:
@@ -470,6 +474,38 @@ jobs:
       - name: Prepare updater feed metadata
         run: node scripts/prepare-release-update-feed.ts release-assets
 
+      - name: Generate release checksums
+        shell: bash
+        run: |
+          cd release-assets
+          rm -f SHA256SUMS
+          shasum -a 256 -- * > SHA256SUMS
+
+      - name: Sign release checksums
+        env:
+          SYNARA_RELEASE_SIGNING_KEY: ${{ secrets.SYNARA_RELEASE_SIGNING_KEY }}
+        shell: bash
+        run: |
+          cd release-assets
+          if [ -z "$SYNARA_RELEASE_SIGNING_KEY" ]; then
+            echo "SYNARA_RELEASE_SIGNING_KEY is not set; refusing to publish an unsigned release." >&2
+            echo "Generate a signing key (ssh-keygen -t ed25519 -C synara-beta-release-signing), store the" >&2
+            echo "private key in the SYNARA_RELEASE_SIGNING_KEY secret, and commit the public key to" >&2
+            echo "scripts/release-signing.pub (installers pin it)." >&2
+            exit 1
+          fi
+          key_file="$(mktemp)"
+          cleanup() { rm -f "$key_file"; }
+          trap cleanup EXIT
+          printf '%s\n' "$SYNARA_RELEASE_SIGNING_KEY" > "$key_file"
+          chmod 600 "$key_file"
+          ssh-keygen -Y sign -f "$key_file" -n synara-beta SHA256SUMS
+          test -f SHA256SUMS.sig
+          # Verify the produced signature against the committed public key
+          # before publishing: a rotated secret with a stale committed .pub
+          # would otherwise publish a release every installer refuses.
+          ssh-keygen -Y verify -f "$GITHUB_WORKSPACE/scripts/release-signing.pub" -I synara-beta-releases -s SHA256SUMS.sig -n synara-beta < SHA256SUMS
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
@@ -488,4 +524,6 @@ jobs:
             release-assets/*.yml
             release-assets/*.provenance.json
             release-assets/*.tar.gz
+            release-assets/SHA256SUMS
+            release-assets/SHA256SUMS.sig
           fail_on_unmatched_files: true
