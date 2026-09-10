@@ -126,7 +126,7 @@ try {
   # The release signature authenticates SHA256SUMS before any checksum is
   # trusted. The private key lives in the SYNARA_RELEASE_SIGNING_KEY repository
   # secret; the matching public key is pinned in scripts/release-signing.pub.
-  $allowedSigners = 'synara-beta-releases ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFA61LZNkb3QTME3wdqznC/zghISZ9nsS2BnUMUQ1JRo'
+  $allowedSigners = 'synara-beta-releases ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINi8kB8J9c2PSQ7D+UGgCp1LsQZg75r6rT31sb+l5ik0 synara-beta-release-signing'
   Invoke-WebRequest -Uri "$base/SHA256SUMS.sig" -OutFile $signaturePath -UseBasicParsing
   Set-Content -Path $signersPath -Value $allowedSigners -Encoding ascii
   Write-Output 'Verifying release signature...'

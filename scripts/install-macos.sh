@@ -35,7 +35,7 @@ KEY_EOF
 # installer ships from). SHA256SUMS is signed with the matching private key
 # during the release workflow; verification happens before any checksum is
 # trusted. Rotate by updating the workflow secret and this line together.
-ALLOWED_SIGNERS="synara-beta-releases ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFA61LZNkb3QTME3wdqznC/zghISZ9nsS2BnUMUQ1JRo"
+ALLOWED_SIGNERS="synara-beta-releases ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINi8kB8J9c2PSQ7D+UGgCp1LsQZg75r6rT31sb+l5ik0 synara-beta-release-signing"
 
 force=0
 tag=""
