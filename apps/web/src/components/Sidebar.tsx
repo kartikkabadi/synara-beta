@@ -5870,7 +5870,7 @@ export default function Sidebar() {
   const betaBadge = isBetaDesktopFlavor ? (
     <span
       aria-label="Synara Beta"
-      className="inline-flex shrink-0 items-center rounded-full bg-[image:var(--beta-gradient)] px-1.5 py-0.5 text-[9px] font-semibold uppercase leading-none tracking-wide text-white"
+      className="inline-flex shrink-0 items-center rounded-full bg-[var(--beta-pill)] px-1.5 py-0.5 text-[9px] font-semibold uppercase leading-none tracking-wide text-[var(--beta-pill-ink)]"
     >
       Beta
     </span>
