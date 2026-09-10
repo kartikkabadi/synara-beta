@@ -166,41 +166,6 @@ func drawIcon(_ p: Palette, name: String) {
 
   ctx.restoreGState()
 
-  // B badge: circular, bottom-right, inside the dock mask
-  let badgeRect = CGRect(x: 1390, y: 138, width: 520, height: 520)
-  ctx.saveGState()
-  ctx.setShadow(offset: CGSize(width: 4, height: -10), blur: 26, color: cg(0x03183A, 0.28))
-  ctx.addPath(CGPath(ellipseIn: badgeRect, transform: nil))
-  ctx.setFillColor(cg(0xFFFFFF))
-  ctx.fillPath()
-  ctx.restoreGState()
-  ctx.saveGState()
-  ctx.addPath(CGPath(ellipseIn: badgeRect, transform: nil))
-  ctx.clip()
-  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF), cg(0xE9F0F9)] as CFArray, locations: [0, 1]) {
-    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: badgeRect.maxY), end: CGPoint(x: 0, y: badgeRect.minY), options: [])
-  }
-  ctx.restoreGState()
-  ctx.saveGState()
-  ctx.addPath(CGPath(ellipseIn: badgeRect.insetBy(dx: 2.5, dy: 2.5), transform: nil))
-  ctx.setStrokeColor(cg(0xD7E0EC, 0.9))
-  ctx.setLineWidth(2.5)
-  ctx.strokePath()
-  ctx.restoreGState()
-
-  let font = NSFont.systemFont(ofSize: 330, weight: .bold)
-  let attrs: [NSAttributedString.Key: Any] = [
-    .font: font,
-    .foregroundColor: NSColor(srgbRed: 0x16 / 255.0, green: 0x68 / 255.0, blue: 0xE2 / 255.0, alpha: 1),
-  ]
-  let text = NSAttributedString(string: "β", attributes: attrs)
-  let size = text.size()
-  let rect = CGRect(x: badgeRect.midX - size.width / 2 + 4, y: badgeRect.midY - size.height / 2, width: size.width, height: size.height)
-  NSGraphicsContext.saveGraphicsState()
-  NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
-  text.draw(in: rect)
-  NSGraphicsContext.restoreGraphicsState()
-
   guard let image = ctx.makeImage() else { print("no image"); return }
   let rep = NSBitmapImageRep(cgImage: image)
   let scaled = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(D), pixelsHigh: Int(D),
