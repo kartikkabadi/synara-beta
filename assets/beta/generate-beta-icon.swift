@@ -17,7 +17,7 @@ struct Palette {
 }
 
 // Light: exact Xcode 26 stop colors.
-let light = Palette(top: 0x0DBDFB, upperMid: 0x1788EE, lowerMid: 0x0D55C0, bottom: 0x0F4BD2, mark: 0xFFFFFF)
+let light = Palette(top: 0x0DBDFB, upperMid: 0x1FA8FC, lowerMid: 0x1473E8, bottom: 0x1868F8, mark: 0xFFFFFF)
 
 func cg(_ hex: UInt32, _ a: CGFloat = 1) -> CGColor {
   CGColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: a)
@@ -74,10 +74,10 @@ let markPath: CGPath = {
   return p
 }()
 
-let markScale: CGFloat = 1.15
+let markScale: CGFloat = 1.08
 let markCenter = CGPoint(x: 235, y: 252)
 func addMark(to ctx: CGContext) {
-  var t = CGAffineTransform(translationX: 274 + markCenter.x * (1 - markScale), y: 266 + markCenter.y * (1 - markScale)).scaledBy(x: markScale, y: markScale)
+  var t = CGAffineTransform(translationX: 274 + markCenter.x * (1 - markScale), y: 280 + markCenter.y * (1 - markScale)).scaledBy(x: markScale, y: markScale)
   if let moved = markPath.copy(using: &t) { ctx.addPath(moved) }
 }
 
@@ -95,10 +95,6 @@ func drawIcon(_ p: Palette, name: String) {
   let stops = [cg(p.top), cg(p.upperMid), cg(p.lowerMid), cg(p.bottom)] as CFArray
   if let g = CGGradient(colorsSpace: cs, colors: [cg(p.top), cg(p.upperMid), cg(p.lowerMid), cg(p.bottom)] as CFArray, locations: [0, 0.35, 0.7, 1]) {
     ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 0), end: CGPoint(x: 0, y: D), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
-  }
-  // Airy crown light: the reference glows up top.
-  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF, 0.20), cg(0xFFFFFF, 0)] as CFArray, locations: [0, 1]) {
-    ctx.drawRadialGradient(g, startCenter: CGPoint(x: 512, y: 60), startRadius: 0, endCenter: CGPoint(x: 512, y: 60), endRadius: 420, options: [])
   }
 
   // Layered translucent depth bands (reference recipe): soft light masses under the linework.
@@ -126,7 +122,7 @@ func drawIcon(_ p: Palette, name: String) {
   // Concentric guide circles
   ctx.setLineWidth(3.2)
   ctx.setStrokeColor(cg(0xFFFFFF, 0.22))
-  ctx.strokeEllipse(in: CGRect(x: 512 - 398, y: 512 - 398, width: 796, height: 796))
+  ctx.strokeEllipse(in: CGRect(x: 512 - 385, y: 512 - 385, width: 770, height: 770))
   // Squircle inset guide
   ctx.setLineWidth(3)
   ctx.setStrokeColor(cg(0xFFFFFF, 0.18))
@@ -151,21 +147,21 @@ func drawIcon(_ p: Palette, name: String) {
   ctx.setShadow(offset: CGSize(width: 8, height: -18), blur: 44, color: cg(0x021233, 0.33))
   addMark(to: ctx)
   ctx.clip()
-  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xF2F9FF), cg(0xDFEEFF)] as CFArray, locations: [0, 1]) {
-    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 246), end: CGPoint(x: 0, y: 791), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xEFF7FF), cg(0xD5E9FF)] as CFArray, locations: [0, 1]) {
+    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 260), end: CGPoint(x: 0, y: 805), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
   }
   if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF, 1.0), cg(0xFFFFFF, 0)] as CFArray, locations: [0, 1]) {
-    ctx.drawRadialGradient(g, startCenter: CGPoint(x: 400, y: 316), startRadius: 0, endCenter: CGPoint(x: 400, y: 316), endRadius: 620, options: [])
+    ctx.drawRadialGradient(g, startCenter: CGPoint(x: 400, y: 330), startRadius: 0, endCenter: CGPoint(x: 400, y: 330), endRadius: 480, options: [])
   }
   if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF, 0.55), cg(0xFFFFFF, 0)] as CFArray, locations: [0, 1]) {
-    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 246), end: CGPoint(x: 0, y: 366), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 260), end: CGPoint(x: 0, y: 380), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
   }
   ctx.restoreGState()
   ctx.saveGState()
   addMark(to: ctx)
   ctx.clip()
   ctx.saveGState()
-  ctx.clip(to: CGRect(x: 0, y: 0, width: D, height: 426))
+  ctx.clip(to: CGRect(x: 0, y: 0, width: D, height: 440))
   addMark(to: ctx)
   ctx.setStrokeColor(cg(0xFFFFFF, 1.0))
   ctx.setLineWidth(4)
