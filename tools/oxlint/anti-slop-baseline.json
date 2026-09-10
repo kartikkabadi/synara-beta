@@ -21139,12 +21139,6 @@
       "e57e958a": 1
     }
   },
-  "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/trustedOrigins.test.ts": {
-    "total": 1,
-    "messages": {
-      "e57e958a": 1
-    }
-  },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/voiceTranscription.test.ts": {
     "total": 1,
     "messages": {
