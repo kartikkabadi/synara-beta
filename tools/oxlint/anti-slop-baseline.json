@@ -539,18 +539,6 @@
       "f731b7f2": 1
     }
   },
-  "anti-slop(no-chained-type-assertions):apps/server/src/provider/Layers/PiAdapter.test.ts": {
-    "total": 1,
-    "messages": {
-      "dfe3cf6a": 1
-    }
-  },
-  "anti-slop(no-chained-type-assertions):apps/server/src/provider/Layers/PiAdapter.ts": {
-    "total": 1,
-    "messages": {
-      "7ee24aa5": 1
-    }
-  },
   "anti-slop(no-chained-type-assertions):apps/server/src/provider/Layers/ProviderDiscoveryService.test.ts": {
     "total": 3,
     "messages": {
@@ -2804,69 +2792,6 @@
       "ffc0275c": 3
     }
   },
-  "anti-slop(no-conditional-empty-object-spread):apps/server/src/provider/Layers/PiAdapter.test.ts": {
-    "total": 1,
-    "messages": {
-      "f30ca1e0": 1
-    }
-  },
-  "anti-slop(no-conditional-empty-object-spread):apps/server/src/provider/Layers/PiAdapter.ts": {
-    "total": 64,
-    "messages": {
-      "38610233": 2,
-      "75234474": 2,
-      "01a1ad7e": 1,
-      "0b59e444": 1,
-      "1a2a0d6f": 1,
-      "1f0cf320": 1,
-      "21325d67": 1,
-      "27ecaa7c": 1,
-      "2a4a80b3": 2,
-      "2ebd2668": 1,
-      "30c579e7": 1,
-      "3e563f13": 1,
-      "482a10a2": 1,
-      "4aa634a0": 1,
-      "5ba7d47b": 1,
-      "63bd06fc": 2,
-      "6938e017": 1,
-      "6bc0648b": 1,
-      "6c27222c": 1,
-      "6c8544ee": 2,
-      "6ec1d9bd": 1,
-      "7aaa9333": 2,
-      "9af0bf31": 1,
-      "9d18bd08": 1,
-      "b08f785e": 1,
-      "b255585d": 1,
-      "b9238f46": 1,
-      "bada5e91": 1,
-      "bb7f3b09": 2,
-      "bcb4205b": 1,
-      "c0e11526": 1,
-      "c183713b": 1,
-      "c46d988e": 1,
-      "c57ba27c": 1,
-      "cb572d3b": 1,
-      "cca7644f": 2,
-      "cdd80c0e": 1,
-      "cfa1b3f9": 2,
-      "d076333b": 1,
-      "d21eafc3": 1,
-      "df5b0546": 1,
-      "e0b4bca6": 1,
-      "e2d20850": 1,
-      "e4d6613d": 1,
-      "e84e010b": 2,
-      "ebb2adc5": 2,
-      "ec884aa3": 1,
-      "ed220b7a": 1,
-      "f2020538": 1,
-      "f2061e14": 1,
-      "fbd33f9b": 1,
-      "fd06f886": 2
-    }
-  },
   "anti-slop(no-conditional-empty-object-spread):apps/server/src/provider/Layers/ProviderDiscoveryService.ts": {
     "total": 1,
     "messages": {
@@ -4799,61 +4724,6 @@
       "3653670a": 1
     }
   },
-  "anti-slop(no-conditional-empty-object-spread):apps/web/src/workLog.ts": {
-    "total": 57,
-    "messages": {
-      "87320549": 1,
-      "97536155": 2,
-      "046598a9": 1,
-      "140f627e": 1,
-      "152bce39": 1,
-      "19bafb3b": 1,
-      "1a1bf09c": 1,
-      "1d5c8bfb": 1,
-      "1e5f6963": 1,
-      "274ff88d": 1,
-      "29436e4b": 1,
-      "2e10234b": 2,
-      "2fa69911": 1,
-      "31bd4a85": 1,
-      "32676aed": 1,
-      "366626e7": 2,
-      "3a5ad14d": 1,
-      "3b2d8ce3": 1,
-      "4d826db7": 1,
-      "5ab8f763": 1,
-      "5f3aca69": 1,
-      "5f446903": 1,
-      "5f44c6f3": 1,
-      "6f94f3b7": 1,
-      "7a0690fb": 1,
-      "7aaa9333": 1,
-      "82ecbeac": 1,
-      "855f4ce7": 1,
-      "9172579d": 1,
-      "9512f9df": 1,
-      "ad6e851d": 1,
-      "b1a33867": 1,
-      "b81eb03b": 1,
-      "bb7b1fd7": 1,
-      "bb7f3b09": 1,
-      "be7e3aef": 1,
-      "c426c352": 1,
-      "c7363999": 1,
-      "c8bcd168": 1,
-      "cb572d3b": 2,
-      "cbe18ac4": 2,
-      "cca7644f": 1,
-      "d722ec75": 2,
-      "e211b53a": 1,
-      "e3e088cd": 1,
-      "e5c3afcf": 1,
-      "ebb2adc5": 2,
-      "f1be2b89": 1,
-      "faff77ed": 1,
-      "fc3a22df": 1
-    }
-  },
   "anti-slop(no-conditional-empty-object-spread):apps/web/src/wsNativeApi.ts": {
     "total": 5,
     "messages": {
@@ -5727,16 +5597,6 @@
       "0f4cb58d": 1,
       "92a74847": 1,
       "de28b8cc": 1
-    }
-  },
-  "anti-slop(no-known-value-widening):apps/server/src/provider/Layers/PiAdapter.ts": {
-    "total": 11,
-    "messages": {
-      "129304d0": 1,
-      "18777cb2": 1,
-      "7f5997d9": 7,
-      "b3014efc": 1,
-      "d488579c": 1
     }
   },
   "anti-slop(no-known-value-widening):apps/server/src/provider/Layers/ProviderHealth.test.ts": {
@@ -7074,12 +6934,6 @@
     "total": 1,
     "messages": {
       "85a95f0d": 1
-    }
-  },
-  "anti-slop(no-known-value-widening):apps/web/src/workLog.ts": {
-    "total": 1,
-    "messages": {
-      "d8f8d309": 1
     }
   },
   "anti-slop(no-known-value-widening):apps/web/src/wsTransport.test.ts": {
@@ -9539,30 +9393,6 @@
       "fb52b555": 1
     }
   },
-  "anti-slop(no-runtime-typeof):apps/server/src/provider/Layers/PiAdapter.ts": {
-    "total": 21,
-    "messages": {
-      "1ce17686": 1,
-      "1d6e46b5": 1,
-      "1d7d27dc": 1,
-      "2a49188a": 2,
-      "31b47ec6": 2,
-      "3b74d154": 1,
-      "46735dc0": 1,
-      "53f00e79": 1,
-      "586b9393": 1,
-      "8af3e9f1": 1,
-      "947cc222": 1,
-      "9762b529": 1,
-      "9d20f488": 1,
-      "a0c74f39": 1,
-      "ae1a298c": 1,
-      "da32ca6f": 1,
-      "dd41b97a": 1,
-      "f0c81987": 1,
-      "f7e5ed1b": 1
-    }
-  },
   "anti-slop(no-runtime-typeof):apps/server/src/provider/Layers/ProviderHealth.ts": {
     "total": 3,
     "messages": {
@@ -11683,40 +11513,6 @@
       "d70d4bd8": 1
     }
   },
-  "anti-slop(no-runtime-typeof):apps/web/src/workLog.ts": {
-    "total": 30,
-    "messages": {
-      "05fca334": 1,
-      "08c296bc": 1,
-      "0cb97bec": 1,
-      "131c46ad": 1,
-      "1361f5a8": 1,
-      "33ae3e03": 1,
-      "34da15f4": 1,
-      "353b4936": 1,
-      "3758aef4": 1,
-      "384b49af": 1,
-      "42a89cee": 1,
-      "482fcee1": 1,
-      "50d0ad71": 1,
-      "529b6e1e": 1,
-      "57ecfbe2": 1,
-      "5a5b961e": 1,
-      "5f93d7d1": 1,
-      "74cf561c": 1,
-      "776ae5c9": 1,
-      "8a5ccdc9": 1,
-      "8c2f9a9a": 1,
-      "a03701b3": 1,
-      "a2e8fbce": 1,
-      "a96c1f4a": 1,
-      "b6c70336": 1,
-      "c99569cf": 1,
-      "cd18330c": 2,
-      "d7668b48": 1,
-      "f5c5b90e": 1
-    }
-  },
   "anti-slop(no-runtime-typeof):apps/web/src/workflowRunUiStore.ts": {
     "total": 1,
     "messages": {
@@ -11939,12 +11735,6 @@
       "8398ecea": 1,
       "9c8a4d34": 1,
       "f58335d7": 1
-    }
-  },
-  "anti-slop(no-runtime-typeof):packages/shared/src/text.ts": {
-    "total": 1,
-    "messages": {
-      "9bfa7422": 1
     }
   },
   "anti-slop(no-runtime-typeof):packages/shared/src/threadSummary.ts": {
@@ -13863,24 +13653,6 @@
       "fee63ecc": 1
     }
   },
-  "anti-slop(no-unknown-parameters):apps/server/src/provider/Layers/PiAdapter.ts": {
-    "total": 13,
-    "messages": {
-      "09c00ecb": 1,
-      "0dbe668d": 1,
-      "287919d6": 1,
-      "33befd27": 1,
-      "454a35a5": 1,
-      "45d7c9a5": 1,
-      "6a5f9e4d": 1,
-      "748972c0": 1,
-      "8da3fe46": 1,
-      "8e28ed1a": 1,
-      "e2b7ab13": 1,
-      "f6430c0f": 1,
-      "ff0442ee": 1
-    }
-  },
   "anti-slop(no-unknown-parameters):apps/server/src/provider/Layers/ProviderHealth.ts": {
     "total": 7,
     "messages": {
@@ -15160,20 +14932,6 @@
       "6aefdb1f": 1
     }
   },
-  "anti-slop(no-unknown-parameters):apps/web/src/workLog.ts": {
-    "total": 9,
-    "messages": {
-      "62803680": 1,
-      "064db883": 1,
-      "5735fef9": 1,
-      "5e3b75b5": 1,
-      "910bb09e": 1,
-      "9575d8bb": 1,
-      "d5f15c76": 1,
-      "e5cbe621": 1,
-      "fe4b632c": 1
-    }
-  },
   "anti-slop(no-unknown-parameters):apps/web/src/workflowRunUiStore.ts": {
     "total": 3,
     "messages": {
@@ -15657,12 +15415,6 @@
       "bed59f1c": 1,
       "c0a1c23f": 1,
       "c6f024cb": 1
-    }
-  },
-  "anti-slop(no-unknown-returns):apps/server/src/provider/Layers/PiAdapter.ts": {
-    "total": 1,
-    "messages": {
-      "cac5a2df": 1
     }
   },
   "anti-slop(no-unknown-returns):apps/server/src/provider/Layers/ProviderSessionDirectory.ts": {
@@ -17122,22 +16874,6 @@
       "eb42cdd4": 1
     }
   },
-  "anti-slop(no-unsafe-dictionary-type):apps/server/src/provider/Layers/PiAdapter.ts": {
-    "total": 11,
-    "messages": {
-      "10275388": 1,
-      "0e8b4b09": 1,
-      "5427b3c4": 1,
-      "6088fbdb": 1,
-      "902b5dc1": 1,
-      "90ef41f6": 1,
-      "9ff3ca17": 1,
-      "bf434bd4": 1,
-      "c6e0c057": 1,
-      "d973ca11": 1,
-      "e732e646": 1
-    }
-  },
   "anti-slop(no-unsafe-dictionary-type):apps/server/src/provider/Layers/ProviderHealth.ts": {
     "total": 2,
     "messages": {
@@ -18082,32 +17818,6 @@
     "total": 1,
     "messages": {
       "89761a3c": 1
-    }
-  },
-  "anti-slop(no-unsafe-dictionary-type):apps/web/src/workLog.ts": {
-    "total": 37,
-    "messages": {
-      "48655372": 1,
-      "06319040": 2,
-      "1aae12ff": 1,
-      "1ad46be0": 15,
-      "281b254b": 1,
-      "4104f009": 1,
-      "4a0045ff": 1,
-      "5265f39c": 1,
-      "59819b2c": 1,
-      "5ba8471c": 1,
-      "62ad2a6d": 1,
-      "7a84933f": 1,
-      "7f535254": 1,
-      "8252c4ff": 1,
-      "b1cf03b8": 1,
-      "c4c3f7c6": 1,
-      "def701c4": 1,
-      "e1ae8bec": 1,
-      "f242739e": 2,
-      "f398b93c": 1,
-      "fdd6e72f": 1
     }
   },
   "anti-slop(no-unsafe-dictionary-type):apps/web/src/wsTransport.test.ts": {
@@ -20914,37 +20624,6 @@
       "d7b813c6": 1,
       "f10faf89": 1,
       "fd06f2aa": 1
-    }
-  },
-  "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/provider/Layers/PiAdapter.test.ts": {
-    "total": 15,
-    "messages": {
-      "55a01f66": 1,
-      "5b9e60e1": 1,
-      "6a7b436f": 1,
-      "7aa6f05d": 2,
-      "932938ec": 1,
-      "c1063c02": 1,
-      "dd06eba8": 1,
-      "e6a436aa": 1,
-      "ed63abe9": 1,
-      "f699912d": 1,
-      "f94ec3b3": 1,
-      "fead0634": 3
-    }
-  },
-  "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/provider/Layers/PiAdapter.ts": {
-    "total": 10,
-    "messages": {
-      "0d94c5e6": 1,
-      "2642a824": 1,
-      "5eb8d06a": 1,
-      "806259a5": 1,
-      "96bd3485": 1,
-      "b60ccd7a": 1,
-      "cd21796f": 1,
-      "e5272336": 2,
-      "e6c3d5ff": 1
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/provider/Layers/PiOpenRouter.test.ts": {
@@ -24137,15 +23816,6 @@
     "total": 1,
     "messages": {
       "4bfa9802": 1
-    }
-  },
-  "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/workLog.ts": {
-    "total": 5,
-    "messages": {
-      "47418056": 1,
-      "515027ec": 2,
-      "56b38352": 1,
-      "f5bdb1cd": 1
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/workflowRunUiStore.ts": {
