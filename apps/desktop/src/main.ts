@@ -51,7 +51,11 @@ import {
   type UpdateDownloadedEvent,
 } from "electron-updater";
 
-import type { ContextMenuItem } from "@synara/contracts";
+import type {
+  ContextMenuItem,
+  DesktopStableImportResult,
+  DesktopStableImportStatus,
+} from "@synara/contracts";
 import { isKeyboardShortcutsHelpChord } from "@synara/shared/browserShortcuts";
 import { getMacTrafficLightPosition } from "@synara/shared/desktopChrome";
 import { DEVICE_HELPER_SOURCE_DIR_ENV } from "@synara/shared/deviceHelperCache";
@@ -65,6 +69,12 @@ import {
 } from "@synara/shared/desktopIdentity";
 import { NetService } from "@synara/shared/Net";
 import { applyShellEnvironmentHydrationMarker } from "@synara/shared/shell";
+import { importStableDatabase } from "@synara/shared/stableDatabaseImport";
+import {
+  checkSyncAvailability,
+  performStableSync,
+  resolveSyncPaths,
+} from "@synara/shared/stableSync";
 import { RotatingFileSink } from "@synara/shared/logging";
 import {
   MIGRATION_DIVERGENCE_CONSENT_ENV,
@@ -4340,6 +4350,95 @@ interface DesktopNotificationRequest {
   readonly threadId?: Json;
 }
 
+let stableImportInFlight = false;
+
+async function readStableImportStatus(): Promise<DesktopStableImportStatus> {
+  const availability = await checkSyncAvailability();
+  const paths = resolveSyncPaths();
+  const stableDatabaseExists = FS.existsSync(
+    Path.join(paths.stableHome, "userdata", "state.sqlite"),
+  );
+  return {
+    available: availability.available || stableDatabaseExists,
+    stableDatabaseExists,
+    hasBeenImportedBefore: availability.hasBeenImportedBefore,
+    isStableProcessRunning: availability.isStableProcessRunning,
+    stableSkillsCount: availability.stableSkillsCount,
+    stableMcpExists: availability.stableMcpExists,
+    ...(availability.reason !== undefined ? { reason: availability.reason } : null),
+  };
+}
+
+/**
+ * Onboarding import from Synara Stable. The Beta backend owns the SQLite file,
+ * so the flow is: stop the backend, sync setup assets, replace the database and
+ * attachments, then relaunch on the fresh database. Any failure restarts the
+ * backend so the app stays usable.
+ */
+async function runStableImportFromOnboarding(): Promise<DesktopStableImportResult> {
+  if (stableImportInFlight) {
+    return { ok: false, message: "An import is already running." };
+  }
+  if (isQuitting) {
+    return { ok: false, message: "Synara Beta is shutting down." };
+  }
+
+  const availability = await checkSyncAvailability();
+  if (!availability.stableExists) {
+    return {
+      ok: false,
+      message: availability.reason ?? "No Synara Stable data found on this machine.",
+    };
+  }
+  if (availability.isStableProcessRunning) {
+    return { ok: false, message: "Quit Synara Stable first, then run the import again." };
+  }
+
+  stableImportInFlight = true;
+  try {
+    const stableDatabaseExists = FS.existsSync(
+      Path.join(resolveSyncPaths().stableHome, "userdata", "state.sqlite"),
+    );
+    await stopBackendAndWaitForExit();
+    const syncResult = await performStableSync();
+    const databaseResult = await importStableDatabase();
+    writeDesktopLogHeader(
+      `stable import finished sync=${syncResult.success ? "ok" : "failed"} database=${databaseResult.success ? "ok" : "failed"}`,
+    );
+
+    // Chats are the point of the import: when Stable has a database, a database
+    // failure is a failure even if the setup assets copied. When it does not,
+    // the setup sync is the whole import.
+    const succeeded = stableDatabaseExists ? databaseResult.success : syncResult.success;
+    if (!succeeded) {
+      await restartBackendAfterCrash("stable import failed", "lifecycle");
+      return {
+        ok: false,
+        message: [databaseResult.message, syncResult.message].filter(Boolean).join(" "),
+      };
+    }
+
+    // The imported database is only opened on the next boot, so hand off with a
+    // relaunch rather than trying to re-init every database-backed service live.
+    setTimeout(() => {
+      app.relaunch();
+      app.exit(0);
+    }, 750);
+    return {
+      ok: true,
+      message: syncResult.success
+        ? "Import complete. Synara Beta is restarting with your data."
+        : "Chats imported. Some setup items could not be copied.",
+    };
+  } catch (cause: unknown) {
+    writeDesktopLogHeader(`stable import error message=${formatErrorMessage(cause)}`);
+    await restartBackendAfterCrash("stable import error", "lifecycle").catch(() => {});
+    return { ok: false, message: `Import failed: ${formatErrorMessage(cause)}` };
+  } finally {
+    stableImportInFlight = false;
+  }
+}
+
 function registerIpcHandlers(): void {
   const storageSnapshotPath = resolveSynaraStorageSnapshotPath(app.getPath("userData"));
 
@@ -4357,6 +4456,15 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.storageMigration.acknowledge, async () => {
     await acknowledgeSynaraStorageSnapshot(storageSnapshotPath);
   });
+
+  ipcMain.handle(
+    IPC.stableImport.getStatus,
+    async (): Promise<DesktopStableImportStatus> => readStableImportStatus(),
+  );
+  ipcMain.handle(
+    IPC.stableImport.run,
+    async (): Promise<DesktopStableImportResult> => runStableImportFromOnboarding(),
+  );
 
   ipcMain.removeAllListeners(IPC.wsUrl);
   ipcMain.on(IPC.wsUrl, (event: IpcMainEvent) => {

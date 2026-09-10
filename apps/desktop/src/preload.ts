@@ -1,9 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
-import type {
-  BrowserAnnotationEvent,
-  BrowserUseOpenPanelRequest,
-  DesktopBridge,
-} from "@synara/contracts";
+import { Predicate } from "effect";
+import type { DesktopBridge } from "@synara/contracts";
 import { normalizeDesktopWsUrl, resolveDesktopWsUrlFromEnv } from "./desktopWsBridge";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import {
@@ -22,54 +19,13 @@ function getDesktopWsUrl(): string | null {
   }
 }
 
-function parseBrowserOpenPanelRequest(payload: unknown): BrowserUseOpenPanelRequest | null {
-  if (!payload || typeof payload !== "object") {
-    return null;
-  }
-  const threadId = (payload as { readonly threadId?: unknown }).threadId;
-  if (typeof threadId !== "string" || threadId.trim().length === 0) {
-    return null;
-  }
-  return { threadId: threadId as BrowserUseOpenPanelRequest["threadId"] };
-}
-
-function parseBrowserAnnotationEvent(payload: unknown): BrowserAnnotationEvent | null {
-  if (!payload || typeof payload !== "object") return null;
-  const event = payload as Record<string, unknown>;
-  if (
-    !["started", "cancelled", "document-changed", "markers-synced", "committed"].includes(
-      String(event.kind),
-    ) ||
-    typeof event.threadId !== "string" ||
-    typeof event.tabId !== "string" ||
-    !event.document ||
-    typeof event.document !== "object" ||
-    !event.source ||
-    typeof event.source !== "object"
-  ) {
-    return null;
-  }
-  const document = event.document as Record<string, unknown>;
-  const source = event.source as Record<string, unknown>;
-  if (
-    typeof document.token !== "string" ||
-    typeof document.key !== "string" ||
-    typeof document.url !== "string" ||
-    typeof source.url !== "string" ||
-    typeof source.pageTitle !== "string"
-  ) {
-    return null;
-  }
-  return payload as BrowserAnnotationEvent;
-}
-
 contextBridge.exposeInMainWorld("desktopBridge", {
   getWsUrl: getDesktopWsUrl,
   // Absolute path for OS-dropped File objects (folders with spaces/parens, etc.).
   getPathForFile: (file: File) => {
     try {
       const path = webUtils.getPathForFile(file);
-      return typeof path === "string" && path.trim().length > 0 ? path : null;
+      return Predicate.isString(path) && path.trim().length > 0 ? path : null;
     } catch {
       return null;
     }
@@ -95,9 +51,11 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     close: () => ipcRenderer.invoke(IPC.windowClose),
     getState: () => ipcRenderer.invoke(IPC.windowGetState),
     onState: (listener) => {
-      const wrappedListener = (_event: Electron.IpcRendererEvent, state: unknown) => {
-        if (typeof state !== "object" || state === null) return;
-        listener(state as Parameters<typeof listener>[0]);
+      const wrappedListener = (
+        _event: Electron.IpcRendererEvent,
+        state: Parameters<typeof listener>[0],
+      ) => {
+        listener(state);
       };
 
       ipcRenderer.on(IPC.windowState, wrappedListener);
@@ -112,8 +70,11 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     relaunch: () => ipcRenderer.invoke(IPC.customTitleBarRelaunch),
   },
   onMenuAction: (listener) => {
-    const wrappedListener = (_event: Electron.IpcRendererEvent, action: unknown) => {
-      if (typeof action !== "string") return;
+    const wrappedListener = (
+      _event: Electron.IpcRendererEvent,
+      action: Parameters<typeof listener>[0],
+    ) => {
+      if (!Predicate.isString(action)) return;
       listener(action);
     };
 
@@ -123,7 +84,10 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     };
   },
   onQuitConfirmationRequest: (listener) => {
-    const wrappedListener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+    const wrappedListener = (
+      _event: Electron.IpcRendererEvent,
+      payload: Parameters<typeof parseQuitConfirmationRequest>[0],
+    ) => {
       const request = parseQuitConfirmationRequest(payload);
       if (request) listener(request);
     };
@@ -140,11 +104,14 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   },
   getZoomFactor: () => {
     const factor = ipcRenderer.sendSync(IPC.zoomFactor);
-    return typeof factor === "number" && Number.isFinite(factor) && factor > 0 ? factor : 1;
+    return Predicate.isNumber(factor) && Number.isFinite(factor) && factor > 0 ? factor : 1;
   },
   onZoomFactorChange: (listener) => {
-    const wrappedListener = (_event: Electron.IpcRendererEvent, factor: unknown) => {
-      if (typeof factor !== "number" || !Number.isFinite(factor) || factor <= 0) return;
+    const wrappedListener = (
+      _event: Electron.IpcRendererEvent,
+      factor: Parameters<typeof listener>[0],
+    ) => {
+      if (!Predicate.isNumber(factor) || !Number.isFinite(factor) || factor <= 0) return;
       listener(factor);
     };
 
@@ -158,9 +125,11 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   downloadUpdate: () => ipcRenderer.invoke(IPC.updateDownload),
   installUpdate: () => ipcRenderer.invoke(IPC.updateInstall),
   onUpdateState: (listener) => {
-    const wrappedListener = (_event: Electron.IpcRendererEvent, state: unknown) => {
-      if (typeof state !== "object" || state === null) return;
-      listener(state as Parameters<typeof listener>[0]);
+    const wrappedListener = (
+      _event: Electron.IpcRendererEvent,
+      state: Parameters<typeof listener>[0],
+    ) => {
+      listener(state);
     };
 
     ipcRenderer.on(IPC.updateState, wrappedListener);
@@ -182,25 +151,31 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     acknowledgeCapture: (captureId) =>
       ipcRenderer.invoke(IPC.appSnap.acknowledgeCapture, captureId),
     onCaptured: (listener) => {
-      const wrappedListener = (_event: Electron.IpcRendererEvent, capture: unknown) => {
-        if (typeof capture !== "object" || capture === null) return;
-        listener(capture as Parameters<typeof listener>[0]);
+      const wrappedListener = (
+        _event: Electron.IpcRendererEvent,
+        capture: Parameters<typeof listener>[0],
+      ) => {
+        listener(capture);
       };
       ipcRenderer.on(IPC.appSnap.captured, wrappedListener);
       return () => ipcRenderer.removeListener(IPC.appSnap.captured, wrappedListener);
     },
     onError: (listener) => {
-      const wrappedListener = (_event: Electron.IpcRendererEvent, error: unknown) => {
-        if (typeof error !== "object" || error === null) return;
-        listener(error as Parameters<typeof listener>[0]);
+      const wrappedListener = (
+        _event: Electron.IpcRendererEvent,
+        error: Parameters<typeof listener>[0],
+      ) => {
+        listener(error);
       };
       ipcRenderer.on(IPC.appSnap.error, wrappedListener);
       return () => ipcRenderer.removeListener(IPC.appSnap.error, wrappedListener);
     },
     onState: (listener) => {
-      const wrappedListener = (_event: Electron.IpcRendererEvent, state: unknown) => {
-        if (typeof state !== "object" || state === null) return;
-        listener(state as Parameters<typeof listener>[0]);
+      const wrappedListener = (
+        _event: Electron.IpcRendererEvent,
+        state: Parameters<typeof listener>[0],
+      ) => {
+        listener(state);
       };
       ipcRenderer.on(IPC.appSnap.state, wrappedListener);
       return () => ipcRenderer.removeListener(IPC.appSnap.state, wrappedListener);
@@ -209,6 +184,10 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   storageMigration: {
     readSnapshot: () => ipcRenderer.sendSync(IPC.storageMigration.read),
     acknowledgeSnapshot: () => ipcRenderer.invoke(IPC.storageMigration.acknowledge),
+  },
+  stableImport: {
+    getStatus: () => ipcRenderer.invoke(IPC.stableImport.getStatus),
+    run: () => ipcRenderer.invoke(IPC.stableImport.run),
   },
   server: {
     transcribeVoice: (input) => ipcRenderer.invoke(IPC.transcribeVoice, input),
@@ -240,18 +219,22 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       cancel: (input) => ipcRenderer.invoke(IPC.browser.annotations.cancel, input),
       syncMarkers: (input) => ipcRenderer.invoke(IPC.browser.annotations.syncMarkers, input),
       onEvent: (listener) => {
-        const wrappedListener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
-          const annotationEvent = parseBrowserAnnotationEvent(payload);
-          if (annotationEvent) listener(annotationEvent);
+        const wrappedListener = (
+          _event: Electron.IpcRendererEvent,
+          event: Parameters<typeof listener>[0],
+        ) => {
+          listener(event);
         };
         ipcRenderer.on(IPC.browser.annotations.event, wrappedListener);
         return () => ipcRenderer.removeListener(IPC.browser.annotations.event, wrappedListener);
       },
     },
     onState: (listener) => {
-      const wrappedListener = (_event: Electron.IpcRendererEvent, state: unknown) => {
-        if (typeof state !== "object" || state === null) return;
-        listener(state as Parameters<typeof listener>[0]);
+      const wrappedListener = (
+        _event: Electron.IpcRendererEvent,
+        state: Parameters<typeof listener>[0],
+      ) => {
+        listener(state);
       };
 
       ipcRenderer.on(IPC.browser.state, wrappedListener);
@@ -260,11 +243,11 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       };
     },
     onBrowserUseOpenPanelRequest: (listener) => {
-      const wrappedListener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
-        const request = parseBrowserOpenPanelRequest(payload);
-        if (request) {
-          listener(request);
-        }
+      const wrappedListener = (
+        _event: Electron.IpcRendererEvent,
+        request: Parameters<typeof listener>[0],
+      ) => {
+        listener(request);
       };
       ipcRenderer.on(IPC.browser.requestOpenPanel, wrappedListener);
       return () => {
@@ -272,9 +255,11 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       };
     },
     onBrowserCopyLink: (listener) => {
-      const wrappedListener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
-        if (typeof payload !== "object" || payload === null) return;
-        listener(payload as Parameters<typeof listener>[0]);
+      const wrappedListener = (
+        _event: Electron.IpcRendererEvent,
+        payload: Parameters<typeof listener>[0],
+      ) => {
+        listener(payload);
       };
       ipcRenderer.on(IPC.browser.copyLink, wrappedListener);
       return () => {
