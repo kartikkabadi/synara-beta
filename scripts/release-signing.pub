@@ -7,4 +7,4 @@
 #
 # To rotate: generate a new pair (`ssh-keygen -t ed25519 -C synara-beta-release-signing`),
 # update the secret, and replace the line below in the same release.
-synara-beta-releases ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFA61LZNkb3QTME3wdqznC/zghISZ9nsS2BnUMUQ1JRo
+synara-beta-releases ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINi8kB8J9c2PSQ7D+UGgCp1LsQZg75r6rT31sb+l5ik0 synara-beta-release-signing
