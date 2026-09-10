@@ -14,6 +14,44 @@ export const BRAND_ASSET_PATHS = {
   developmentWebAppleTouchIconPng: "assets/dev/blueprint-web-apple-touch-180.png",
 } as const;
 
+export const BETA_ASSET_PATHS = {
+  betaMacIconPng: "assets/beta/beta-macos-1024.png",
+  betaMacLegacyIconPng: "assets/beta/beta-macos-legacy-1024.png",
+  betaLinuxIconPng: "assets/beta/beta-universal-1024.png",
+  betaWindowsIconIco: "assets/beta/beta-windows.ico",
+  betaWebFaviconIco: "assets/beta/beta-web-favicon.ico",
+  betaWebFavicon16Png: "assets/beta/beta-web-favicon-16x16.png",
+  betaWebFavicon32Png: "assets/beta/beta-web-favicon-32x32.png",
+  betaWebAppleTouchIconPng: "assets/beta/beta-web-apple-touch-180.png",
+} as const;
+
+export type DesktopBuildFlavor = "production" | "canary" | "beta";
+
+export interface DesktopIconAssetPaths {
+  readonly macIconPng: string;
+  readonly macLegacyIconPng: string;
+  readonly linuxIconPng: string;
+  readonly windowsIconIco: string;
+}
+
+/** Beta builds carry their own vivid-blue + white BETA pill brand; every other flavor keeps production. */
+export function desktopIconAssetPaths(flavor: DesktopBuildFlavor): DesktopIconAssetPaths {
+  if (flavor === "beta") {
+    return {
+      macIconPng: BETA_ASSET_PATHS.betaMacIconPng,
+      macLegacyIconPng: BETA_ASSET_PATHS.betaMacLegacyIconPng,
+      linuxIconPng: BETA_ASSET_PATHS.betaLinuxIconPng,
+      windowsIconIco: BETA_ASSET_PATHS.betaWindowsIconIco,
+    };
+  }
+  return {
+    macIconPng: BRAND_ASSET_PATHS.productionMacIconPng,
+    macLegacyIconPng: BRAND_ASSET_PATHS.productionMacLegacyIconPng,
+    linuxIconPng: BRAND_ASSET_PATHS.productionLinuxIconPng,
+    windowsIconIco: BRAND_ASSET_PATHS.productionWindowsIconIco,
+  };
+}
+
 export interface IconOverride {
   readonly sourceRelativePath: string;
   readonly targetRelativePath: string;
@@ -56,3 +94,27 @@ export const PUBLISH_ICON_OVERRIDES: ReadonlyArray<IconOverride> = [
     targetRelativePath: "dist/client/apple-touch-icon.png",
   },
 ];
+
+const BETA_PUBLISH_ICON_OVERRIDES: ReadonlyArray<IconOverride> = [
+  {
+    sourceRelativePath: BETA_ASSET_PATHS.betaWebFaviconIco,
+    targetRelativePath: "dist/client/favicon.ico",
+  },
+  {
+    sourceRelativePath: BETA_ASSET_PATHS.betaWebFavicon16Png,
+    targetRelativePath: "dist/client/favicon-16x16.png",
+  },
+  {
+    sourceRelativePath: BETA_ASSET_PATHS.betaWebFavicon32Png,
+    targetRelativePath: "dist/client/favicon-32x32.png",
+  },
+  {
+    sourceRelativePath: BETA_ASSET_PATHS.betaWebAppleTouchIconPng,
+    targetRelativePath: "dist/client/apple-touch-icon.png",
+  },
+];
+
+/** Favicon overrides for a packaged build; beta ships its own vivid-blue set. */
+export function publishIconOverrides(flavor: DesktopBuildFlavor): ReadonlyArray<IconOverride> {
+  return flavor === "beta" ? BETA_PUBLISH_ICON_OVERRIDES : PUBLISH_ICON_OVERRIDES;
+}
