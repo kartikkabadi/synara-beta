@@ -121,14 +121,13 @@ export function summarizeProviderUsageForAgent(input: {
   }
 
   const quotaWindows: ServerAgentProviderUsageWindow[] = snapshot.limits.map((limit) => {
+    const { resetsAt, windowDurationMins } = limit;
     const common = {
       window: limit.window,
-      ...(limit.resetsAt ? { resetsAt: limit.resetsAt } : {}),
-      ...(limit.windowDurationMins !== undefined
-        ? { windowDurationMins: limit.windowDurationMins }
-        : {}),
       source: snapshot.source,
       observedAt: snapshot.updatedAt,
+      ...(resetsAt ? { resetsAt } : null),
+      ...(windowDurationMins !== undefined ? { windowDurationMins } : null),
     };
     const resetAtMs = limit.resetsAt ? Date.parse(limit.resetsAt) : null;
     if (resetAtMs !== null && Number.isFinite(resetAtMs) && resetAtMs <= checkedAtMs) {
@@ -179,12 +178,16 @@ export function summarizeProviderUsageListForAgent(input: {
   checkedAtMs?: number;
 }): ServerAgentProviderUsage[] {
   const byProvider = new Map(input.snapshots.map((snapshot) => [snapshot.provider, snapshot]));
-  return input.providers.map((provider) =>
-    summarizeProviderUsageForAgent({
-      provider,
-      enabled: input.enabledProviders.has(provider),
-      snapshot: byProvider.get(provider) ?? null,
-      ...(input.checkedAtMs === undefined ? {} : { checkedAtMs: input.checkedAtMs }),
-    }),
-  );
+  return input.providers.map((provider) => {
+    const enabled = input.enabledProviders.has(provider);
+    const snapshot = byProvider.get(provider) ?? null;
+    return input.checkedAtMs === undefined
+      ? summarizeProviderUsageForAgent({ provider, enabled, snapshot })
+      : summarizeProviderUsageForAgent({
+          provider,
+          enabled,
+          snapshot,
+          checkedAtMs: input.checkedAtMs,
+        });
+  });
 }
