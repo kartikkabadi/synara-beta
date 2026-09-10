@@ -34,6 +34,8 @@ Context collected by the Synara feedback dialog (sanitized and allow-listed for 
 {{DIAGNOSTICS_SUMMARY}}
 </diagnostics>
 
+{{PRIVATE_ENDPOINT_NOTE}}
+
 My initial description (may be empty):
 
 <initial-report>
@@ -106,9 +108,19 @@ Follow these steps in order, asking one focused question at a time and waiting f
 
 Be concise, no filler, one question at a time. Never invent details. Write "Not sure" rather than guessing.`;
 
+// Whether the report also reached the private beta endpoint changes what the
+// agent may claim: the note is injected as a fixed sentence, never from user
+// input, so the prompt cannot overstate delivery.
+const PRIVATE_ENDPOINT_DELIVERED_NOTE =
+  "A sanitized copy of this report (the same details and diagnostics shown above) was also delivered to the maintainer's private beta endpoint, so it is already on file. The GitHub issue is the public companion — it must still contain no private identifiers.";
+const PRIVATE_ENDPOINT_FAILED_NOTE =
+  "Sending a sanitized copy of this report to the maintainer's private beta endpoint failed, so no private copy is on file — this issue is the only report.";
+
 export interface BuildGithubIssueInterviewPromptInput {
   details: string;
   diagnosticsSummary: string;
+  /** True when submitFeedback already delivered the report to the beta worker. */
+  deliveredToBetaEndpoint: boolean;
 }
 
 /** Builds the bug-report interview prompt that is prefilled into a new draft thread composer. */
@@ -121,8 +133,11 @@ export function buildGithubIssueInterviewPrompt(
   const safeDiagnostics = defangPromptPlaceholders(
     escapePromptDelimiters(sanitizeUntrustedText(input.diagnosticsSummary)),
   );
-  return BUG_REPORT_INTERVIEW_PROMPT_TEMPLATE.replaceAll(
-    "{{DETAILS}}",
-    () => sanitizedDetails,
-  ).replaceAll("{{DIAGNOSTICS_SUMMARY}}", () => safeDiagnostics);
+  return BUG_REPORT_INTERVIEW_PROMPT_TEMPLATE.replaceAll("{{DETAILS}}", () => sanitizedDetails)
+    .replaceAll("{{DIAGNOSTICS_SUMMARY}}", () => safeDiagnostics)
+    .replaceAll("{{PRIVATE_ENDPOINT_NOTE}}", () =>
+      input.deliveredToBetaEndpoint
+        ? PRIVATE_ENDPOINT_DELIVERED_NOTE
+        : PRIVATE_ENDPOINT_FAILED_NOTE,
+    );
 }

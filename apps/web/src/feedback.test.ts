@@ -1,11 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildFeedbackSubmission,
+  DEFAULT_FEEDBACK_ENDPOINT,
   FEEDBACK_CATEGORIES,
   formatBugReportDiagnostics,
   formatFeedbackSummary,
   normalizeHomePaths,
   redactObviousSecrets,
+  submitFeedback,
   type FeedbackDiagnostics,
   type FeedbackThreadContext,
 } from "./feedback";
@@ -138,6 +140,7 @@ describe("buildFeedbackSubmission", () => {
     });
 
     expect(submission).toMatchObject({
+      schemaVersion: 1,
       category: "bug",
       details: "The composer stopped responding.",
       diagnostics: {
@@ -156,6 +159,15 @@ describe("buildFeedbackSubmission", () => {
         diagnostics: submission.diagnostics,
       }),
     );
+    // The allow-listed block the agent-drafted issue flow quotes travels with
+    // the submission so the private report and the public draft match.
+    expect(submission.diagnosticsReport).toBe(
+      formatBugReportDiagnostics({
+        category: "bug",
+        diagnostics: submission.diagnostics,
+      }),
+    );
+    expect(submission.diagnosticsReport).not.toContain("User agent:");
     expect(submission.summary).not.toContain("The composer stopped responding.");
     expect(submission.details).not.toContain("  ");
     expect(submission).not.toHaveProperty("screenshot");
@@ -310,6 +322,71 @@ describe("buildFeedbackSubmission", () => {
     expect(submission.summary).not.toContain("sk-0123456789ABCDEFGHIJKLMNOPQRSTUVWX");
     expect(submission.summary).not.toContain("/Users/kartik");
     expect(submission.summary).toContain("Model: [REDACTED] fine-tune from ~/leak");
+  });
+});
+
+describe("submitFeedback", () => {
+  const makeSubmission = () =>
+    buildFeedbackSubmission({
+      category: "bug",
+      details: "The composer stopped responding.",
+      context: CONTEXT,
+      userAgent: "Synara test agent",
+      platform: "MacIntel",
+      language: "en-US",
+      viewport: { width: 1_440, height: 900 },
+    });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("posts the submission to the private beta collector with the shared-secret bearer", async () => {
+    vi.stubGlobal("window", { setTimeout, clearTimeout });
+    const fetchMock = vi.fn(async () => new Response(null, { status: 202 }));
+
+    await submitFeedback(makeSubmission(), fetchMock);
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    // The beta default is Kartik's Cloudflare worker — never trysynara.com.
+    expect(url).toBe(DEFAULT_FEEDBACK_ENDPOINT);
+    expect(url).toContain("synara-beta-bugreport");
+    expect(url).toContain("workers.dev");
+    expect(url).not.toContain("trysynara.com");
+    expect(init.method).toBe("POST");
+    const headers = init.headers as Record<string, string>;
+    expect(headers["content-type"]).toBe("application/json");
+    expect(headers["x-synara-feedback"]).toBe("1");
+    expect(headers["authorization"]).toMatch(/^Bearer .+$/u);
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect(body["schemaVersion"]).toBe(1);
+    expect(body["category"]).toBe("bug");
+    expect(typeof body["diagnosticsReport"]).toBe("string");
+    expect(body["diagnostics"]).toMatchObject({ provider: "codex" });
+  });
+
+  it("honors the endpoint and token build-time overrides", async () => {
+    vi.stubGlobal("window", { setTimeout, clearTimeout });
+    vi.stubEnv("VITE_FEEDBACK_ENDPOINT", "https://override.example/reports");
+    vi.stubEnv("VITE_FEEDBACK_TOKEN", "override-token");
+    const fetchMock = vi.fn(async () => new Response(null, { status: 202 }));
+
+    await submitFeedback(makeSubmission(), fetchMock);
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://override.example/reports");
+    const headers = init.headers as Record<string, string>;
+    expect(headers["authorization"]).toBe("Bearer override-token");
+  });
+
+  it("surfaces the worker's error message on a non-OK response", async () => {
+    vi.stubGlobal("window", { setTimeout, clearTimeout });
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 }),
+    );
+
+    await expect(submitFeedback(makeSubmission(), fetchMock)).rejects.toThrow("unauthorized");
   });
 });
 

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { buildFeedbackSubmission, formatBugReportDiagnostics } from "../feedback";
+import { buildFeedbackSubmission, submitFeedback } from "../feedback";
 import type { FeedbackThreadContext } from "../feedback";
 import { buildGithubIssueInterviewPrompt } from "../feedbackGithubIssue";
 import { useFeedbackDialogStore } from "../feedbackDialogStore";
@@ -65,15 +65,29 @@ export function GlobalFeedbackDialog() {
       throw new Error("No project available.");
     }
     const submission = buildFeedbackSubmission({ category: "bug", details, context });
+    // The private beta endpoint is the primary sink: deliver the sanitized
+    // report even when the user only wants the agent-drafted public issue.
+    // Delivery is awaited so the prompt states the truth, but a failure must
+    // not block the draft — the interview is the fallback path.
+    let deliveredToBetaEndpoint = false;
+    try {
+      await submitFeedback(submission);
+      deliveredToBetaEndpoint = true;
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Private report copy failed",
+        description:
+          error instanceof Error ? error.message : "An unexpected delivery error occurred.",
+      });
+    }
     // The public-bound prompt gets the allow-listed rows only: raw user-agent,
     // language, and submitted-at strings stay on the first-party feedback path.
     // buildGithubIssueInterviewPrompt remains the single sanitization boundary.
     const prompt = buildGithubIssueInterviewPrompt({
       details: submission.details,
-      diagnosticsSummary: formatBugReportDiagnostics({
-        category: "bug",
-        diagnostics: submission.diagnostics,
-      }),
+      diagnosticsSummary: submission.diagnosticsReport,
+      deliveredToBetaEndpoint,
     });
     // The bug-report draft must not claim the project's new-thread slot: a
     // fresh mapped draft would evict and delete the user's unsent composer

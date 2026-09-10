@@ -16,8 +16,16 @@ const mocks = vi.hoisted(() => ({
   handleNewThread: vi.fn(),
   appendComposerPromptText: vi.fn(),
   toastAdd: vi.fn(),
+  submitFeedback: vi.fn(),
   dialogProps: { current: null as Record<string, unknown> | null },
 }));
+
+// The real builders stay: only the network call is stubbed, so the prompt the
+// test inspects is the one the agent would actually receive.
+vi.mock("../feedback", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../feedback")>();
+  return { ...actual, submitFeedback: mocks.submitFeedback };
+});
 
 vi.mock("../focusedChatContext", () => ({
   useFocusedChatContext: () => mocks.focusedChat,
@@ -99,6 +107,7 @@ describe("GlobalFeedbackDialog.onDraftGithubIssue", () => {
     mocks.projects = [];
     mocks.threadsHydrated = true;
     mocks.handleNewThread.mockResolvedValue("thread-1");
+    mocks.submitFeedback.mockResolvedValue(undefined);
     useFeedbackDialogStore.setState({ isOpen: false, context: null, initialCategory: null });
     vi.stubGlobal("window", { innerWidth: 1_440, innerHeight: 900 });
     vi.stubGlobal("navigator", {
@@ -131,8 +140,34 @@ describe("GlobalFeedbackDialog.onDraftGithubIssue", () => {
     expect(prompt).toContain("bug report");
     expect(prompt).toContain("[REDACTED]");
     expect(prompt).not.toContain("ghp_0123456789abcdefghijklmnop");
+    // The private copy landed, so the prompt may say so.
+    expect(mocks.submitFeedback).toHaveBeenCalledTimes(1);
+    expect(prompt).toContain("delivered to the maintainer's private beta endpoint");
     expect(useFeedbackDialogStore.getState().isOpen).toBe(false);
     expect(mocks.toastAdd).toHaveBeenCalledWith(expect.objectContaining({ type: "success" }));
+  });
+
+  it("still drafts when the private report copy fails, and says so in the prompt", async () => {
+    const ordinary = project({ id: "proj-active" as Project["id"] });
+    mocks.projects = [ordinary];
+    mocks.focusedChat.activeProject = ordinary;
+    mocks.focusedChat.activeProjectId = ordinary.id;
+    mocks.submitFeedback.mockRejectedValue(new Error("unauthorized"));
+    useFeedbackDialogStore.getState().openDialog(undefined, "bug");
+
+    const props = renderDialog();
+    const draft = props.onDraftGithubIssue as (details: string) => Promise<void>;
+    await draft("Send crashes on every other submit.");
+
+    expect(mocks.handleNewThread).toHaveBeenCalledTimes(1);
+    const [, prompt] = mocks.appendComposerPromptText.mock.calls[0] as [string, string];
+    // The agent must not claim a private copy it does not have.
+    expect(prompt).toContain("no private copy is on file");
+    expect(prompt).not.toContain("delivered to the maintainer's private beta endpoint");
+    expect(mocks.toastAdd).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "error", title: "Private report copy failed" }),
+    );
+    expect(useFeedbackDialogStore.getState().isOpen).toBe(false);
   });
 
   it("drafts into the first ordinary project when the active container is Home", async () => {

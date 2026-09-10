@@ -1,7 +1,7 @@
 // FILE: feedback.ts
 // Purpose: Owns feedback categories, privacy-safe diagnostics, and delivery.
 // Layer: Web feature logic
-// Depends on: The public trysynara feedback endpoint.
+// Depends on: The private beta bug-report collector (infrastructure/bugreport-worker).
 
 import { APP_VERSION } from "./branding";
 
@@ -48,14 +48,28 @@ export type FeedbackDiagnostics = FeedbackThreadContext & {
 };
 
 export interface FeedbackSubmission {
+  schemaVersion: 1;
   category: FeedbackCategory | null;
   details: string;
   /** Reader-facing rendering of `diagnostics`; the reporter never sees or edits it. */
   summary: string;
+  /**
+   * Allow-listed diagnostics block — the same text the agent-drafted issue
+   * flow quotes, so the private report and the public draft match.
+   */
+  diagnosticsReport: string;
   diagnostics: FeedbackDiagnostics;
 }
 
-const DEFAULT_FEEDBACK_ENDPOINT = "https://www.trysynara.com/api/feedback";
+// Placeholder until the collector is deployed: paste the worker's workers.dev
+// URL (see infrastructure/bugreport-worker/README.md). Overridable per build
+// with VITE_FEEDBACK_ENDPOINT.
+export const DEFAULT_FEEDBACK_ENDPOINT =
+  "https://synara-beta-bugreport.<subdomain>.workers.dev/v1/reports";
+// The worker requires a shared-secret bearer token (wrangler secret
+// BUG_REPORT_TOKEN); this placeholder must match it. Overridable per build
+// with VITE_FEEDBACK_TOKEN.
+const DEFAULT_FEEDBACK_TOKEN = "REPLACE_WITH_BUG_REPORT_TOKEN";
 const FEEDBACK_REQUEST_TIMEOUT_MS = 20_000;
 
 const SECRET_PATTERNS = [
@@ -284,10 +298,17 @@ export function buildFeedbackSubmission(input: {
   });
 
   return {
+    schemaVersion: 1,
     category: input.category,
     details: sanitizeUntrustedText(input.details.trim()),
     summary: sanitizeUntrustedText(
       formatFeedbackSummary({
+        category: input.category,
+        diagnostics,
+      }),
+    ),
+    diagnosticsReport: sanitizeUntrustedText(
+      formatBugReportDiagnostics({
         category: input.category,
         diagnostics,
       }),
@@ -298,6 +319,10 @@ export function buildFeedbackSubmission(input: {
 
 function feedbackEndpoint(): string {
   return import.meta.env.VITE_FEEDBACK_ENDPOINT?.trim() || DEFAULT_FEEDBACK_ENDPOINT;
+}
+
+function feedbackToken(): string {
+  return import.meta.env.VITE_FEEDBACK_TOKEN?.trim() || DEFAULT_FEEDBACK_TOKEN;
 }
 
 export async function submitFeedback(
@@ -311,6 +336,7 @@ export async function submitFeedback(
       method: "POST",
       headers: {
         "content-type": "application/json",
+        authorization: `Bearer ${feedbackToken()}`,
         "x-synara-feedback": "1",
       },
       body: JSON.stringify(submission),

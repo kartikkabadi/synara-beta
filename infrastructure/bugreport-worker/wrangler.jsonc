@@ -1,0 +1,24 @@
+{
+  "name": "synara-beta-bugreport",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "workers_dev": true,
+  // No cron: bug reports are a triage queue, not telemetry. They persist until
+  // an operator deletes or resolves them (see README Retention).
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "synara-beta-bugreports",
+      // wrangler d1 create synara-beta-bugreports → paste the id here.
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+    },
+  ],
+  // Screenshot uploads. Create the bucket before deploy or delete this block;
+  // the attachment route fails closed with 503 when the binding is absent.
+  "r2_buckets": [
+    {
+      "binding": "BUG_REPORT_ATTACHMENTS",
+      "bucket_name": "synara-beta-bugreport-attachments",
+    },
+  ],
+}

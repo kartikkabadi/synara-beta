@@ -33,13 +33,14 @@ const SAMPLE_DIAGNOSTICS = {
   viewport: "1920x1080",
 };
 
-const makePrompt = (details: string) =>
+const makePrompt = (details: string, deliveredToBetaEndpoint = true) =>
   buildGithubIssueInterviewPrompt({
     details,
     diagnosticsSummary: formatFeedbackSummary({
       category: "bug",
       diagnostics: SAMPLE_DIAGNOSTICS,
     }),
+    deliveredToBetaEndpoint,
   });
 
 const section = (prompt: string, tag: string) =>
@@ -104,6 +105,21 @@ describe("buildGithubIssueInterviewPrompt", () => {
     expect(prompt).toContain(GITHUB_ISSUE_URL);
     expect(prompt).toContain("?title=<encoded title>&body=<encoded body>");
     expect(prompt).toContain("6,000");
+  });
+
+  it("tells the agent the report also reached the private beta endpoint", () => {
+    const prompt = makePrompt("The sidebar footer button is missing.", true);
+
+    expect(prompt).toContain("delivered to the maintainer's private beta endpoint");
+    expect(prompt).toContain("already on file");
+    expect(prompt).not.toContain("no private copy is on file");
+  });
+
+  it("does not claim a private copy when beta delivery failed", () => {
+    const prompt = makePrompt("The sidebar footer button is missing.", false);
+
+    expect(prompt).toContain("no private copy is on file");
+    expect(prompt).not.toContain("already on file");
   });
 });
 
