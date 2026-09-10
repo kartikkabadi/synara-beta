@@ -569,6 +569,21 @@ export interface SynaraStorageSnapshot {
   readonly entries: Readonly<Record<string, string>>;
 }
 
+export interface DesktopStableImportStatus {
+  readonly available: boolean;
+  readonly stableDatabaseExists: boolean;
+  readonly hasBeenImportedBefore: boolean;
+  readonly isStableProcessRunning: boolean;
+  readonly stableSkillsCount: number;
+  readonly stableMcpExists: boolean;
+  readonly reason?: string | undefined;
+}
+
+export interface DesktopStableImportResult {
+  readonly ok: boolean;
+  readonly message: string;
+}
+
 export interface DesktopBridge {
   getWsUrl: () => string | null;
   /**
@@ -648,6 +663,15 @@ export interface DesktopBridge {
   storageMigration: {
     readSnapshot: () => SynaraStorageSnapshot | null;
     acknowledgeSnapshot: () => Promise<void>;
+  };
+  /**
+   * Beta-only onboarding import from Synara Stable. The main process stops the
+   * Beta backend before replacing its database, so a successful `run` relaunches
+   * the app and only resolves with `ok: false` when nothing was imported.
+   */
+  stableImport?: {
+    getStatus: () => Promise<DesktopStableImportStatus>;
+    run: () => Promise<DesktopStableImportResult>;
   };
   server?: {
     transcribeVoice: (

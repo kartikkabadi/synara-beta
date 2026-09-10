@@ -20,6 +20,7 @@ import {
   useParams,
   useRouterState,
 } from "@tanstack/react-router";
+import { Predicate } from "effect";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Throttler } from "@tanstack/react-pacer";
@@ -29,6 +30,7 @@ import { DesktopWindowControls } from "../components/DesktopWindowControls";
 import { RunningChatsQuitCoordinator } from "../components/RunningChatsQuitCoordinator";
 import { AppSnapCoordinator } from "../components/AppSnapCoordinator";
 import { AppSnapWelcomeDialog } from "../components/AppSnapWelcomeDialog";
+import { StableImportWelcomeDialog } from "../components/StableImportWelcomeDialog";
 import { QueuedComposerDrainCoordinator } from "../components/QueuedComposerDrainCoordinator";
 import { FeedbackDialog } from "../components/FeedbackDialog";
 import { SETTINGS_TARGETS } from "../settingsNavigation";
@@ -307,6 +309,7 @@ function RootRouteView() {
           <TaskCompletionNotifications />
           <QueuedComposerDrainCoordinator />
           <AppSnapWelcomeDialog />
+          <StableImportWelcomeDialog />
           <AppSnapCoordinator />
           <DesktopProjectBootstrap />
           <Outlet />
@@ -545,7 +548,7 @@ async function runProviderUpdateAll(params: {
           .map(({ provider }) => provider.versionAdvisory?.updateCommand)
           .filter(
             (command): command is string =>
-              typeof command === "string" && command.trim().length > 0,
+              Predicate.isString(command) && command.trim().length > 0,
           ),
       ),
     );
@@ -564,7 +567,7 @@ async function runProviderUpdateAll(params: {
           : failureLines,
       data: {
         onClose: dismissProgressToast,
-        ...(manualCommands.length > 0 ? { copyText: manualCommands.join("\n") } : {}),
+        ...(manualCommands.length > 0 ? { copyText: manualCommands.join("\n") } : null),
       },
       timeout: 0,
     });
@@ -719,7 +722,7 @@ function GlobalShortcutsDialog() {
 
   useEffect(() => {
     const onMenuAction = window.desktopBridge?.onMenuAction;
-    if (typeof onMenuAction !== "function") {
+    if (!Predicate.isFunction(onMenuAction)) {
       return;
     }
 
@@ -859,29 +862,29 @@ function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
   );
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
+function errorMessage(cause: unknown): string {
+  if (cause instanceof Error && cause.message.trim().length > 0) {
+    return cause.message;
   }
 
-  if (typeof error === "string" && error.trim().length > 0) {
-    return error;
+  if (Predicate.isString(cause) && cause.trim().length > 0) {
+    return cause;
   }
 
   return "An unexpected router error occurred.";
 }
 
-function errorDetails(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack ?? error.message;
+function errorDetails(cause: unknown): string {
+  if (cause instanceof Error) {
+    return cause.stack ?? cause.message;
   }
 
-  if (typeof error === "string") {
-    return error;
+  if (Predicate.isString(cause)) {
+    return cause;
   }
 
   try {
-    return JSON.stringify(error, null, 2);
+    return JSON.stringify(cause, null, 2);
   } catch {
     return "No additional error details are available.";
   }
@@ -901,6 +904,8 @@ function addBoundedSetValue<T>(set: Set<T>, value: T, limit: number): void {
     set.delete(value);
   }
   while (set.size >= normalizedLimit) {
+    // SAFETY: values() over a non-empty Set yields defined T values; the loop
+    // condition guarantees size >= 1, so undefined only marks iterator completion.
     const oldestValue = set.values().next().value as T | undefined;
     if (oldestValue === undefined) {
       break;
@@ -1646,6 +1651,8 @@ function EventRouter() {
     };
 
     const removeOrphanedTerminalsForCurrentState = () => {
+      // SAFETY: Composer draft state keys are written as ThreadId by the draft
+      // navigation code; Object.keys cannot preserve the branded key type.
       const draftThreadIds = Object.keys(
         useComposerDraftStore.getState().draftThreadsByThreadId,
       ) as ThreadId[];

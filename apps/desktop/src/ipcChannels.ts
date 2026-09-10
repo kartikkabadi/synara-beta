@@ -39,6 +39,10 @@ export const DESKTOP_IPC_CHANNELS = {
     read: "desktop:storage-migration-read",
     acknowledge: "desktop:storage-migration-acknowledge",
   },
+  stableImport: {
+    getStatus: "desktop:stable-import-get-status",
+    run: "desktop:stable-import-run",
+  },
   appSnap: {
     getState: "desktop:appsnap-get-state",
     setEnabled: "desktop:appsnap-set-enabled",

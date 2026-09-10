@@ -100,6 +100,10 @@
       "types": "./src/sync/stableSync.ts",
       "import": "./src/sync/stableSync.ts"
     },
+    "./stableDatabaseImport": {
+      "types": "./src/sync/stableDatabaseImport.ts",
+      "import": "./src/sync/stableDatabaseImport.ts"
+    },
     "./Net": {
       "types": "./src/Net.ts",
       "import": "./src/Net.ts"

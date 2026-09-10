@@ -4511,12 +4511,6 @@
       "dfca10bf": 1
     }
   },
-  "anti-slop(no-conditional-empty-object-spread):apps/web/src/routes/__root.tsx": {
-    "total": 1,
-    "messages": {
-      "0c608cf2": 1
-    }
-  },
   "anti-slop(no-conditional-empty-object-spread):apps/web/src/routes/_chat.automations.$automationId.tsx": {
     "total": 2,
     "messages": {
@@ -8023,31 +8017,6 @@
       "40402c63": 1
     }
   },
-  "anti-slop(no-runtime-typeof):apps/desktop/src/preload.ts": {
-    "total": 23,
-    "messages": {
-      "0296f1eb": 1,
-      "031789b4": 1,
-      "0c54c943": 4,
-      "11fb7a5b": 1,
-      "2eb9a386": 1,
-      "301204a4": 1,
-      "66f529a1": 1,
-      "84cb49b2": 1,
-      "852887f8": 1,
-      "8dd7676f": 1,
-      "b0aaf95b": 1,
-      "c69cc19c": 1,
-      "d18e69df": 1,
-      "d5bb6c97": 1,
-      "ed7e9ced": 1,
-      "f017d0cd": 1,
-      "f39cacad": 1,
-      "f7723aa2": 1,
-      "fada12b2": 1,
-      "ff8dbe3f": 1
-    }
-  },
   "anti-slop(no-runtime-typeof):apps/desktop/src/resumableUpdateDownload.test.ts": {
     "total": 1,
     "messages": {
@@ -11236,15 +11205,6 @@
       "6675724e": 1
     }
   },
-  "anti-slop(no-runtime-typeof):apps/web/src/routes/__root.tsx": {
-    "total": 4,
-    "messages": {
-      "0cdaa2d2": 1,
-      "5725a4c5": 1,
-      "c349b34e": 1,
-      "d2db6267": 1
-    }
-  },
   "anti-slop(no-runtime-typeof):apps/web/src/routes/_chat.automations.$automationId.tsx": {
     "total": 1,
     "messages": {
@@ -12695,19 +12655,6 @@
     "messages": {
       "bb531a1a": 1,
       "cfabc82e": 2
-    }
-  },
-  "anti-slop(no-unknown-parameters):apps/desktop/src/preload.ts": {
-    "total": 14,
-    "messages": {
-      "090e3f7a": 1,
-      "4296bffc": 1,
-      "86300be2": 1,
-      "a9b582e2": 4,
-      "bb313a4f": 1,
-      "d64f7842": 4,
-      "d9f92a9e": 1,
-      "e55e9830": 1
     }
   },
   "anti-slop(no-unknown-parameters):apps/desktop/src/runningChatsQuitGuard.ts": {
@@ -14724,13 +14671,6 @@
       "ff0442ee": 1
     }
   },
-  "anti-slop(no-unknown-parameters):apps/web/src/routes/__root.tsx": {
-    "total": 2,
-    "messages": {
-      "385fa416": 1,
-      "ac62fb33": 1
-    }
-  },
   "anti-slop(no-unknown-parameters):apps/web/src/settingsNavigation.ts": {
     "total": 1,
     "messages": {
@@ -15850,14 +15790,6 @@
     "total": 2,
     "messages": {
       "3774c5e3": 2
-    }
-  },
-  "anti-slop(no-unsafe-dictionary-type):apps/desktop/src/preload.ts": {
-    "total": 3,
-    "messages": {
-      "281357a6": 1,
-      "afd6b5de": 1,
-      "c0d18b16": 1
     }
   },
   "anti-slop(no-unsafe-dictionary-type):apps/desktop/src/resumableUpdateDownload.ts": {
@@ -18443,21 +18375,6 @@
     "total": 1,
     "messages": {
       "d0da0dc6": 1
-    }
-  },
-  "anti-slop(require-safety-comment-for-type-assertion):apps/desktop/src/preload.ts": {
-    "total": 13,
-    "messages": {
-      "06ef4beb": 1,
-      "35cbd03d": 4,
-      "38e04e41": 1,
-      "3ef03fd8": 1,
-      "65640fdd": 1,
-      "836fe50a": 1,
-      "a0b898ae": 1,
-      "a64ced18": 1,
-      "b2c528ea": 1,
-      "ec2c8cd8": 1
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/desktop/src/resumableUpdateDownload.test.ts": {
@@ -23356,13 +23273,6 @@
     "total": 3,
     "messages": {
       "ecd16e37": 3
-    }
-  },
-  "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/routes/__root.tsx": {
-    "total": 2,
-    "messages": {
-      "2411ce22": 1,
-      "97c3499f": 1
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/routes/_chat.automations.$automationId.tsx": {
