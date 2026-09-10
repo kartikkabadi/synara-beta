@@ -155,6 +155,7 @@ import {
   DISCLOSURE_TRANSITION_MS,
   disclosureContentClassName,
 } from "~/lib/disclosureMotion";
+import { useTransientPresentation } from "./useTransientPresentation";
 import { getAppTypographyScale } from "../../lib/appTypography";
 import {
   USER_MESSAGE_COLLAPSED_FADE_LINES,
@@ -788,7 +789,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     animateAnchorSlide: !followLiveOutput,
   });
 
-  const presentedWorktreeSetup = useWorktreeSetupPresentation(worktreeSetup);
+  const presentedWorktreeSetup = useTransientPresentation(worktreeSetup);
   const rawRows = useMemo(
     () =>
       deriveMessagesTimelineRows({
@@ -2812,90 +2813,6 @@ function applyMessageSendEnterAnimation(params: {
     });
   }, MESSAGE_SEND_ENTER_ANIMATION_MS + MESSAGE_SEND_ENTER_CLEANUP_BUFFER_MS);
   cleanupTimeoutsRef.current.push(cleanupTimeout);
-}
-
-interface WorktreeSetupPresentation {
-  snapshot: WorktreeSetupSnapshot;
-  open: boolean;
-}
-
-// Keeps the transient worktree-setup card mounted through one shared-disclosure
-// close animation after ChatView clears the snapshot, mirroring
-// useSettledTurnCollapseTransitions' rAF-flip + delayed-cleanup shape.
-function useWorktreeSetupPresentation(
-  worktreeSetup: WorktreeSetupSnapshot | null,
-): WorktreeSetupPresentation | null {
-  const [presented, setPresented] = useState<WorktreeSetupPresentation | null>(null);
-  const closeFrameRef = useRef<number | null>(null);
-  const cleanupTimeoutRef = useRef<number | null>(null);
-
-  const clearCloseTimers = useCallback(() => {
-    if (closeFrameRef.current !== null) {
-      window.cancelAnimationFrame(closeFrameRef.current);
-      closeFrameRef.current = null;
-    }
-    if (cleanupTimeoutRef.current !== null) {
-      window.clearTimeout(cleanupTimeoutRef.current);
-      cleanupTimeoutRef.current = null;
-    }
-  }, []);
-
-  useLayoutEffect(() => {
-    reconcileWorktreeSetupPresentation({
-      worktreeSetup,
-      presented,
-      clearCloseTimers,
-      closeFrameRef,
-      cleanupTimeoutRef,
-      setPresented,
-    });
-  }, [worktreeSetup, presented, clearCloseTimers]);
-
-  useLayoutEffect(() => clearCloseTimers, [clearCloseTimers]);
-
-  return presented;
-}
-
-// Opens synchronously so the card is mounted before paint, then hands the close off
-// to a rAF-flip + delayed unmount. Isolated in a module helper (not compiled) so the
-// synchronous open setState stays out of the compiled hook while its exact ordering
-// against the close timers is preserved.
-function reconcileWorktreeSetupPresentation(params: {
-  worktreeSetup: WorktreeSetupSnapshot | null;
-  presented: WorktreeSetupPresentation | null;
-  clearCloseTimers: () => void;
-  closeFrameRef: RefObject<number | null>;
-  cleanupTimeoutRef: RefObject<number | null>;
-  setPresented: Dispatch<SetStateAction<WorktreeSetupPresentation | null>>;
-}): void {
-  const {
-    worktreeSetup,
-    presented,
-    clearCloseTimers,
-    closeFrameRef,
-    cleanupTimeoutRef,
-    setPresented,
-  } = params;
-  if (worktreeSetup) {
-    clearCloseTimers();
-    setPresented((current) =>
-      current?.open && current.snapshot === worktreeSetup
-        ? current
-        : { snapshot: worktreeSetup, open: true },
-    );
-    return;
-  }
-  if (!presented?.open || closeFrameRef.current !== null) {
-    return;
-  }
-  closeFrameRef.current = window.requestAnimationFrame(() => {
-    closeFrameRef.current = null;
-    setPresented((current) => (current?.open ? { ...current, open: false } : current));
-    cleanupTimeoutRef.current = window.setTimeout(() => {
-      cleanupTimeoutRef.current = null;
-      setPresented(null);
-    }, DISCLOSURE_TRANSITION_MS + DISCLOSURE_CLEANUP_BUFFER_MS);
-  });
 }
 
 // Keeps newly folded turn details mounted for one shared-disclosure close

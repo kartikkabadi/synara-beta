@@ -181,7 +181,10 @@ export function renameProjectLocally(
 export function setError(state: AppState, threadId: ThreadId, error: string | null): AppState {
   return applyThreadUpdate(state, threadId, (thread) => {
     if (thread.error === error) return thread;
-    return { ...thread, error };
+    // The error generation lives on the thread itself so every write path —
+    // local sends, session events, snapshot sync — bumps it and a stale
+    // failed-send snapshot can never alias a rewritten message.
+    return { ...thread, error, errorVersion: (thread.errorVersion ?? 0) + 1 };
   });
 }
 

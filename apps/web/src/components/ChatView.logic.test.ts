@@ -10,6 +10,7 @@ import {
 } from "@synara/contracts";
 import { describe, expect, it, vi } from "vitest";
 
+import type { ChatMessage, Thread } from "../types";
 import type { WorkLogEntry } from "../session-logic";
 
 import {
@@ -70,6 +71,19 @@ import {
   shouldShowComposerModelBootstrapSkeleton,
   shouldStartActiveTurnLayoutGrace,
   shouldRenderTerminalWorkspace,
+  bumpLocalDraftErrorVersion,
+  bumpThreadErrorWriteEpoch,
+  MAX_THREAD_ERROR_WRITE_EPOCHS,
+  evictOverflowFailedThreadSend,
+  failedSendSnapshotOwnsCurrentError,
+  MAX_FAILED_THREAD_SEND_SNAPSHOTS,
+  MAX_LOCAL_DRAFT_ERROR_VERSIONS,
+  releaseFailedSendAtSendCommit,
+  releaseFailedSendSnapshotAfterSend,
+  releaseRetriedFailedSend,
+  releaseSupersededFailedSend,
+  findTranscriptFallbackRetryTarget,
+  hasThreadErrorRetryTarget,
   worktreeSetupHasError,
 } from "./ChatView.logic";
 
@@ -2942,5 +2956,726 @@ describe("resolveDraftFallbackModelSelection", () => {
         settingsDefaultProvider: "grok",
       }),
     ).toEqual({ provider: "grok", model: "grok-4.6" });
+  });
+});
+
+describe("failed thread send snapshot identity", () => {
+  it("owns the card only while the current error is the generation the snapshot raised", () => {
+    const snapshot = { errorMessage: "rate limited", errorVersion: 2 };
+    expect(
+      failedSendSnapshotOwnsCurrentError(snapshot, {
+        error: "rate limited",
+        errorVersion: 2,
+      }),
+    ).toBe(true);
+    // E→F→E: identical text after an intervening error is a newer generation,
+    // so the snapshot is stale and must not clear the card or drive retry.
+    expect(
+      failedSendSnapshotOwnsCurrentError(snapshot, {
+        error: "rate limited",
+        errorVersion: 3,
+      }),
+    ).toBe(false);
+    expect(failedSendSnapshotOwnsCurrentError(snapshot, { error: null, errorVersion: 3 })).toBe(
+      false,
+    );
+  });
+});
+
+describe("evictOverflowFailedThreadSend", () => {
+  const snapshotFor = (errorMessage: string, errorVersion: number) => ({
+    errorMessage,
+    errorVersion,
+    prompt: "failed payload",
+  });
+  // Fills the map to the bound so the next call must evict its oldest entry.
+  const fill = (sends: Map<ThreadId, ReturnType<typeof snapshotFor>>) => {
+    for (let index = 0; sends.size < MAX_FAILED_THREAD_SEND_SNAPSHOTS; index += 1) {
+      sends.set(ThreadId.makeUnsafe(`thread-fill-${index}`), snapshotFor("other", 1));
+    }
+  };
+
+  it("leaves the map alone below the bound", () => {
+    const sends = new Map([[ThreadId.makeUnsafe("thread-1"), snapshotFor("e", 1)]]);
+    expect(
+      evictOverflowFailedThreadSend(sends, () => ({ error: "e", errorVersion: 1 })),
+    ).toBeNull();
+    expect(sends.size).toBe(1);
+  });
+
+  it("returns the evicted thread only while its snapshot still owns the current error", () => {
+    const oldest = ThreadId.makeUnsafe("thread-oldest");
+    const sends = new Map<ThreadId, ReturnType<typeof snapshotFor>>([
+      [oldest, snapshotFor("send failed", 1)],
+    ]);
+    fill(sends);
+    expect(
+      evictOverflowFailedThreadSend(sends, () => ({
+        error: "send failed",
+        errorVersion: 1,
+      })),
+    ).toBe(oldest);
+    expect(sends.has(oldest)).toBe(false);
+    expect(sends.size).toBe(MAX_FAILED_THREAD_SEND_SNAPSHOTS - 1);
+  });
+
+  it("evicts the stale snapshot without clearing the newer identical error (E→F→E)", () => {
+    const oldest = ThreadId.makeUnsafe("thread-oldest");
+    const sends = new Map<ThreadId, ReturnType<typeof snapshotFor>>([
+      [oldest, snapshotFor("rate limited", 1)],
+    ]);
+    fill(sends);
+    // The same message was re-raised at a newer generation — the card belongs
+    // to a different failure, so eviction must not clear it.
+    expect(
+      evictOverflowFailedThreadSend(sends, () => ({
+        error: "rate limited",
+        errorVersion: 3,
+      })),
+    ).toBeNull();
+    expect(sends.has(oldest)).toBe(false);
+  });
+});
+
+describe("bumpLocalDraftErrorVersion", () => {
+  const noPins = () => false;
+
+  it("bumps monotonically per thread", () => {
+    const versions = new Map<ThreadId, number>();
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    expect(bumpLocalDraftErrorVersion(versions, noPins, threadId)).toBe(1);
+    expect(bumpLocalDraftErrorVersion(versions, noPins, threadId)).toBe(2);
+    expect(bumpLocalDraftErrorVersion(versions, noPins, ThreadId.makeUnsafe("other"))).toBe(1);
+  });
+
+  it("bounds the map by evicting the oldest entry no live snapshot references", () => {
+    const versions = new Map<ThreadId, number>();
+    // A pinned entry — the one a failed-send snapshot still references — must
+    // survive pressure so the snapshot's identity check can never go blind.
+    const pinnedId = ThreadId.makeUnsafe("thread-pinned");
+    bumpLocalDraftErrorVersion(versions, noPins, pinnedId);
+    const isPinned = (id: ThreadId) => id === pinnedId;
+    for (let index = 0; index < MAX_LOCAL_DRAFT_ERROR_VERSIONS + 10; index += 1) {
+      bumpLocalDraftErrorVersion(versions, isPinned, ThreadId.makeUnsafe(`thread-${index}`));
+    }
+    expect(versions.size).toBeLessThanOrEqual(MAX_LOCAL_DRAFT_ERROR_VERSIONS);
+    expect(versions.has(pinnedId)).toBe(true);
+    // The oldest unpinned entries were evicted first.
+    expect(versions.has(ThreadId.makeUnsafe("thread-0"))).toBe(false);
+    expect(versions.has(ThreadId.makeUnsafe(`thread-${MAX_LOCAL_DRAFT_ERROR_VERSIONS + 9}`))).toBe(
+      true,
+    );
+  });
+});
+
+describe("releaseFailedSendSnapshotAfterSend", () => {
+  const snapshot = { errorMessage: "rate limited", errorVersion: 1 };
+
+  it("deletes the exact snapshot when the resend is accepted and the error was cleared", async () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, snapshot]]);
+    const accepted = await releaseFailedSendSnapshotAfterSend(
+      Promise.resolve(true),
+      failedSends,
+      threadId,
+      snapshot,
+      () => ({ error: null, errorVersion: 2 }),
+    );
+    expect(accepted).toBe(true);
+    expect(failedSends.has(threadId)).toBe(false);
+  });
+
+  it("retains the snapshot when the resend is rejected", async () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, snapshot]]);
+    const accepted = await releaseFailedSendSnapshotAfterSend(
+      Promise.resolve(false),
+      failedSends,
+      threadId,
+      snapshot,
+      () => ({ error: null, errorVersion: 2 }),
+    );
+    expect(accepted).toBe(false);
+    expect(failedSends.get(threadId)).toBe(snapshot);
+  });
+
+  it("does not delete the snapshot when accepted but the send did not actually dispatch", async () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, snapshot]]);
+    const accepted = await releaseFailedSendSnapshotAfterSend(
+      Promise.resolve(true),
+      failedSends,
+      threadId,
+      snapshot,
+      () => ({ error: snapshot.errorMessage, errorVersion: snapshot.errorVersion }),
+    );
+    expect(accepted).toBe(true);
+    expect(failedSends.get(threadId)).toBe(snapshot);
+  });
+
+  it("does not delete a newer snapshot created by an overlapping send", async () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const newer = { errorMessage: "network error", errorVersion: 2 };
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, newer]]);
+    const accepted = await releaseFailedSendSnapshotAfterSend(
+      Promise.resolve(true),
+      failedSends,
+      threadId,
+      snapshot,
+      () => ({ error: newer.errorMessage, errorVersion: newer.errorVersion }),
+    );
+    expect(accepted).toBe(true);
+    expect(failedSends.get(threadId)).toBe(newer);
+  });
+});
+
+describe("releaseSupersededFailedSend", () => {
+  const snapshot = { errorMessage: "rate limited", errorVersion: 1 };
+
+  it("releases the superseded snapshot and clears the error together", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, snapshot]]);
+    const cleared: ThreadId[] = [];
+    releaseSupersededFailedSend(failedSends, threadId, (id) => {
+      cleared.push(id);
+    });
+    expect(failedSends.has(threadId)).toBe(false);
+    expect(cleared).toEqual([threadId]);
+  });
+
+  it("still clears the error when no failed-send snapshot exists", () => {
+    // An accepted send supersedes whatever card is showing, including a fresh
+    // error that has no captured payload — it must not survive the commit.
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const failedSends = new Map<ThreadId, typeof snapshot>();
+    const cleared: ThreadId[] = [];
+    releaseSupersededFailedSend(failedSends, threadId, (id) => {
+      cleared.push(id);
+    });
+    expect(cleared).toEqual([threadId]);
+  });
+
+  it("releases a snapshot recorded while the send was still preparing, so its payload cannot outlive the superseded card", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const newer = { errorMessage: "network error", errorVersion: 2 };
+    const failedSends = new Map<ThreadId, typeof newer>([[threadId, newer]]);
+    const cleared: ThreadId[] = [];
+    releaseSupersededFailedSend(failedSends, threadId, (id) => {
+      cleared.push(id);
+    });
+    expect(failedSends.has(threadId)).toBe(false);
+    expect(cleared).toEqual([threadId]);
+  });
+
+  it("leaves another thread's failed send untouched", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const otherThreadId = ThreadId.makeUnsafe("thread-2");
+    const failedSends = new Map<ThreadId, typeof snapshot>([[otherThreadId, snapshot]]);
+    releaseSupersededFailedSend(failedSends, threadId, () => {});
+    expect(failedSends.get(otherThreadId)).toBe(snapshot);
+  });
+});
+
+describe("releaseRetriedFailedSend", () => {
+  const snapshot = { errorMessage: "rate limited", errorVersion: 1 };
+  const retriedError = { error: "rate limited", errorVersion: 1 };
+
+  it("releases the captured snapshot and clears its card when the state is unchanged", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, snapshot]]);
+    const cleared: ThreadId[] = [];
+    releaseRetriedFailedSend(
+      failedSends,
+      threadId,
+      snapshot,
+      retriedError,
+      () => retriedError,
+      (id) => {
+        cleared.push(id);
+      },
+    );
+    expect(failedSends.has(threadId)).toBe(false);
+    expect(cleared).toEqual([threadId]);
+  });
+
+  it("leaves a newer snapshot and its card intact when a failure lands during the retry's attachment rebuild", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const newer = { errorMessage: "network error", errorVersion: 2 };
+    const newerError = { error: newer.errorMessage, errorVersion: newer.errorVersion };
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, newer]]);
+    const cleared: ThreadId[] = [];
+    releaseRetriedFailedSend(
+      failedSends,
+      threadId,
+      snapshot,
+      retriedError,
+      () => newerError,
+      (id) => {
+        cleared.push(id);
+      },
+    );
+    expect(failedSends.get(threadId)).toBe(newer);
+    expect(cleared).toEqual([]);
+  });
+
+  it("clears a card with no captured payload (transcript retry) only while the same error is still showing", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const failedSends = new Map<ThreadId, typeof snapshot>();
+    const cleared: ThreadId[] = [];
+    const getCurrentError = () => retriedError;
+    releaseRetriedFailedSend(failedSends, threadId, null, retriedError, getCurrentError, (id) => {
+      cleared.push(id);
+    });
+    expect(cleared).toEqual([threadId]);
+    // A newer error that replaced the retried one survives the commit.
+    cleared.length = 0;
+    releaseRetriedFailedSend(
+      failedSends,
+      threadId,
+      null,
+      retriedError,
+      () => ({ error: "different failure", errorVersion: 2 }),
+      (id) => {
+        cleared.push(id);
+      },
+    );
+    expect(cleared).toEqual([]);
+  });
+
+  it("releases the retried snapshot even when a newer card without a payload is showing — its payload is already queued", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, snapshot]]);
+    const cleared: ThreadId[] = [];
+    releaseRetriedFailedSend(
+      failedSends,
+      threadId,
+      snapshot,
+      retriedError,
+      () => ({ error: "different failure", errorVersion: 2 }),
+      (id) => {
+        cleared.push(id);
+      },
+    );
+    expect(failedSends.has(threadId)).toBe(false);
+    expect(cleared).toEqual([]);
+  });
+
+  it("keeps the card when a newer failed send re-recorded the same error text — its snapshot must not be stranded", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    // Recording a snapshot does not bump the error version when the message is
+    // unchanged (setError no-ops on identical text), so the newer snapshot
+    // owning the card is the only signal that this is a different failure.
+    const newer = { errorMessage: "rate limited", errorVersion: 1 };
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, newer]]);
+    const cleared: ThreadId[] = [];
+    releaseRetriedFailedSend(
+      failedSends,
+      threadId,
+      null,
+      retriedError,
+      () => retriedError,
+      (id) => {
+        cleared.push(id);
+      },
+    );
+    expect(failedSends.get(threadId)).toBe(newer);
+    expect(cleared).toEqual([]);
+  });
+
+  it("keeps a replaced snapshot and its card when a newer failure owns the current error", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const newer = { errorMessage: "rate limited", errorVersion: 1 };
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, newer]]);
+    const cleared: ThreadId[] = [];
+    releaseRetriedFailedSend(
+      failedSends,
+      threadId,
+      snapshot,
+      retriedError,
+      () => retriedError,
+      (id) => {
+        cleared.push(id);
+      },
+    );
+    expect(failedSends.get(threadId)).toBe(newer);
+    expect(cleared).toEqual([]);
+  });
+});
+
+// `onSend` has several commit points — the restored-draft queue enqueue, the
+// plan-follow-up enqueue, the direct dispatch, and `onSubmitPlanFollowUp` — and
+// every one of them funnels through `releaseFailedSendAtSendCommit`. A retry
+// passes the identity it captured before its awaits; a fresh send passes
+// nothing and supersedes. These tests pin the overlap contract each path
+// relies on: a newer failure that lands mid-retry keeps its snapshot and card.
+describe("releaseFailedSendAtSendCommit", () => {
+  const snapshot = { errorMessage: "rate limited", errorVersion: 1 };
+  const retriedError = { error: "rate limited", errorVersion: 1 };
+
+  it("supersedes the failed-send pair for a fresh send, including the plan-follow-up queue commit", () => {
+    // A queued plan follow-up must not leave the stale card and pinned payload
+    // behind — it commits like any other send.
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, snapshot]]);
+    const cleared: ThreadId[] = [];
+    releaseFailedSendAtSendCommit(
+      failedSends,
+      threadId,
+      undefined,
+      () => retriedError,
+      (id) => {
+        cleared.push(id);
+      },
+    );
+    expect(failedSends.has(threadId)).toBe(false);
+    expect(cleared).toEqual([threadId]);
+  });
+
+  it("keeps a newer snapshot and card when a direct-dispatch retry commits over an overlapping failure", () => {
+    // The snapshot leg dispatches `send(undefined, "queue", retryTurn)`, which
+    // skips the queue branch and commits at the direct dispatch point — after
+    // awaits during which a newer send can fail.
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const newer = { errorMessage: "network error", errorVersion: 2 };
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, newer]]);
+    const cleared: ThreadId[] = [];
+    releaseFailedSendAtSendCommit(
+      failedSends,
+      threadId,
+      { expectedSnapshot: snapshot, retriedError },
+      () => ({ error: newer.errorMessage, errorVersion: newer.errorVersion }),
+      (id) => {
+        cleared.push(id);
+      },
+    );
+    expect(failedSends.get(threadId)).toBe(newer);
+    expect(cleared).toEqual([]);
+  });
+
+  it("keeps a newer snapshot and card when a restored-draft retry commits to the queue", () => {
+    // The restored-draft leg calls `send(undefined, "queue")` and commits at
+    // the queue-enqueue point after the attachment-persistence await. The
+    // overlapping failure re-raised identical text, so only the snapshot it
+    // recorded proves the card belongs to it.
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const newer = { errorMessage: "rate limited", errorVersion: 1 };
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, newer]]);
+    const cleared: ThreadId[] = [];
+    releaseFailedSendAtSendCommit(
+      failedSends,
+      threadId,
+      { expectedSnapshot: snapshot, retriedError },
+      () => retriedError,
+      (id) => {
+        cleared.push(id);
+      },
+    );
+    expect(failedSends.get(threadId)).toBe(newer);
+    expect(cleared).toEqual([]);
+  });
+
+  it("keeps a newer snapshot and card when a plan follow-up retry commits over an overlapping failure", () => {
+    // The transcript fallback has no captured payload, so the retry carries
+    // only the error identity it was initiated for; a newer failure recorded
+    // in between keeps both halves of its pair.
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const newer = { errorMessage: "network error", errorVersion: 2 };
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, newer]]);
+    const cleared: ThreadId[] = [];
+    releaseFailedSendAtSendCommit(
+      failedSends,
+      threadId,
+      { expectedSnapshot: null, retriedError },
+      () => ({ error: newer.errorMessage, errorVersion: newer.errorVersion }),
+      (id) => {
+        cleared.push(id);
+      },
+    );
+    expect(failedSends.get(threadId)).toBe(newer);
+    expect(cleared).toEqual([]);
+  });
+
+  it("releases the retry's own pair when nothing newer landed before the commit", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const failedSends = new Map<ThreadId, typeof snapshot>([[threadId, snapshot]]);
+    const cleared: ThreadId[] = [];
+    releaseFailedSendAtSendCommit(
+      failedSends,
+      threadId,
+      { expectedSnapshot: snapshot, retriedError },
+      () => retriedError,
+      (id) => {
+        cleared.push(id);
+      },
+    );
+    expect(failedSends.has(threadId)).toBe(false);
+    expect(cleared).toEqual([threadId]);
+  });
+});
+
+// The transcript fallback replays the errored turn's own input, so it must only
+// fire when the card's failure IS that turn's failure. Every other error source
+// (approval and user-input responses, unblocks, plan follow-ups, dispatches
+// that never produced a turn) has no safe payload, and resending the last
+// transcript message would launch an unrelated earlier request. The returned
+// turn is also the retry's plan-linkage source: buildRetryTurn copies its
+// sourceProposedPlan so the retried thread.turn.start keeps implementation
+// tracking attached to the original plan.
+describe("findTranscriptFallbackRetryTarget", () => {
+  const erroredTurnId = TurnId.makeUnsafe("turn-errored");
+  const planReference = {
+    threadId: ThreadId.makeUnsafe("thread-1"),
+    planId: "plan-1",
+  };
+  const erroredPlanTurn: NonNullable<Thread["latestTurn"]> = {
+    turnId: erroredTurnId,
+    state: "error",
+    requestedAt: "2026-09-09T00:00:02.000Z",
+    startedAt: "2026-09-09T00:00:02.500Z",
+    completedAt: "2026-09-09T00:00:03.000Z",
+    assistantMessageId: null,
+    sourceProposedPlan: planReference,
+  };
+  const currentError = { error: "boom", errorVersion: 3 };
+  const ownership = {
+    threadId: ThreadId.makeUnsafe("thread-1"),
+    turnId: erroredTurnId,
+    errorVersion: currentError.errorVersion,
+    writeEpoch: 7,
+  };
+  const userMessage = (turnId: TurnId | null, text = "Implement the plan"): ChatMessage => ({
+    id: MessageId.makeUnsafe(text.toLowerCase().replace(/\s+/g, "-")),
+    role: "user",
+    text,
+    turnId,
+    createdAt: "2026-09-09T00:00:01.000Z",
+    streaming: false,
+  });
+
+  it("targets the errored turn's own last user message and carries its plan linkage", () => {
+    const failedUserMessage = userMessage(erroredTurnId, "Implement the plan");
+    const ownership = {
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      turnId: erroredTurnId,
+      errorVersion: currentError.errorVersion,
+      writeEpoch: 7,
+    };
+    const target = findTranscriptFallbackRetryTarget(
+      [userMessage(TurnId.makeUnsafe("turn-older"), "Propose a plan"), failedUserMessage],
+      erroredPlanTurn,
+      currentError,
+      ownership,
+      7,
+    );
+    expect(target?.message).toBe(failedUserMessage);
+    // Identity, not a copy: the retry reads sourceProposedPlan off this exact
+    // turn record, so the retried thread.turn.start keeps the linkage.
+    expect(target?.turn).toBe(erroredPlanTurn);
+    expect(target?.turn.sourceProposedPlan).toEqual(planReference);
+  });
+
+  it("rejects a live turn so a retry cannot interrupt or duplicate it", () => {
+    expect(
+      findTranscriptFallbackRetryTarget(
+        [userMessage(erroredTurnId)],
+        { ...erroredPlanTurn, state: "running", completedAt: null },
+        currentError,
+        ownership,
+        7,
+      ),
+    ).toBeNull();
+  });
+
+  it("rejects when the last user message belongs to an older turn", () => {
+    // An approval or user-input response failure lands while an errored turn is
+    // still the latest but its own dispatch never produced a transcript message
+    // — the fallback must not resend the older turn's input.
+    expect(
+      findTranscriptFallbackRetryTarget(
+        [userMessage(TurnId.makeUnsafe("turn-older"))],
+        { ...erroredPlanTurn, turnId: TurnId.makeUnsafe("turn-newer") },
+        currentError,
+        ownership,
+        7,
+      ),
+    ).toBeNull();
+  });
+
+  it("rejects a transcript whose last user message never joined a turn", () => {
+    expect(
+      findTranscriptFallbackRetryTarget(
+        [userMessage(null)],
+        erroredPlanTurn,
+        currentError,
+        ownership,
+        7,
+      ),
+    ).toBeNull();
+  });
+
+  it("rejects a transcript with no user message at all", () => {
+    expect(
+      findTranscriptFallbackRetryTarget([], erroredPlanTurn, currentError, ownership, 7),
+    ).toBeNull();
+  });
+
+  it("rejects a completed latest turn — its failure is not the card's error", () => {
+    expect(
+      findTranscriptFallbackRetryTarget(
+        [userMessage(erroredTurnId)],
+        { ...erroredPlanTurn, state: "completed" },
+        currentError,
+        ownership,
+        7,
+      ),
+    ).toBeNull();
+  });
+});
+
+// "Try again" must reflect a concrete replay target, not just a retryable
+// error string: approval and user-input response failures can raise
+// connection-classified errors with nothing to replay. A target exists when a
+// failed-send snapshot still owns the current error, or the transcript
+// fallback has a safe target.
+describe("hasThreadErrorRetryTarget", () => {
+  const erroredTurnId = TurnId.makeUnsafe("turn-errored");
+  const erroredPlanTurn: NonNullable<Thread["latestTurn"]> = {
+    turnId: erroredTurnId,
+    state: "error",
+    requestedAt: "2026-09-09T00:00:02.000Z",
+    startedAt: "2026-09-09T00:00:02.500Z",
+    completedAt: "2026-09-09T00:00:03.000Z",
+    assistantMessageId: null,
+  };
+  const userMessage = (turnId: TurnId | null): ChatMessage => ({
+    id: MessageId.makeUnsafe("message-errored"),
+    role: "user",
+    text: "Implement the plan",
+    turnId,
+    createdAt: "2026-09-09T00:00:01.000Z",
+    streaming: false,
+  });
+  const snapshot = { errorMessage: "boom", errorVersion: 1 };
+
+  it("accepts a snapshot that still owns the current error", () => {
+    expect(
+      hasThreadErrorRetryTarget(snapshot, { error: "boom", errorVersion: 1 }, [], null, null, 4),
+    ).toBe(true);
+  });
+
+  it("rejects a stale snapshot with no transcript fallback target", () => {
+    // An approval or user-input response failure replaced the card: the
+    // snapshot no longer owns it and no errored turn exists to replay.
+    expect(
+      hasThreadErrorRetryTarget(snapshot, { error: "boom", errorVersion: 2 }, [], null, null, 4),
+    ).toBe(false);
+  });
+
+  it("accepts the transcript fallback while the session attribution is current", () => {
+    expect(
+      hasThreadErrorRetryTarget(
+        undefined,
+        { error: "boom", errorVersion: 1 },
+        [userMessage(erroredTurnId)],
+        erroredPlanTurn,
+        {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          turnId: erroredTurnId,
+          errorVersion: 1,
+          writeEpoch: 4,
+        },
+        4,
+      ),
+    ).toBe(true);
+  });
+
+  it("closes the transcript fallback once a newer client-side failure overwrites the error", () => {
+    // An attachment, script, approval, or user-input failure overwrites
+    // thread.error without touching the session's lastError: the card now
+    // belongs to that newer failure, and the old turn's input must not resend.
+    expect(
+      hasThreadErrorRetryTarget(
+        undefined,
+        { error: "You can attach up to 8 references per message.", errorVersion: 4 },
+        [userMessage(erroredTurnId)],
+        erroredPlanTurn,
+        null,
+        4,
+      ),
+    ).toBe(false);
+  });
+
+  it("closes the transcript fallback when a client write reuses the session text", () => {
+    // The client write bumps the write epoch without changing the generation,
+    // so the attribution recorded for the session failure no longer matches.
+    expect(
+      hasThreadErrorRetryTarget(
+        undefined,
+        { error: "boom", errorVersion: 3 },
+        [userMessage(erroredTurnId)],
+        erroredPlanTurn,
+        {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          turnId: erroredTurnId,
+          errorVersion: 3,
+          writeEpoch: 9,
+        },
+        10,
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects when neither a snapshot nor a fallback target exists", () => {
+    expect(
+      hasThreadErrorRetryTarget(undefined, { error: "boom", errorVersion: 1 }, [], null, null, 4),
+    ).toBe(false);
+  });
+
+  it("keeps the fallback closed when the session error is null", () => {
+    // A client-side clear or a non-session error source: nothing ties the
+    // card to the errored turn.
+    expect(
+      hasThreadErrorRetryTarget(
+        undefined,
+        { error: "boom", errorVersion: 1 },
+        [userMessage(erroredTurnId)],
+        erroredPlanTurn,
+        null,
+        4,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("bumpThreadErrorWriteEpoch", () => {
+  it("keeps a recently written thread's entry alive across writes to other threads", () => {
+    const epochs = new Map<ThreadId, number>();
+    const counter = { current: 0 };
+    const touched = ThreadId.makeUnsafe("thread-touched");
+    bumpThreadErrorWriteEpoch(epochs, touched, counter);
+    for (let i = 0; i < MAX_THREAD_ERROR_WRITE_EPOCHS - 1; i += 1) {
+      bumpThreadErrorWriteEpoch(epochs, ThreadId.makeUnsafe(`thread-other-${i}`), counter);
+    }
+    // The touched entry is still the least recently written here, but the
+    // re-touch moves it to the tail before the bound applies, so it survives
+    // with the next globally monotonic value.
+    expect(bumpThreadErrorWriteEpoch(epochs, touched, counter)).toBe(65);
+    expect(epochs.has(touched)).toBe(true);
+    expect(epochs.size).toBeLessThanOrEqual(MAX_THREAD_ERROR_WRITE_EPOCHS);
+  });
+
+  it("keeps epochs globally monotonic past eviction, so old claims never re-match", () => {
+    const epochs = new Map<ThreadId, number>();
+    const counter = { current: 0 };
+    const evicted = ThreadId.makeUnsafe("thread-evicted");
+    bumpThreadErrorWriteEpoch(epochs, evicted, counter);
+    for (let i = 0; i < MAX_THREAD_ERROR_WRITE_EPOCHS; i += 1) {
+      bumpThreadErrorWriteEpoch(epochs, ThreadId.makeUnsafe(`thread-other-${i}`), counter);
+    }
+    expect(epochs.has(evicted)).toBe(false);
+    // The next write takes the next global value, not a restarted 1: an old
+    // claim with epoch 1 can never match a later same-text write.
+    const nextEpoch = bumpThreadErrorWriteEpoch(epochs, evicted, counter);
+    expect(nextEpoch).toBeGreaterThan(MAX_THREAD_ERROR_WRITE_EPOCHS);
   });
 });

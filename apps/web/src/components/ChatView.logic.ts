@@ -1903,3 +1903,303 @@ export function enrichSubagentWorkEntries(
     };
   });
 }
+
+// Abandoned error cards would otherwise pin attachment File blobs in the map
+// forever; evict the oldest entry past this bound.
+export const MAX_FAILED_THREAD_SEND_SNAPSHOTS = 8;
+
+export interface FailedSendErrorIdentity {
+  /** The error string this failure raised. */
+  errorMessage: string;
+  /** The thread's error generation right after this failure raised its card. */
+  errorVersion: number;
+}
+
+export interface CurrentThreadError {
+  error: string | null;
+  errorVersion: number;
+}
+
+// A failed-send snapshot only owns the thread's error card while the current
+// error is still the generation that failure raised. The generation bumps on
+// every error change, so a rewritten message — even an identical one — is a
+// different generation and the snapshot is stale.
+export function failedSendSnapshotOwnsCurrentError(
+  snapshot: FailedSendErrorIdentity,
+  current: CurrentThreadError,
+): boolean {
+  return current.error === snapshot.errorMessage && current.errorVersion === snapshot.errorVersion;
+}
+
+// Evicts the oldest snapshot once the map hits the bound. Returns the evicted
+// thread id when the snapshot still owns that thread's current error — the
+// caller must clear that error so the card cannot outlive its retry payload.
+// Returns null when nothing was evicted or the evicted snapshot is stale (a
+// newer error already replaced the card it raised).
+export function evictOverflowFailedThreadSend<S extends FailedSendErrorIdentity>(
+  failedSends: Map<ThreadId, S>,
+  currentError: (threadId: ThreadId) => CurrentThreadError,
+): ThreadId | null {
+  if (failedSends.size < MAX_FAILED_THREAD_SEND_SNAPSHOTS) {
+    return null;
+  }
+  const oldest = failedSends.keys().next().value;
+  if (oldest === undefined) {
+    return null;
+  }
+  const evicted = failedSends.get(oldest);
+  failedSends.delete(oldest);
+  if (!evicted) {
+    return null;
+  }
+  return failedSendSnapshotOwnsCurrentError(evicted, currentError(oldest)) ? oldest : null;
+}
+
+// Draft threads have no store entry, so their error generations live in a
+// component-local map keyed by thread id. A generation is only ever compared
+// against a live failed-send snapshot, so past this bound the oldest entry no
+// snapshot references can be evicted safely; pinned entries always survive.
+export const MAX_LOCAL_DRAFT_ERROR_VERSIONS = 64;
+
+export function bumpLocalDraftErrorVersion(
+  versions: Map<ThreadId, number>,
+  isPinned: (threadId: ThreadId) => boolean,
+  threadId: ThreadId,
+): number {
+  const nextVersion = (versions.get(threadId) ?? 0) + 1;
+  // Re-insert at the tail so the bound evicts the least recently touched.
+  versions.delete(threadId);
+  if (versions.size >= MAX_LOCAL_DRAFT_ERROR_VERSIONS) {
+    const evictable = [...versions.keys()].find((id) => !isPinned(id));
+    if (evictable !== undefined) {
+      versions.delete(evictable);
+    }
+  }
+  versions.set(threadId, nextVersion);
+  return nextVersion;
+}
+
+// A failed-send snapshot should be released only once the resend is accepted
+// and actually dispatched or durably queued. The promise may resolve `true` for
+// non-dispatching flows (stale automation resolution, slash commands, etc.), so
+// we delete the exact snapshot only when the map still contains it *and* the
+// thread's current error is no longer the one it raised. This also prevents an
+// accepted older retry from deleting a newer failed-send snapshot created by an
+// overlapping send.
+export async function releaseFailedSendSnapshotAfterSend<S extends FailedSendErrorIdentity>(
+  acceptedPromise: Promise<boolean>,
+  failedSends: Map<ThreadId, S>,
+  threadId: ThreadId,
+  expectedSnapshot: S,
+  getCurrentError: (threadId: ThreadId) => CurrentThreadError,
+): Promise<boolean> {
+  const accepted = await acceptedPromise;
+  if (accepted) {
+    const current = failedSends.get(threadId);
+    if (
+      current === expectedSnapshot &&
+      !failedSendSnapshotOwnsCurrentError(expectedSnapshot, getCurrentError(threadId))
+    ) {
+      failedSends.delete(threadId);
+    }
+  }
+  return accepted;
+}
+
+// Accepting a send supersedes whatever failed-send payload and error card the
+// thread was showing — the same pairing the direct dispatch path runs when it
+// commits the turn. The delete and the clear must move together: a card
+// without its payload can never retry, and a payload without its card leaks
+// attachments. It runs unconditionally at the commit point so an error that
+// lands while the send is still being prepared (e.g. a live turn failing
+// during attachment persistence) is superseded along with the rest.
+export function releaseSupersededFailedSend<S extends FailedSendErrorIdentity>(
+  failedSends: Map<ThreadId, S>,
+  threadId: ThreadId,
+  clearError: (threadId: ThreadId) => void,
+): void {
+  failedSends.delete(threadId);
+  clearError(threadId);
+}
+
+// A retry replays one specific captured payload — unlike a fresh send, it may
+// release only the snapshot it was initiated with and clear only the card that
+// snapshot raised. Retrying can take real time (transcript attachment rebuilds
+// await network fetches before the queued retry commits), so a newer failure
+// may have landed in between: its snapshot and its card both stay intact.
+// expectedSnapshot is null for the transcript fallback, which has no payload.
+export function releaseRetriedFailedSend<S extends FailedSendErrorIdentity>(
+  failedSends: Map<ThreadId, S>,
+  threadId: ThreadId,
+  expectedSnapshot: S | null,
+  retriedError: CurrentThreadError,
+  getCurrentError: (threadId: ThreadId) => CurrentThreadError,
+  clearError: (threadId: ThreadId) => void,
+): void {
+  if (expectedSnapshot !== null && failedSends.get(threadId) === expectedSnapshot) {
+    failedSends.delete(threadId);
+  }
+  const current = getCurrentError(threadId);
+  const currentSnapshot = failedSends.get(threadId);
+  // An identical error text can hide a newer failure: recording a snapshot does
+  // not bump the error version when the message is unchanged, so a snapshot
+  // that now owns the card — and is not the one this retry just released — is
+  // the only signal that the card belongs to a newer failure. Keep it.
+  const claimedByNewerSnapshot =
+    currentSnapshot !== undefined &&
+    currentSnapshot !== expectedSnapshot &&
+    failedSendSnapshotOwnsCurrentError(currentSnapshot, current);
+  if (
+    !claimedByNewerSnapshot &&
+    current.error === retriedError.error &&
+    current.errorVersion === retriedError.errorVersion
+  ) {
+    clearError(threadId);
+  }
+}
+
+// The identity a retry carries through the send path so the commit point can
+// tell it apart from a fresh send. `expectedSnapshot` is the failed-send
+// snapshot the retry was initiated with — null for the transcript fallback,
+// which has no captured payload. `retriedError` is the error generation the
+// retry was initiated for, captured before its first await.
+export interface RetriedFailedSendCommit<S extends FailedSendErrorIdentity> {
+  expectedSnapshot: S | null;
+  retriedError: CurrentThreadError;
+}
+
+// The single release every send commit point runs. A normal send supersedes
+// whatever failed-send payload and error card the thread was showing. A retry
+// routes through the same commit points but replays one captured payload, so
+// callers pass the identity captured when the retry started: only that
+// snapshot and the card it raised are released — a newer failure that landed
+// while the retry was in flight keeps both.
+export function releaseFailedSendAtSendCommit<S extends FailedSendErrorIdentity>(
+  failedSends: Map<ThreadId, S>,
+  threadId: ThreadId,
+  retriedCommit: RetriedFailedSendCommit<S> | undefined,
+  getCurrentError: (threadId: ThreadId) => CurrentThreadError,
+  clearError: (threadId: ThreadId) => void,
+): void {
+  if (retriedCommit) {
+    releaseRetriedFailedSend(
+      failedSends,
+      threadId,
+      retriedCommit.expectedSnapshot,
+      retriedCommit.retriedError,
+      getCurrentError,
+      clearError,
+    );
+    return;
+  }
+  releaseSupersededFailedSend(failedSends, threadId, clearError);
+}
+
+// The transcript fallback replays the input of the turn that errored, so it is
+// only safe when the card's failure IS that turn's failure. `ownership` is the
+// attribution ChatView records when it observes a new error generation: it is
+// set only when the thread's current error is the session-projected failure
+// (thread.error equals the session's lastError) of an errored latest turn, and
+// it carries the write epoch observed at that moment. A client-side failure
+// that reuses the session failure's exact text bumps the write epoch without
+// changing the generation, so a stale epoch closes the fallback. Any other
+// error source — an approval or user-input response, an unblock, a plan
+// follow-up, an attachment or script failure, or a dispatch that never
+// produced a turn — has no safe payload here, and resending the last
+// transcript message would launch an unrelated earlier request. The returned
+// turn is the retry's payload source: its sourceProposedPlan keeps a
+// plan-backed retry's implementation linkage.
+export interface TranscriptFallbackOwnership {
+  threadId: ThreadId;
+  turnId: NonNullable<Thread["latestTurn"]>["turnId"];
+  errorVersion: number;
+  writeEpoch: number;
+}
+
+export function findTranscriptFallbackRetryTarget(
+  messages: readonly ChatMessage[],
+  latestTurn: Thread["latestTurn"],
+  currentError: CurrentThreadError,
+  ownership: TranscriptFallbackOwnership | null,
+  currentWriteEpoch: number,
+): { message: ChatMessage; turn: NonNullable<Thread["latestTurn"]> } | null {
+  if (!latestTurn || latestTurn.state !== "error") {
+    return null;
+  }
+  // The card must still be showing the generation the session projected for
+  // this turn, attributed when it landed: a newer client-side failure — even
+  // one reusing the exact text — bumps the write epoch and breaks the match.
+  if (
+    !ownership ||
+    ownership.turnId !== latestTurn.turnId ||
+    ownership.errorVersion !== currentError.errorVersion ||
+    ownership.writeEpoch !== currentWriteEpoch
+  ) {
+    return null;
+  }
+  const lastUserMessage = messages.findLast((message) => message.role === "user");
+  if (
+    !lastUserMessage ||
+    lastUserMessage.turnId == null ||
+    lastUserMessage.turnId !== latestTurn.turnId
+  ) {
+    return null;
+  }
+  return { message: lastUserMessage, turn: latestTurn };
+}
+
+// The error card's "Try again" must reflect a concrete replay target, not just
+// a retryable-looking error string: approval and user-input response failures
+// can raise connection-classified errors with nothing to replay, and a button
+// that performs no request is worse than no button. A target exists when a
+// failed-send snapshot still owns the current error (its payload replays) or
+// the transcript fallback has a safe target (the errored latest turn's own
+// last user message).
+export function hasThreadErrorRetryTarget(
+  snapshot: FailedSendErrorIdentity | undefined,
+  currentError: CurrentThreadError,
+  messages: readonly ChatMessage[],
+  latestTurn: Thread["latestTurn"],
+  ownership: TranscriptFallbackOwnership | null,
+  currentWriteEpoch: number,
+): boolean {
+  if (snapshot && failedSendSnapshotOwnsCurrentError(snapshot, currentError)) {
+    return true;
+  }
+  return (
+    findTranscriptFallbackRetryTarget(
+      messages,
+      latestTurn,
+      currentError,
+      ownership,
+      currentWriteEpoch,
+    ) !== null
+  );
+}
+
+// Bounds the per-thread error-write epoch map (see ChatView's setThreadError).
+// Entries are only read by an in-flight unblock claim, so past this bound the
+// oldest entry can be dropped safely: a claim whose epoch entry was evicted no
+// longer matches, and the guarded release declines to clear — the safe
+// direction (a card is kept, never wrongly cleared).
+export const MAX_THREAD_ERROR_WRITE_EPOCHS = 64;
+
+export function bumpThreadErrorWriteEpoch(
+  epochs: Map<ThreadId, number>,
+  threadId: ThreadId,
+  epochCounter: { current: number },
+): number {
+  // Globally monotonic: an evicted thread's next write takes the next global
+  // value, so an old claim can never numerically match a later write.
+  const nextEpoch = ++epochCounter.current;
+  // Re-insert at the tail so the bound evicts the least recently written.
+  epochs.delete(threadId);
+  if (epochs.size >= MAX_THREAD_ERROR_WRITE_EPOCHS) {
+    const oldest = epochs.keys().next().value;
+    if (oldest !== undefined) {
+      epochs.delete(oldest);
+    }
+  }
+  epochs.set(threadId, nextEpoch);
+  return nextEpoch;
+}

@@ -17,6 +17,8 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import { applyOrchestrationEvents, applyOrchestrationEventsHotPath } from "./storeEventReducer";
+import { failedSendSnapshotOwnsCurrentError } from "./components/ChatView.logic";
+import { setError } from "./store";
 import {
   syncServerShellSnapshot,
   syncServerReadModel,
@@ -2314,5 +2316,117 @@ describe("store event reducer", () => {
     expect(next.messageIdsByThreadId?.[threadId]).toBe(
       initialState.messageIdsByThreadId?.[threadId],
     );
+  });
+});
+
+describe("thread error generation", () => {
+  const sessionSetError = (threadId: ThreadId, lastError: string | null) =>
+    makeDomainEvent("thread.session-set", {
+      threadId,
+      session: {
+        threadId,
+        status: lastError ? "error" : "ready",
+        providerName: "codex",
+        runtimeMode: "full-access",
+        activeTurnId: null,
+        lastError,
+        updatedAt: "2026-02-27T00:02:00.000Z",
+      },
+    });
+
+  it("keeps the generation authoritative across store, session-event, and snapshot writes (E→F→E)", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    // A failed send raises E; the error card's snapshot records the generation.
+    let state = setError(makeState(makeThread()), threadId, "rate limited");
+    const failedSendSnapshot = {
+      errorMessage: "rate limited",
+      errorVersion: threadsOf(state)[0]?.errorVersion ?? 0,
+    };
+    expect(failedSendSnapshot.errorVersion).toBe(1);
+
+    // A session event rewrites the error — a path that must bump the
+    // generation, or an evicted snapshot could clear a card it does not own.
+    state = applyOrchestrationEvents(state, [sessionSetError(threadId, "provider crashed")]);
+    expect(threadsOf(state)[0]?.error).toBe("provider crashed");
+    expect(threadsOf(state)[0]?.errorVersion).toBe(2);
+
+    // A read-model sync raises E again: identical text, new generation.
+    state = syncServerReadModel(
+      state,
+      makeReadModel(
+        makeReadModelThread({
+          updatedAt: "2026-02-27T00:03:00.000Z",
+          session: {
+            threadId,
+            status: "error",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: "rate limited",
+            updatedAt: "2026-02-27T00:03:00.000Z",
+          },
+        }),
+      ),
+    );
+    const current = threadsOf(state)[0];
+    expect(current?.error).toBe("rate limited");
+    expect(current?.errorVersion).toBe(3);
+
+    // The guard behind snapshot eviction and retry identity must not treat the
+    // stale snapshot as owning this card: the newer card stays mounted and
+    // retry cannot replay the old payload.
+    expect(
+      failedSendSnapshotOwnsCurrentError(failedSendSnapshot, {
+        error: current?.error ?? null,
+        errorVersion: current?.errorVersion ?? 0,
+      }),
+    ).toBe(false);
+    expect(
+      failedSendSnapshotOwnsCurrentError(
+        { errorMessage: "rate limited", errorVersion: 3 },
+        { error: current?.error ?? null, errorVersion: current?.errorVersion ?? 0 },
+      ),
+    ).toBe(true);
+  });
+
+  it("does not bump the generation when a write repeats the same error", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    let state = setError(makeState(makeThread()), threadId, "rate limited");
+    const version = threadsOf(state)[0]?.errorVersion;
+    // A session echo of the same error is the same generation — the failed-send
+    // snapshot stays the owner and its card must not be treated as stale.
+    state = applyOrchestrationEvents(state, [sessionSetError(threadId, "rate limited")]);
+    state = setError(state, threadId, "rate limited");
+    expect(threadsOf(state)[0]?.errorVersion).toBe(version);
+  });
+
+  it("keeps a snapshot's generation valid under error churn on other threads", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const churnThreads = Array.from({ length: 70 }, (_, index) =>
+      makeReadModelThread({ id: ThreadId.makeUnsafe(`thread-churn-${index}`) }),
+    );
+    let state = syncServerReadModel(makeState(makeThread()), {
+      ...makeReadModel(makeReadModelThread({})),
+      threads: [makeReadModelThread({}), ...churnThreads],
+    });
+    // The failed send records (message, generation) on its snapshot. The
+    // generation lives on the thread itself, so nothing can age it out while
+    // the snapshot lives — retry stays bound to the payload that raised the card.
+    state = setError(state, threadId, "send failed");
+    const snapshot = {
+      errorMessage: "send failed",
+      errorVersion: threadsOf(state)[0]?.errorVersion ?? 0,
+    };
+    for (const thread of churnThreads) {
+      state = setError(state, thread.id, `churn ${thread.id}`);
+      state = setError(state, thread.id, `churn again ${thread.id}`);
+    }
+    const current = threadsOf(state).find((thread) => thread.id === threadId);
+    expect(
+      failedSendSnapshotOwnsCurrentError(snapshot, {
+        error: current?.error ?? null,
+        errorVersion: current?.errorVersion ?? 0,
+      }),
+    ).toBe(true);
   });
 });

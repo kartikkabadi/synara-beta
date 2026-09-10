@@ -38,6 +38,7 @@ import {
   normalizeTurnDiffFiles,
   providerReferenceArraysEqual,
   resolveCreateBranchFlowCompletedMerge,
+  resolveThreadErrorVersion,
   withOrchestrationEventSequence,
 } from "./storeNormalization";
 import {
@@ -1237,7 +1238,10 @@ function applyOrchestrationEvent(
         event.payload.threadId,
         (thread) => {
           const session = normalizeThreadSession(event.payload.session, thread.session);
-          const error = normalizeThreadErrorMessage(event.payload.session.lastError);
+          const { error, errorVersion } = resolveThreadErrorVersion(
+            thread,
+            normalizeThreadErrorMessage(event.payload.session.lastError),
+          );
           const latestTurn = reconcileLatestTurnFromSession(thread, event.payload.session, error);
           if (
             session === thread.session &&
@@ -1253,6 +1257,7 @@ function applyOrchestrationEvent(
             ...thread,
             session,
             error,
+            errorVersion,
             latestTurn,
             ...(thread.sidechatSourceThreadId && !thread.sidechatExpiredAt
               ? { sidechatLastActivityAt: event.payload.session.updatedAt }

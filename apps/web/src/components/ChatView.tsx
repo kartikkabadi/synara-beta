@@ -162,6 +162,7 @@ import {
   formatOutgoingComposerPrompt,
   hydratePendingBlobComposerAttachments,
   readFileAsDataUrl,
+  rebuildComposerAttachmentsFromMessage,
 } from "../lib/composerSend";
 import { composerImageBlobKey, persistComposerImageBlob } from "../lib/composerImageBlobStore";
 import { reconcileDeletedThreadFromClient } from "../lib/deletedThreadClientReconciliation";
@@ -345,6 +346,7 @@ import { ComposerLiveChangesHeader } from "./chat/ComposerLiveChangesHeader";
 import { ComposerGoalHeader } from "./chat/ComposerGoalHeader";
 import { ComposerPickerMenuPopup } from "./chat/ComposerPickerMenuPopup";
 import { Button } from "./ui/button";
+import { DisclosureRegion } from "./ui/DisclosureRegion";
 import { Skeleton } from "./ui/skeleton";
 import { Menu, MenuItem, MenuTrigger } from "./ui/menu";
 import { randomTerminalId } from "./terminal/terminalIds";
@@ -394,6 +396,7 @@ import {
 } from "../composerDraftStore";
 import { useTemporaryThreadStore } from "../temporaryThreadStore";
 import { useComposerFocusRequestStore } from "../composerFocusRequestStore";
+import { normalizeThreadErrorMessage } from "../storeNormalization";
 import { useWorkflowRunUiStore, useWorkflowRunUiThreadState } from "../workflowRunUiStore";
 import { appendComposerPromptText } from "../lib/chatReferences";
 import {
@@ -419,9 +422,11 @@ import {
   appendAssistantSelectionsToPrompt,
   formatAssistantSelectionQueuePreview,
   formatAssistantSelectionTitleSeed,
+  stripEmbeddedAssistantSelections,
 } from "../lib/assistantSelections";
 import {
   appendBrowserAnnotationsToPrompt,
+  extractTrailingBrowserAnnotations,
   formatBrowserAnnotationLabel,
 } from "../lib/browserAnnotations";
 import {
@@ -495,6 +500,8 @@ import {
 } from "../routes/-automations.shared";
 import { ChatTranscriptPane } from "./chat/ChatTranscriptPane";
 import { ChatThreadFindHost } from "./chat/ThreadFindBar";
+import { ThreadErrorCard } from "./chat/ThreadErrorCard";
+import { useTransientPresentation } from "./chat/useTransientPresentation";
 import {
   createThreadFindHighlightStore,
   eventTargetsInAppBrowser,
@@ -581,7 +588,6 @@ import { resolveRuntimeModelDescriptor } from "./chat/runtimeModelCapabilities";
 import { ProjectPicker } from "./chat/ProjectPicker";
 import { FolderClosed } from "./FolderClosed";
 import { ProviderHealthBanner } from "./chat/ProviderHealthBanner";
-import { useThreadErrorToast } from "./chat/useThreadErrorToast";
 import {
   RateLimitBanner,
   deriveLatestRateLimitStatus,
@@ -596,8 +602,19 @@ import {
   resolveDraftFallbackModelSelection,
   DISMISSED_PROVIDER_HEALTH_BANNERS_KEY,
   DismissedProviderHealthBannersSchema,
+  bumpLocalDraftErrorVersion,
+  bumpThreadErrorWriteEpoch,
   collectUserMessageBlobPreviewUrls,
   deriveComposerSendState,
+  evictOverflowFailedThreadSend,
+  failedSendSnapshotOwnsCurrentError,
+  findTranscriptFallbackRetryTarget,
+  hasThreadErrorRetryTarget,
+  releaseFailedSendAtSendCommit,
+  releaseFailedSendSnapshotAfterSend,
+  releaseRetriedFailedSend,
+  type RetriedFailedSendCommit,
+  type TranscriptFallbackOwnership,
   failWorktreeSetupSnapshot,
   filterSidechatTranscriptMessages,
   hasLiveTurnTakenOver,
@@ -1012,6 +1029,42 @@ type ComposerPluginSuggestion = {
   mention: ProviderMentionReference;
 };
 
+// The payload of a send that failed before its turn dispatched. The composer is
+// restored separately; this snapshot lets the error card's retry replay the
+// exact content (attachments included) even after the draft is edited or
+// cleared, and tells retry whether the live draft IS the restored payload.
+type FailedThreadSendSnapshot = Pick<
+  QueuedComposerChatTurn,
+  | "prompt"
+  | "images"
+  | "files"
+  | "assistantSelections"
+  | "browserAnnotations"
+  | "terminalContexts"
+  | "fileComments"
+  | "pastedTexts"
+  | "skills"
+  | "mentions"
+  | "sourceProposedPlan"
+> & {
+  restoredToComposer: boolean;
+  /**
+   * The interaction mode the failed dispatch used. A plan follow-up's retry
+   * must resend with the mode the failed submission had — an implementation
+   * follow-up replayed as a refinement would silently downgrade to plan mode.
+   */
+  interactionMode?: "default" | "plan";
+  /** The error string this failure raised, so eviction can tell whether the thread's current error still belongs to it. */
+  errorMessage: string;
+  /** The thread's error generation right after this failure raised its card. The generation lives on the thread, so it cannot be evicted while the snapshot lives. */
+  errorVersion: number;
+};
+
+// A retry routes through the same send commit points as a fresh send but may
+// only release the snapshot and card it was initiated for. The send handlers
+// carry this identity so the commit can pick the guarded release.
+type RetriedFailedSendRelease = RetriedFailedSendCommit<FailedThreadSendSnapshot>;
+
 const EMPTY_COMPOSER_PLUGIN_SUGGESTIONS: ComposerPluginSuggestion[] = [];
 
 function buildQueuedComposerPreviewText(input: {
@@ -1115,6 +1168,7 @@ interface PlanFollowUpSubmission {
   interactionMode: "default" | "plan";
   dispatchMode: "queue" | "steer";
   queuedTurn?: QueuedComposerPlanFollowUp;
+  retryRelease?: RetriedFailedSendRelease;
 }
 
 /**
@@ -1134,6 +1188,7 @@ interface LateComposerSendHandlers {
     event?: { preventDefault: () => void },
     dispatchMode?: "queue" | "steer",
     queuedTurn?: QueuedComposerChatTurn,
+    retryRelease?: RetriedFailedSendRelease,
   ) => Promise<boolean>;
   readonly submitPlanFollowUp: (submission: PlanFollowUpSubmission) => Promise<boolean>;
   readonly advanceActivePendingUserInput: (
@@ -1479,6 +1534,16 @@ export default function ChatView({
   const [localDraftErrorsByThreadId, setLocalDraftErrorsByThreadId] = useState<
     Record<ThreadId, string | null>
   >({});
+  const localDraftErrorsByThreadIdRef = useRef(localDraftErrorsByThreadId);
+  // Commit-phase mirror: an in-flight send can read the ref before a passive
+  // effect would run, and must see the latest errors to decide eviction clears.
+  useLayoutEffect(() => {
+    localDraftErrorsByThreadIdRef.current = localDraftErrorsByThreadId;
+  }, [localDraftErrorsByThreadId]);
+  // Error generations for local draft threads — the draft-thread counterpart of
+  // the store's `errorVersion`. Read synchronously by in-flight sends, so it is
+  // a ref, not render state.
+  const localDraftErrorVersionsRef = useRef(new Map<ThreadId, number>());
   const [localDispatch, setLocalDispatch] = useState<LocalDispatchSnapshot | null>(null);
   const failedWorktreeSetupDispatchStartedAtRef = useRef<string | null>(null);
   // Live handle to the in-flight send's worktree preparation, resolved by the
@@ -1690,6 +1755,17 @@ export default function ChatView({
   const attachmentPreviewHandoffTimeoutByMessageIdRef = useRef<Record<string, number>>({});
   const sendInFlightRef = useRef(false);
   const sendPreflightInFlightRef = useRef(false);
+  // Set by the send catch when a dispatch fails before the turn exists: the
+  // error card's "Try again" reads this to resend the exact failed payload.
+  // Keyed by thread so a dispatch on another thread cannot erase it.
+  const failedThreadSendsRef = useRef(new Map<ThreadId, FailedThreadSendSnapshot>());
+  // Counts thread-error writes per thread (see setThreadError): ownership
+  // claims captured before a write (the unblock's identity) stop matching
+  // once any newer write lands, including an identical-text one. The counter
+  // is globally monotonic so an evicted entry's thread can never re-match an
+  // old claim's value.
+  const threadErrorWriteEpochRef = useRef(new Map<ThreadId, number>());
+  const threadErrorWriteEpochCounterRef = useRef(0);
   const dragDepthRef = useRef(0);
   const terminalOpenByThreadRef = useRef<Record<string, boolean>>({});
   const activatedThreadIdRef = useRef<ThreadId | null>(null);
@@ -4341,22 +4417,66 @@ export default function ChatView({
       window.cancelAnimationFrame(frame);
     };
   }, [secondaryChromeThreadId, shouldDeferSecondaryChrome]);
+  // The error generation is authoritative on the thread: every write path —
+  // store `setError`, session-set events, snapshot sync, and local draft sends —
+  // bumps it whenever the message changes, so a failed-send snapshot can always
+  // tell whether the card it raised is still the one showing.
+  const getCurrentThreadErrorAndVersion = useCallback(
+    (targetThreadId: ThreadId): { error: string | null; errorVersion: number } => {
+      const thread = getThreadFromState(useStore.getState(), targetThreadId);
+      if (thread) {
+        return { error: thread.error, errorVersion: thread.errorVersion ?? 0 };
+      }
+      return {
+        error: localDraftErrorsByThreadIdRef.current[targetThreadId] ?? null,
+        errorVersion: localDraftErrorVersionsRef.current.get(targetThreadId) ?? 0,
+      };
+    },
+    [],
+  );
+  // Returns the error generation after the write; an in-flight send records it
+  // on the failed-send snapshot before React flushes the state update.
   const setThreadError = useCallback(
-    (targetThreadId: ThreadId | null, error: string | null) => {
-      if (!targetThreadId) return;
+    (targetThreadId: ThreadId | null, error: string | null): number => {
+      if (!targetThreadId) return 0;
+      // Counts writes, not generations: an identical-text rewrite keeps the
+      // thread's errorVersion by design, so ownership claims keyed on the
+      // generation alone (the unblock's captured identity) cannot tell a
+      // newer failure apart. Every write bumps this epoch, so a claim made
+      // before the write no longer matches.
+      bumpThreadErrorWriteEpoch(
+        threadErrorWriteEpochRef.current,
+        targetThreadId,
+        threadErrorWriteEpochCounterRef,
+      );
       if (getThreadFromState(useStore.getState(), targetThreadId)) {
         setStoreThreadError(targetThreadId, error);
-        return;
+        return getThreadFromState(useStore.getState(), targetThreadId)?.errorVersion ?? 0;
       }
-      setLocalDraftErrorsByThreadId((existing) => {
-        if ((existing[targetThreadId] ?? null) === error) {
-          return existing;
+      const previousError = localDraftErrorsByThreadIdRef.current[targetThreadId] ?? null;
+      if (previousError === error) {
+        return localDraftErrorVersionsRef.current.get(targetThreadId) ?? 0;
+      }
+      const nextVersion = bumpLocalDraftErrorVersion(
+        localDraftErrorVersionsRef.current,
+        (pinnedThreadId) => failedThreadSendsRef.current.has(pinnedThreadId),
+        targetThreadId,
+      );
+      // The versions map is the bounded LRU; an error entry whose generation
+      // was evicted is stale — no live snapshot can reference a generation that
+      // no longer exists — so rebuild the record without it rather than letting
+      // it keep every key forever.
+      const nextErrors = {} as Record<ThreadId, string | null>;
+      for (const draftThreadId of localDraftErrorVersionsRef.current.keys()) {
+        const draftError = localDraftErrorsByThreadIdRef.current[draftThreadId];
+        if (draftError !== undefined) {
+          nextErrors[draftThreadId] = draftError;
         }
-        return {
-          ...existing,
-          [targetThreadId]: error,
-        };
-      });
+      }
+      nextErrors[targetThreadId] = error;
+      localDraftErrorsByThreadIdRef.current = nextErrors;
+      setLocalDraftErrorsByThreadId(nextErrors);
+      return nextVersion;
     },
     [setStoreThreadError],
   );
@@ -7591,6 +7711,7 @@ export default function ChatView({
     e?: { preventDefault: () => void },
     requestedDispatchMode?: "queue" | "steer",
     queuedTurn?: QueuedComposerChatTurn,
+    retryRelease?: RetriedFailedSendRelease,
   ): Promise<boolean> => {
     const dispatchMode =
       requestedDispatchMode ??
@@ -7774,6 +7895,16 @@ export default function ChatView({
             ...(providerOptionsForDispatch ? { providerOptionsForDispatch } : {}),
             runtimeMode,
           });
+          // A queued plan follow-up is a send commit like any other: release the
+          // failed-send pair it supersedes — or, for a retry, only the pair the
+          // retry was initiated for.
+          releaseFailedSendAtSendCommit(
+            failedThreadSendsRef.current,
+            activeThread.id,
+            retryRelease,
+            getCurrentThreadErrorAndVersion,
+            (targetThreadId) => setThreadError(targetThreadId, null),
+          );
           return true;
         }
         clearComposerInput(activeThread.id);
@@ -7782,6 +7913,7 @@ export default function ChatView({
           text: followUp.text,
           interactionMode: followUp.interactionMode,
           dispatchMode,
+          ...(retryRelease ? { retryRelease } : {}),
         });
       }
     }
@@ -8113,6 +8245,19 @@ export default function ChatView({
         interactionMode: interactionModeForSend,
         envMode: envModeForSend,
       });
+      // A queued send (including a restored retry) supersedes whatever failed-send
+      // payload and error card the thread was showing. Reading the current error
+      // here would race the attachment-persistence await above, so a fresh send
+      // releases unconditionally at the commit point; a retry carries the identity
+      // it captured and releases only its own pair — a newer failure that landed
+      // mid-await keeps its snapshot and card.
+      releaseFailedSendAtSendCommit(
+        failedThreadSendsRef.current,
+        activeThread.id,
+        retryRelease,
+        getCurrentThreadErrorAndVersion,
+        (targetThreadId) => setThreadError(targetThreadId, null),
+      );
       return true;
     }
     const threadIdForSend = activeThread.id;
@@ -8304,7 +8449,7 @@ export default function ChatView({
     // cached branch query may still be loading or may lag behind an out-of-band checkout.
     if (shouldResumeSettledLocalThread) {
       if (!gitBranchSourceCwd) {
-        setStoreThreadError(threadIdForSend, "Unable to determine the current branch.");
+        setThreadError(threadIdForSend, "Unable to determine the current branch.");
         return false;
       }
 
@@ -8315,7 +8460,7 @@ export default function ChatView({
         });
         currentActiveGitBranchForSend = gitStatus.branch;
       } catch {
-        setStoreThreadError(
+        setThreadError(
           threadIdForSend,
           "Unable to determine the current branch. Try again before sending.",
         );
@@ -8337,10 +8482,7 @@ export default function ChatView({
     const shouldCreateWorktree =
       isFirstMessage && nextThreadEnvMode === "worktree" && !nextThreadWorktreePath;
     if (shouldCreateWorktree && !nextThreadBranch) {
-      setStoreThreadError(
-        threadIdForSend,
-        "Select a base branch before sending in New worktree mode.",
-      );
+      setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
       return false;
     }
 
@@ -8479,7 +8621,18 @@ export default function ChatView({
     tailAnchorScrollInFlightRef.current = true;
     setTailAnchor({ threadId: threadIdForSend, messageId: messageIdForSend });
 
-    setThreadError(threadIdForSend, null);
+    // A new dispatch supersedes any payload captured by an earlier failure —
+    // only for this thread; another thread's failed send stays retryable. A
+    // retry instead releases only the pair it was initiated for: the awaits
+    // above leave a window where a newer failure can land, and it must keep
+    // both its snapshot and its card.
+    releaseFailedSendAtSendCommit(
+      failedThreadSendsRef.current,
+      threadIdForSend,
+      retryRelease,
+      getCurrentThreadErrorAndVersion,
+      (targetThreadId) => setThreadError(targetThreadId, null),
+    );
     if (expiredTerminalContextCount > 0) {
       const toastCopy = buildExpiredTerminalContextToastCopy(
         expiredTerminalContextCount,
@@ -8995,9 +9148,7 @@ export default function ChatView({
             );
         }
       }
-      if (
-        queuedChatTurn === null &&
-        !turnStartSucceeded &&
+      const composerDraftWasEmpty =
         promptRef.current.length === 0 &&
         composerImagesRef.current.length === 0 &&
         composerFilesRef.current.length === 0 &&
@@ -9005,8 +9156,55 @@ export default function ChatView({
         composerBrowserAnnotationsRef.current.length === 0 &&
         composerFileCommentsRef.current.length === 0 &&
         composerTerminalContextsRef.current.length === 0 &&
-        composerPastedTextsRef.current.length === 0
-      ) {
+        composerPastedTextsRef.current.length === 0;
+      const sendErrorMessage = err instanceof Error ? err.message : "Failed to send message.";
+      let sendErrorVersion = 0;
+      if (!setupCancelled) {
+        sendErrorVersion = setThreadError(threadIdForSend, sendErrorMessage);
+      }
+      // A retry dispatches a pre-built turn the queue does not own — if it fails
+      // after the commit released the retried pair, the payload must be
+      // recaptured or the card loses its retry content. Genuinely queued turns
+      // are excluded: the queue retains them for the drain's own retries.
+      const failedSendIsRetryable = queuedChatTurn === null || retryRelease !== undefined;
+      if (failedSendIsRetryable && !turnStartSucceeded && !setupCancelled) {
+        // The failed send never reached the transcript, so capture its full
+        // payload: the error card's retry replays this exact content instead of
+        // whatever draft the composer happens to hold later.
+        const failedSends = failedThreadSendsRef.current;
+        failedSends.delete(threadIdForSend);
+        // The evicted thread's error card can no longer replay its payload —
+        // clear it rather than leave a retry that resends the wrong transcript
+        // message. Eviction only clears while the snapshot still owns the
+        // current error; a newer error — even an identical-message one — is a
+        // different generation and its card stays.
+        const evictedThreadId = evictOverflowFailedThreadSend(
+          failedSends,
+          getCurrentThreadErrorAndVersion,
+        );
+        if (evictedThreadId !== null) {
+          setThreadError(evictedThreadId, null);
+        }
+        failedSends.set(threadIdForSend, {
+          // A pre-built retry turn never lived in the composer, so its payload
+          // is replayed directly rather than resent through the live draft.
+          restoredToComposer: queuedChatTurn === null && composerDraftWasEmpty,
+          errorMessage: sendErrorMessage,
+          errorVersion: sendErrorVersion,
+          prompt: promptForSend,
+          images: composerImagesSnapshot,
+          files: composerFilesSnapshot,
+          assistantSelections: composerAssistantSelectionsSnapshot,
+          browserAnnotations: composerBrowserAnnotationsSnapshot,
+          terminalContexts: composerTerminalContextsSnapshot,
+          fileComments: composerFileCommentsSnapshot,
+          pastedTexts: composerPastedTextsSnapshot,
+          skills: composerSkillsSnapshot,
+          mentions: composerMentionsSnapshot,
+          sourceProposedPlan: sourceProposedPlanForSend,
+        });
+      }
+      if (queuedChatTurn === null && !turnStartSucceeded && composerDraftWasEmpty) {
         setOptimisticUserMessages((existing) => {
           const removed = existing.filter((message) => message.id === messageIdForSend);
           for (const message of removed) {
@@ -9039,12 +9237,6 @@ export default function ChatView({
         updateSelectedComposerSkills(composerSkillsSnapshot);
         updateSelectedComposerMentions(composerMentionsSnapshot);
         setComposerTrigger(detectComposerTrigger(promptForSend, promptForSend.length));
-      }
-      if (!setupCancelled) {
-        setThreadError(
-          threadIdForSend,
-          err instanceof Error ? err.message : "Failed to send message.",
-        );
       }
     });
     sendInFlightRef.current = false;
@@ -9097,14 +9289,14 @@ export default function ChatView({
           createdAt: new Date().toISOString(),
         })
         .catch((err: unknown) => {
-          setStoreThreadError(
+          setThreadError(
             activeThreadId,
             err instanceof Error ? err.message : "Failed to submit approval decision.",
           );
         });
       setRespondingRequestKeys((existing) => existing.filter((key) => key !== requestKey));
     },
-    [activeThreadId, runtimeMode, setComposerDraftRuntimeMode, setStoreThreadError],
+    [activeThreadId, runtimeMode, setComposerDraftRuntimeMode, setThreadError],
   );
 
   const onRespondToUserInput = useCallback(
@@ -9134,14 +9326,14 @@ export default function ChatView({
           createdAt: new Date().toISOString(),
         })
         .catch((err: unknown) => {
-          setStoreThreadError(
+          setThreadError(
             activeThreadId,
             err instanceof Error ? err.message : "Failed to submit user input.",
           );
         });
       setRespondingUserInputRequestKeys((existing) => existing.filter((key) => key !== requestKey));
     },
-    [activeThreadId, setStoreThreadError],
+    [activeThreadId, setThreadError],
   );
 
   const onCancelActivePendingUserInput = useCallback(() => {
@@ -9312,12 +9504,8 @@ export default function ChatView({
     interactionMode: nextInteractionMode,
     dispatchMode,
     queuedTurn,
-  }: {
-    text: string;
-    interactionMode: "default" | "plan";
-    dispatchMode: "queue" | "steer";
-    queuedTurn?: QueuedComposerPlanFollowUp;
-  }): Promise<boolean> {
+    retryRelease,
+  }: PlanFollowUpSubmission): Promise<boolean> {
     const api = readNativeApi();
     if (
       !api ||
@@ -9338,6 +9526,16 @@ export default function ChatView({
     const threadIdForSend = activeThread.id;
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
+    // Computed before the dispatch so a failure can capture the exact plan
+    // linkage the turn was sent with — the retry must replay the same
+    // implementation reference, not re-derive it from later state.
+    const sourceProposedPlanForPlanDispatch =
+      nextInteractionMode === "default"
+        ? buildSourceProposedPlanReference({
+            threadId: activeThread.id,
+            proposedPlan: activeProposedPlan,
+          })
+        : undefined;
     const outgoingMessageText = formatOutgoingComposerPrompt({
       provider: queuedTurn?.selectedProvider ?? selectedProvider,
       model: queuedTurn?.selectedModel ?? selectedModel,
@@ -9347,7 +9545,17 @@ export default function ChatView({
 
     sendInFlightRef.current = true;
     beginLocalDispatch({ expectedUserMessageId: messageIdForSend });
-    setThreadError(threadIdForSend, null);
+    // A committed send supersedes whatever failed-send payload and error card
+    // the thread was showing — release both together so the card cannot outlive
+    // its payload and the payload cannot leak without its card. A retry carries
+    // the identity it captured and releases only its own pair.
+    releaseFailedSendAtSendCommit(
+      failedThreadSendsRef.current,
+      threadIdForSend,
+      retryRelease,
+      getCurrentThreadErrorAndVersion,
+      (targetThreadId) => setThreadError(targetThreadId, null),
+    );
     setOptimisticUserMessages((existing) => [
       ...existing,
       {
@@ -9382,13 +9590,6 @@ export default function ChatView({
       const providerOptionsForPlanDispatch =
         queuedTurn?.providerOptionsForDispatch ?? providerOptionsForDispatch;
       const modelSelectionForPlanDispatch = queuedTurn?.modelSelection ?? selectedModelSelection;
-      const sourceProposedPlan =
-        nextInteractionMode === "default"
-          ? buildSourceProposedPlanReference({
-              threadId: activeThread.id,
-              proposedPlan: activeProposedPlan,
-            })
-          : undefined;
       rememberCustomBinaryPathForDispatch({
         threadId: threadIdForSend,
         provider: modelSelectionForPlanDispatch.provider,
@@ -9414,7 +9615,9 @@ export default function ChatView({
         dispatchMode,
         runtimeMode: queuedTurn?.runtimeMode ?? runtimeMode,
         interactionMode: nextInteractionMode,
-        ...(sourceProposedPlan ? { sourceProposedPlan } : {}),
+        ...(sourceProposedPlanForPlanDispatch
+          ? { sourceProposedPlan: sourceProposedPlanForPlanDispatch }
+          : {}),
         createdAt: messageCreatedAt,
       });
       // Steers on providers without native mid-turn steering interrupt the live
@@ -9454,10 +9657,62 @@ export default function ChatView({
       setOptimisticUserMessages((existing) =>
         existing.filter((message) => message.id !== messageIdForSend),
       );
-      setThreadError(
-        threadIdForSend,
-        err instanceof Error ? err.message : "Failed to send plan follow-up.",
-      );
+      const sendErrorMessage =
+        err instanceof Error ? err.message : "Failed to send plan follow-up.";
+      const sendErrorVersion = setThreadError(threadIdForSend, sendErrorMessage);
+      // A plan follow-up has no transcript message, so without a snapshot the
+      // card's retry would have nothing to replay and "Try again" would be a
+      // no-op. Capture the follow-up payload the dispatch actually used,
+      // including its interaction mode and plan linkage. A generated
+      // implementation prompt is not restored into the composer: the plan
+      // follow-up banner is still up, and resubmitting empty regenerates the
+      // same prompt with the same default mode — restoring its generated text
+      // would make the next manual send re-read it as a plan refinement.
+      // Queued turns are excluded: the drain retains and retries them itself,
+      // so a captured snapshot here would offer a second, duplicate resend.
+      const restoredToComposer =
+        !queuedTurn && nextInteractionMode === "plan" && promptRef.current.trim().length === 0;
+      const failedSends = failedThreadSendsRef.current;
+      if (!queuedTurn) {
+        failedSends.delete(threadIdForSend);
+        const evictedThreadId = evictOverflowFailedThreadSend(
+          failedSends,
+          getCurrentThreadErrorAndVersion,
+        );
+        if (evictedThreadId !== null) {
+          setThreadError(evictedThreadId, null);
+        }
+        failedSends.set(threadIdForSend, {
+          restoredToComposer,
+          interactionMode: nextInteractionMode,
+          errorMessage: sendErrorMessage,
+          errorVersion: sendErrorVersion,
+          prompt: text,
+          images: [],
+          files: [],
+          assistantSelections: [],
+          browserAnnotations: [],
+          terminalContexts: [],
+          fileComments: [],
+          pastedTexts: [],
+          skills: [],
+          mentions: [],
+          ...(sourceProposedPlanForPlanDispatch
+            ? { sourceProposedPlan: sourceProposedPlanForPlanDispatch }
+            : {}),
+        });
+      }
+      // The submitted text would otherwise be lost: a plan follow-up has no
+      // transcript message, so the composer is the only place a user-authored
+      // refinement can come back. Only when the user has not typed something
+      // newer while the dispatch was in flight.
+      if (restoredToComposer) {
+        promptRef.current = text;
+        setPrompt(text);
+        setComposerDraftPrompt(threadIdForSend, text);
+        setComposerCursor(collapseExpandedComposerCursor(text, text.length));
+        setComposerTrigger(detectComposerTrigger(text, text.length));
+      }
       sendInFlightRef.current = false;
       // The turn RPC failed, so no server turn exists for the watchdog to
       // recover — drop the marker armed when the dispatch began.
@@ -11301,26 +11556,391 @@ export default function ChatView({
   );
   const dismissActiveThreadError = useCallback(() => {
     if (!activeThread) return;
+    failedThreadSendsRef.current.delete(activeThread.id);
     setThreadError(activeThread.id, null);
   }, [activeThread, setThreadError]);
+  // The unblock RPC resolves asynchronously, so the failure it was initiated
+  // against must be captured at click time: a newer failure can land while the
+  // request is in flight, and the callback may only release the older pair.
+  // The write epoch closes the identical-text hole — a same-text rewrite keeps
+  // the thread's errorVersion, so the generation alone cannot prove the card
+  // still belongs to the captured failure.
+  const unblockRequestIdentityRef = useRef<{
+    threadId: ThreadId;
+    expectedSnapshot: FailedThreadSendSnapshot | null;
+    error: { error: string | null; errorVersion: number };
+    writeEpoch: number;
+  } | null>(null);
   const clearThreadErrorAfterUnblock = useCallback(
     (unblockedThreadId: ThreadId) => {
+      const identity = unblockRequestIdentityRef.current;
+      unblockRequestIdentityRef.current = null;
+      if (
+        identity?.threadId === unblockedThreadId &&
+        identity.writeEpoch === (threadErrorWriteEpochRef.current.get(unblockedThreadId) ?? 0)
+      ) {
+        releaseRetriedFailedSend(
+          failedThreadSendsRef.current,
+          unblockedThreadId,
+          identity.expectedSnapshot,
+          identity.error,
+          getCurrentThreadErrorAndVersion,
+          (targetThreadId) => setThreadError(targetThreadId, null),
+        );
+        return;
+      }
+      if (identity?.threadId === unblockedThreadId) {
+        // A newer error write owns the card now — the unblock result is stale
+        // for it, so leave the newer card (and its payload) alone.
+        return;
+      }
       setThreadError(unblockedThreadId, null);
     },
-    [setThreadError],
+    [getCurrentThreadErrorAndVersion, setThreadError],
   );
   const { unblockThread: unblockActiveThread, unblocking: unblockingActiveThread } =
     useThreadUnblock({
       threadId: activeThread?.id ?? null,
       onUnblocked: clearThreadErrorAfterUnblock,
     });
-  useThreadErrorToast({
-    threadId: activeThread?.id ?? null,
-    error: activeThread?.error ?? null,
-    onDismiss: dismissActiveThreadError,
-    onUnblock: unblockActiveThread,
-    unblocking: unblockingActiveThread,
+  const onUnblockActiveThread = useCallback(() => {
+    const threadId = activeThread?.id;
+    // Capture the identity only when the hook accepts the request: a click
+    // while another unblock is in flight is rejected, and overwriting the
+    // captured identity here would let the in-flight request's completion
+    // clear a newer error without its identity checks.
+    if (threadId && unblockActiveThread()) {
+      unblockRequestIdentityRef.current = {
+        threadId,
+        expectedSnapshot: failedThreadSendsRef.current.get(threadId) ?? null,
+        error: getCurrentThreadErrorAndVersion(threadId),
+        writeEpoch: threadErrorWriteEpochRef.current.get(threadId) ?? 0,
+      };
+    }
+  }, [activeThread?.id, getCurrentThreadErrorAndVersion, unblockActiveThread]);
+  // Keeps the card mounted through the disclosure animation in both directions:
+  // it opens on a frame flip when the error appears and closes out when the
+  // stored error clears (dismiss, unblock, or a send that wipes it).
+  const presentedThreadError = useTransientPresentation(activeThread?.error ?? null, {
+    animateOpen: true,
   });
+  // During the close animation — including after a thread switch — the card
+  // still shows the previous error, but the action handlers target the active
+  // thread. Stand the actions down unless the presented error is the active
+  // thread's own current error, so a closing card can never dismiss, unblock,
+  // or retry the wrong conversation.
+  const presentedThreadErrorIsCurrent =
+    presentedThreadError != null &&
+    activeThread != null &&
+    presentedThreadError.snapshot === activeThread.error;
+  // "Try again" must reflect a concrete replay target, not just a retryable
+  // error string: approval and user-input response failures can raise
+  // connection-classified errors with nothing to replay, and a button that
+  // performs no request is worse than no button. The snapshot map is a ref
+  // (not reactive), so availability is reconciled after each commit that could
+  // change its inputs — every map mutation that matters is paired with an
+  // error write, which re-renders and re-runs this reconciliation.
+  const [activeThreadHasRetryTarget, setActiveThreadHasRetryTarget] = useState(false);
+  // Attributes the thread's current error generation to its source, observed
+  // whenever the generation changes: the transcript fallback may only replay
+  // the errored latest turn's input while the card still shows the failure the
+  // session projected for that turn. A client-side write that reuses the
+  // session failure's exact text bumps the write epoch without changing the
+  // generation, so the recorded epoch goes stale and closes the fallback.
+  const transcriptRetryOwnershipRef = useRef<TranscriptFallbackOwnership | null>(null);
+  useLayoutEffect(() => {
+    const thread = activeThread;
+    if (!thread) {
+      transcriptRetryOwnershipRef.current = null;
+      setActiveThreadHasRetryTarget(false);
+      return;
+    }
+    const current = getCurrentThreadErrorAndVersion(thread.id);
+    const writeEpoch = threadErrorWriteEpochRef.current.get(thread.id) ?? 0;
+    const observed = transcriptRetryOwnershipRef.current;
+    const generationUnchanged =
+      observed !== null &&
+      observed.threadId === thread.id &&
+      observed.errorVersion === current.errorVersion;
+    if (!generationUnchanged) {
+      const sessionError = normalizeThreadErrorMessage(thread.session?.lastError ?? null);
+      transcriptRetryOwnershipRef.current =
+        thread.error !== null &&
+        thread.error === sessionError &&
+        thread.latestTurn?.state === "error"
+          ? {
+              threadId: thread.id,
+              turnId: thread.latestTurn.turnId,
+              errorVersion: current.errorVersion,
+              writeEpoch,
+            }
+          : null;
+    } else if (observed.writeEpoch !== writeEpoch) {
+      // A client-side write re-used the session failure's exact text: the
+      // generation did not move but the write epoch did, so the card now
+      // belongs to that client write and the turn's input must not resend.
+      transcriptRetryOwnershipRef.current = null;
+    }
+    setActiveThreadHasRetryTarget(
+      hasThreadErrorRetryTarget(
+        failedThreadSendsRef.current.get(thread.id),
+        current,
+        thread.messages,
+        thread.latestTurn,
+        transcriptRetryOwnershipRef.current,
+        writeEpoch,
+      ),
+    );
+  }, [activeThread, getCurrentThreadErrorAndVersion]);
+  // The error card's "Try again". Three cases, in order:
+  // 1. The failed send never dispatched — its payload was captured into
+  //    `failedThreadSendRef` (and restored into the composer when the draft was
+  //    empty). If the composer still holds that restored draft, resend whatever
+  //    it now holds — edits included, attachments included — through the normal
+  //    send path. If the composer was cleared or holds an unrelated draft,
+  //    replay the captured payload through the pre-built-turn dispatch, which
+  //    never touches the live draft.
+  // 2. The turn failed server-side — the message is in the transcript and any
+  //    composer draft is unrelated, so resend the last user message and leave
+  //    the draft alone. Attachments are fetched back from the managed-blob
+  //    store where their ids are still alive.
+  // 3. A live turn is still running — enqueue instead of dispatching so the
+  //    retry cannot hit an "already processing" rejection.
+  const retryActiveThreadError = useCallback(async () => {
+    const lateSendHandlers = lateComposerSendHandlersRef.current;
+    if (!lateSendHandlers || !activeThread) return;
+    const threadId = activeThread.id;
+    // The transcript fallback below awaits attachment rebuilds, so capture the
+    // error identity this retry was initiated for — a newer failure landing in
+    // between must keep both its card and its captured payload.
+    const retriedError = getCurrentThreadErrorAndVersion(threadId);
+    let failedSend = failedThreadSendsRef.current.get(threadId) ?? null;
+    if (failedSend) {
+      // The snapshot only owns this card while the current error is still the
+      // generation that raised it. A stale snapshot must not replay its payload
+      // for a newer failure — drop it and fall through to the transcript path.
+      // An owned snapshot stays in the map until its resend is accepted: the
+      // send path clears it on dispatch and overwrites it on failure, so a
+      // rejected retry cannot strand the card without its payload.
+      if (
+        !failedSendSnapshotOwnsCurrentError(failedSend, getCurrentThreadErrorAndVersion(threadId))
+      ) {
+        failedThreadSendsRef.current.delete(threadId);
+        failedSend = null;
+      }
+    }
+    const dispatchRetryTurn = (retryTurn: QueuedComposerChatTurn) => {
+      if (hasQueueableLiveTurn) {
+        enqueueQueuedComposerTurn(threadId, retryTurn);
+        // The queued turn now durably owns the retried payload. Release only the
+        // exact snapshot this retry captured and clear the card only while it
+        // still shows the error that snapshot raised — an enqueue replays a
+        // specific payload, it does not supersede a newer failure.
+        releaseRetriedFailedSend(
+          failedThreadSendsRef.current,
+          threadId,
+          failedSend,
+          retriedError,
+          getCurrentThreadErrorAndVersion,
+          (targetThreadId) => setThreadError(targetThreadId, null),
+        );
+        return;
+      }
+      // The dispatch routes through `onSend`, whose awaits leave a window for a
+      // newer failure to land — carry the captured identity so the commit
+      // releases only this retry's pair.
+      void lateSendHandlers.send(undefined, "queue", retryTurn, {
+        expectedSnapshot: failedSend,
+        retriedError,
+      });
+    };
+    const buildRetryTurn = (
+      payload: Pick<
+        QueuedComposerChatTurn,
+        | "prompt"
+        | "images"
+        | "files"
+        | "assistantSelections"
+        | "browserAnnotations"
+        | "terminalContexts"
+        | "fileComments"
+        | "pastedTexts"
+        | "skills"
+        | "mentions"
+        | "sourceProposedPlan"
+      > & { interactionMode?: "default" | "plan" },
+    ): QueuedComposerChatTurn => ({
+      id: randomUUID(),
+      kind: "chat",
+      createdAt: new Date().toISOString(),
+      previewText: buildQueuedComposerPreviewText({
+        trimmedPrompt: payload.prompt.trim(),
+        images: payload.images,
+        files: payload.files,
+        assistantSelections: payload.assistantSelections,
+        browserAnnotations: payload.browserAnnotations,
+        terminalContexts: payload.terminalContexts,
+        fileComments: payload.fileComments,
+        pastedTexts: payload.pastedTexts,
+      }),
+      prompt: payload.prompt,
+      images: payload.images.map(cloneComposerImageAttachment),
+      files: payload.files,
+      assistantSelections: payload.assistantSelections,
+      browserAnnotations: payload.browserAnnotations,
+      terminalContexts: payload.terminalContexts,
+      fileComments: payload.fileComments,
+      pastedTexts: payload.pastedTexts,
+      skills: payload.skills,
+      mentions: payload.mentions,
+      selectedProvider,
+      selectedModel,
+      selectedPromptEffort,
+      modelSelection: selectedModelSelection,
+      ...(providerOptionsForDispatch ? { providerOptionsForDispatch } : {}),
+      ...(payload.sourceProposedPlan ? { sourceProposedPlan: payload.sourceProposedPlan } : {}),
+      runtimeMode,
+      // A captured retry replays the mode its failed dispatch used — a plan
+      // follow-up snapshot must not be re-interpreted by the composer's
+      // current mode toggle.
+      interactionMode: payload.interactionMode ?? interactionMode,
+      envMode,
+    });
+    if (failedSend) {
+      const attachmentIdsMatch = (
+        live: ReadonlyArray<{ id: string }>,
+        saved: ReadonlyArray<{ id: string }>,
+      ) => live.length === saved.length && live.every((a, i) => a.id === saved[i]?.id);
+      const liveComposerText = (
+        composerEditorRef.current?.readSnapshot()?.value ?? promptRef.current
+      ).trim();
+      const draftsMatch = (live: unknown, saved: unknown) =>
+        JSON.stringify(live) === JSON.stringify(saved);
+      // Send through the live composer only while it still holds the restored
+      // failed draft — an edited or replaced draft (including a same-count
+      // swap of any structured item) means the user moved on, so retry replays
+      // the captured payload and leaves their draft untouched.
+      const draftMatchesRestored =
+        liveComposerText === failedSend.prompt.trim() &&
+        attachmentIdsMatch(composerImagesRef.current, failedSend.images) &&
+        attachmentIdsMatch(composerFilesRef.current, failedSend.files) &&
+        attachmentIdsMatch(
+          composerAssistantSelectionsRef.current,
+          failedSend.assistantSelections,
+        ) &&
+        draftsMatch(composerBrowserAnnotationsRef.current, failedSend.browserAnnotations) &&
+        draftsMatch(composerFileCommentsRef.current, failedSend.fileComments) &&
+        draftsMatch(composerTerminalContextsRef.current, failedSend.terminalContexts) &&
+        draftsMatch(composerPastedTextsRef.current, failedSend.pastedTexts);
+      if (failedSend.restoredToComposer && draftMatchesRestored) {
+        if (hasQueueableLiveTurn) {
+          // A live turn would reject a direct resend — queue the restored draft.
+          // The send carries the captured identity so its commit releases only
+          // this retry's pair; the outer guard still covers accepted-but-not-
+          // dispatched returns, where the snapshot must be retained.
+          void releaseFailedSendSnapshotAfterSend(
+            lateSendHandlers.send(undefined, "queue", undefined, {
+              expectedSnapshot: failedSend,
+              retriedError,
+            }),
+            failedThreadSendsRef.current,
+            threadId,
+            failedSend,
+            getCurrentThreadErrorAndVersion,
+          );
+        } else {
+          void releaseFailedSendSnapshotAfterSend(
+            lateSendHandlers.send(undefined, undefined, undefined, {
+              expectedSnapshot: failedSend,
+              retriedError,
+            }),
+            failedThreadSendsRef.current,
+            threadId,
+            failedSend,
+            getCurrentThreadErrorAndVersion,
+          );
+        }
+        return;
+      }
+      dispatchRetryTurn(buildRetryTurn(failedSend));
+      return;
+    }
+    // The transcript fallback replays the input of the turn that errored. The
+    // ownership attribution must still match — the card shows the failure the
+    // session projected for that turn, and no client-side write (even one
+    // reusing the exact text) has replaced it since.
+    const retryTarget = findTranscriptFallbackRetryTarget(
+      activeThread.messages,
+      activeThread.latestTurn,
+      retriedError,
+      transcriptRetryOwnershipRef.current,
+      threadErrorWriteEpochRef.current.get(threadId) ?? 0,
+    );
+    if (!retryTarget) {
+      return;
+    }
+    const { message: lastUserMessage, turn: retriedTurn } = retryTarget;
+    const { images, files, assistantSelections } = await rebuildComposerAttachmentsFromMessage(
+      lastUserMessage.attachments ?? [],
+    );
+    // The rebuild awaited network fetches; if the user switched threads in
+    // between, the send handlers now belong to a different thread — abort
+    // rather than land this retry in the wrong conversation.
+    if (activatedThreadIdRef.current !== threadId) {
+      return;
+    }
+    // The stored text ends with serialized composer blocks; the outermost
+    // browser-annotations block is keyed to the old message id, so strip it and
+    // hand the drafts back to the send path to re-serialize under the new id.
+    let retryPromptText = lastUserMessage?.text ?? "";
+    let browserAnnotations: BrowserAnnotationDraft[] = [];
+    if (lastUserMessage) {
+      const extracted = extractTrailingBrowserAnnotations(retryPromptText, lastUserMessage.id);
+      browserAnnotations = extracted.annotations;
+      retryPromptText = extracted.promptText;
+    }
+    // Assistant selections ride the wire as attachment entries AND a serialized
+    // prompt block. The rebuilt attachments carry the entries, so strip the
+    // stale block — the send path re-appends a fresh one.
+    if (assistantSelections.length > 0) {
+      retryPromptText = stripEmbeddedAssistantSelections(retryPromptText);
+    }
+    const prompt = retryPromptText.trim();
+    if (!prompt && images.length === 0 && files.length === 0 && assistantSelections.length === 0) {
+      return;
+    }
+    dispatchRetryTurn(
+      buildRetryTurn({
+        prompt,
+        images,
+        files,
+        assistantSelections,
+        browserAnnotations,
+        terminalContexts: [],
+        fileComments: [],
+        pastedTexts: [],
+        skills: lastUserMessage.skills ?? [],
+        mentions: lastUserMessage.mentions ?? [],
+        // The transcript fallback has no snapshot; the failed turn's plan
+        // linkage survives only on the turn record, so recover it from there.
+        sourceProposedPlan: retriedTurn.sourceProposedPlan,
+      }),
+    );
+  }, [
+    activeThread,
+    enqueueQueuedComposerTurn,
+    envMode,
+    getCurrentThreadErrorAndVersion,
+    hasQueueableLiveTurn,
+    interactionMode,
+    providerOptionsForDispatch,
+    runtimeMode,
+    selectedModel,
+    selectedModelSelection,
+    selectedPromptEffort,
+    selectedProvider,
+    setThreadError,
+  ]);
   const dismissActiveProviderHealthBanner = useCallback(() => {
     if (!activeProviderHealthBannerDismissalKey) return;
     setDismissedProviderHealthBannerKeys((current) => {
@@ -12477,8 +13097,9 @@ export default function ChatView({
         />
       ) : null}
 
-      {/* Thread-level errors render as a toast (see `useThreadErrorToast`) so they
-          never displace the transcript. */}
+      {/* Thread-level errors render as an ephemeral card floating at the top of
+          the chat column — the position the old toast occupied — with the shared
+          disclosure open/close animation instead of a raw toast. */}
       <ProviderHealthBanner
         status={shouldShowProviderHealthBanner ? visibleActiveProviderStatus : null}
         onDismiss={dismissActiveProviderHealthBanner}
@@ -12501,6 +13122,32 @@ export default function ChatView({
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {/* Chat column */}
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          {/* Thread errors float at the top-center of the chat pane — where the
+              old toast appeared — so a failure reads where the user is already
+              looking and never shifts transcript content. */}
+          {presentedThreadError ? (
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-40 flex justify-center pt-3">
+              <DisclosureRegion open={presentedThreadError.open}>
+                <div className="pointer-events-auto pb-1">
+                  <ThreadErrorCard
+                    error={presentedThreadError.snapshot}
+                    unblocking={unblockingActiveThread}
+                    onDismiss={presentedThreadErrorIsCurrent ? dismissActiveThreadError : undefined}
+                    onRetry={
+                      presentedThreadErrorIsCurrent && activeThreadHasRetryTarget
+                        ? retryActiveThreadError
+                        : undefined
+                    }
+                    onUnblock={presentedThreadErrorIsCurrent ? onUnblockActiveThread : undefined}
+                    // The countdown must outlive the rate-limit banner's own
+                    // dismissal — hiding the banner is not "the limit reset".
+                    rateLimitStatus={activeRateLimitStatus}
+                    retryKey={activeThread?.id}
+                  />
+                </div>
+              </DisclosureRegion>
+            </div>
+          ) : null}
           <div
             aria-hidden={terminalWorkspaceTerminalTabActive}
             className={cn(
