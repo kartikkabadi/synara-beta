@@ -36,7 +36,7 @@ export function unicodeSafeEndOffset(text: string, requestedEndOffsetChars: numb
 // constructors validate without normalizing, so an untrimmed value throws.
 // Use this wherever a string travels from provider output into a command.
 export function nonEmptyTrimmed(value: string | null | undefined): string | undefined {
-  if (typeof value !== "string") return undefined;
+  if (value === null || value === undefined) return undefined;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
 }
