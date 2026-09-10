@@ -214,6 +214,10 @@ curl -fsSL -o "$tmp/SHA256SUMS.sig" "$base/SHA256SUMS.sig" || {
 }
 
 printf '%s\n' "$ALLOWED_SIGNERS" > "$tmp/allowed_signers"
+if ! command -v ssh-keygen >/dev/null 2>&1; then
+  echo "install-macos.sh: ssh-keygen is required to verify the release signature. OpenSSH ships with macOS; if it is missing, install it and retry." >&2
+  exit 1
+fi
 echo "Verifying release signature..."
 if ! ssh-keygen -Y verify -f "$tmp/allowed_signers" -I synara-beta-releases -s "$tmp/SHA256SUMS.sig" -n synara-beta < "$tmp/SHA256SUMS" >/dev/null 2>&1; then
   echo "install-macos.sh: release signature verification failed for SHA256SUMS. Refusing to install." >&2
