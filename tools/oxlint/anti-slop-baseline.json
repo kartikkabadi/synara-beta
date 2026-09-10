@@ -4998,12 +4998,6 @@
       "104bc62f": 1
     }
   },
-  "anti-slop(no-conditional-empty-object-spread):scripts/build-desktop-artifact.ts": {
-    "total": 1,
-    "messages": {
-      "546c70b7": 1
-    }
-  },
   "anti-slop(no-conditional-empty-object-spread):scripts/lib/desktop-platform-build-config.ts": {
     "total": 1,
     "messages": {
@@ -7234,13 +7228,6 @@
     "messages": {
       "02d0fa46": 1,
       "6f063974": 1
-    }
-  },
-  "anti-slop(no-known-value-widening):scripts/build-desktop-artifact.ts": {
-    "total": 2,
-    "messages": {
-      "5e6643c0": 1,
-      "ed47c3b8": 1
     }
   },
   "anti-slop(no-known-value-widening):scripts/check-migration-lineage.ts": {
@@ -18240,18 +18227,6 @@
       "43e5461a": 1,
       "4be46b74": 1,
       "d9ac7039": 1
-    }
-  },
-  "anti-slop(no-unsafe-dictionary-type):scripts/build-desktop-artifact.ts": {
-    "total": 7,
-    "messages": {
-      "336a762c": 1,
-      "609ebd6a": 1,
-      "6594dc37": 1,
-      "7d6e46dd": 1,
-      "9da0ffe4": 1,
-      "b56a74ac": 1,
-      "f3598391": 1
     }
   },
   "anti-slop(no-unsafe-dictionary-type):scripts/device-helper-smoke.ts": {
