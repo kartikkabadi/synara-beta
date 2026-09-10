@@ -5880,7 +5880,6 @@ export default function Sidebar() {
     <div className="flex w-full items-center gap-1.5">
       <SidebarTrigger className="shrink-0 text-muted-foreground/75 hover:text-foreground md:hidden" />
       {headerControls}
-      {betaBadge}
     </div>
   );
   const renameProjectDialogProject = renameProjectDialogId
@@ -5931,7 +5930,6 @@ export default function Sidebar() {
             )}
           >
             {titlebarControls}
-            {betaBadge}
           </SidebarHeader>
         </>
       ) : (
@@ -6012,6 +6010,7 @@ export default function Sidebar() {
                     onClick={() => setActivityViewEnabledSmoothly(!activityViewEnabled)}
                   />
                 ) : null}
+                {betaBadge}
               </div>
             </div>
             {/* The keyed content remounts with a short enter animation while the picker
