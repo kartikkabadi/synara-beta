@@ -98,6 +98,7 @@ import { pluralize } from "@synara/shared/text";
 import { resolveThreadWorkspaceCwd } from "@synara/shared/threadEnvironment";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate, useParams, useSearch } from "@tanstack/react-router";
+import { Predicate } from "effect";
 import {
   type SidebarProjectSortOrder,
   type SidebarThreadSortOrder,
@@ -453,15 +454,22 @@ const THREAD_PREVIEW_PAGE_SIZE = 5;
 const preventFocusOnMouseDown = (event: React.MouseEvent) => {
   event.preventDefault();
 };
-const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
+const SIDEBAR_SORT_LABELS = {
   updated_at: "Last user message",
   created_at: "Created at",
   manual: "Manual",
-};
-const SIDEBAR_THREAD_SORT_LABELS: Record<SidebarThreadSortOrder, string> = {
+} as const satisfies Record<SidebarProjectSortOrder, string>;
+const SIDEBAR_THREAD_SORT_LABELS = {
   updated_at: "Last user message",
   created_at: "Created at",
-};
+} as const satisfies Record<SidebarThreadSortOrder, string>;
+
+function isSidebarProjectSortOrder(value: string): value is SidebarProjectSortOrder {
+  return Object.hasOwn(SIDEBAR_SORT_LABELS, value);
+}
+function isSidebarThreadSortOrder(value: string): value is SidebarThreadSortOrder {
+  return Object.hasOwn(SIDEBAR_THREAD_SORT_LABELS, value);
+}
 const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   duration: 180,
   easing: "ease-out",
@@ -516,7 +524,7 @@ type DebugFeatureFlagsWindow = Window & {
 };
 
 function readDebugFeatureFlagsMenuVisibility(): boolean {
-  if (typeof window === "undefined") {
+  if (Predicate.isUndefined(globalThis.window)) {
     return false;
   }
 
@@ -768,16 +776,15 @@ function ProjectSortMenu({
           <MenuRadioGroup
             value={projectSortOrder}
             onValueChange={(value) => {
-              onProjectSortOrderChange(value as SidebarProjectSortOrder);
+              if (!isSidebarProjectSortOrder(value)) return;
+              onProjectSortOrderChange(value);
             }}
           >
-            {(Object.entries(SIDEBAR_SORT_LABELS) as Array<[SidebarProjectSortOrder, string]>).map(
-              ([value, label]) => (
-                <MenuRadioItem key={value} value={value} className="min-h-7 py-1 sm:text-xs">
-                  {label}
-                </MenuRadioItem>
-              ),
-            )}
+            {Object.entries(SIDEBAR_SORT_LABELS).map(([value, label]) => (
+              <MenuRadioItem key={value} value={value} className="min-h-7 py-1 sm:text-xs">
+                {label}
+              </MenuRadioItem>
+            ))}
           </MenuRadioGroup>
         </MenuGroup>
         <MenuGroup>
@@ -911,16 +918,15 @@ function ThreadSortMenuItems({
     <MenuRadioGroup
       value={threadSortOrder}
       onValueChange={(value) => {
-        onThreadSortOrderChange(value as SidebarThreadSortOrder);
+        if (!isSidebarThreadSortOrder(value)) return;
+        onThreadSortOrderChange(value);
       }}
     >
-      {(Object.entries(SIDEBAR_THREAD_SORT_LABELS) as Array<[SidebarThreadSortOrder, string]>).map(
-        ([value, label]) => (
-          <MenuRadioItem key={value} value={value} className="min-h-7 py-1 sm:text-xs">
-            {label}
-          </MenuRadioItem>
-        ),
-      )}
+      {Object.entries(SIDEBAR_THREAD_SORT_LABELS).map(([value, label]) => (
+        <MenuRadioItem key={value} value={value} className="min-h-7 py-1 sm:text-xs">
+          {label}
+        </MenuRadioItem>
+      ))}
     </MenuRadioGroup>
   );
 }
@@ -1160,7 +1166,7 @@ const ACTIVITY_ONBOARDING_STORAGE_KEY = "synara:activity-onboarding:v1";
 const ACTIVITY_ONBOARDING_DURATION_MS = 8_000;
 
 function shouldShowActivityOnboarding(): boolean {
-  if (typeof window === "undefined") return false;
+  if (Predicate.isUndefined(globalThis.window)) return false;
   try {
     return window.localStorage.getItem(ACTIVITY_ONBOARDING_STORAGE_KEY) !== "seen";
   } catch {
@@ -1263,10 +1269,14 @@ function SidebarActivityBellButton({
   );
 }
 
-const SIDEBAR_SURFACE_PICKER_COPY: Record<SidebarView, { title: string; description: string }> = {
+const SIDEBAR_SURFACE_PICKER_COPY = {
   threads: { title: "Synara", description: "Build, debug, and ship" },
   studio: { title: "Studio", description: "Open-ended agent work" },
-};
+} as const satisfies Record<SidebarView, { title: string; description: string }>;
+
+function isSidebarView(value: string): value is SidebarView {
+  return Object.hasOwn(SIDEBAR_SURFACE_PICKER_COPY, value);
+}
 
 /**
  * App-switcher style surface picker: a compact pill with the active surface
@@ -1315,9 +1325,9 @@ export function SidebarSurfacePicker({
           className="flex flex-col gap-0.5"
           value={activeView}
           onValueChange={(value) => {
-            const view = value as SidebarView;
-            onPrewarmView?.(view);
-            onSelectView(view);
+            if (!isSidebarView(value)) return;
+            onPrewarmView?.(value);
+            onSelectView(value);
           }}
         >
           {views.map((view) => {
@@ -1459,11 +1469,13 @@ export default function Sidebar() {
   const routeProjectId = useParams({
     strict: false,
     select: (params) =>
-      typeof params.projectId === "string" ? ProjectId.makeUnsafe(params.projectId) : null,
+      params.projectId !== undefined ? ProjectId.makeUnsafe(params.projectId) : null,
   });
   const routeSearch = useDiffRouteSearch();
-  const settingsSectionSearch = useSearch({ strict: false }) as Record<string, unknown>;
-  const activeSettingsSection = normalizeSettingsSection(settingsSectionSearch.section);
+  const settingsSectionSearch = useSearch({ strict: false });
+  const activeSettingsSection = normalizeSettingsSection(
+    "section" in settingsSectionSearch ? settingsSectionSearch.section : undefined,
+  );
   const activeSplitView = useSplitViewStore(
     useMemo(() => selectSplitView(routeSearch.splitViewId ?? null), [routeSearch.splitViewId]),
   );
@@ -1499,7 +1511,7 @@ export default function Sidebar() {
   }, [projects.length, syncServerShellSnapshot, threadsHydrated]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (Predicate.isUndefined(globalThis.window)) {
       return;
     }
 
@@ -1512,7 +1524,7 @@ export default function Sidebar() {
       return;
     }
 
-    const debugWindow = window as DebugFeatureFlagsWindow;
+    const debugWindow: DebugFeatureFlagsWindow = window;
     const updateVisibility = () => {
       setShowDebugFeatureFlagsMenu(readDebugFeatureFlagsMenuVisibility());
     };
@@ -2203,7 +2215,7 @@ export default function Sidebar() {
     }> =>
       waitForRecoverableProjectInReadModel({
         projectId,
-        ...(workspaceRoot ? { workspaceRoot } : {}),
+        ...(workspaceRoot ? { workspaceRoot } : null),
         loadSnapshot: () => api.orchestration.getShellSnapshot().catch(() => null),
         maxAttempts: ADD_PROJECT_SNAPSHOT_CATCH_UP_MAX_ATTEMPTS,
         delayMs: ADD_PROJECT_SNAPSHOT_CATCH_UP_DELAY_MS,
@@ -2225,7 +2237,7 @@ export default function Sidebar() {
     }> =>
       waitForRecoverableProjectInReadModel({
         projectId,
-        ...(workspaceRoot ? { workspaceRoot } : {}),
+        ...(workspaceRoot ? { workspaceRoot } : null),
         loadSnapshot: () => api.orchestration.getShellSnapshot().catch(() => null),
         maxAttempts: GITHUB_CANCEL_RECOVERY_MAX_ATTEMPTS,
         delayMs: GITHUB_CANCEL_RECOVERY_DELAY_MS,
@@ -2577,9 +2589,9 @@ export default function Sidebar() {
           api,
           workspaceRoot: cwd,
           ...(options.createIfMissing === undefined
-            ? {}
+            ? null
             : { createIfMissing: options.createIfMissing }),
-          ...(options.spaceId === undefined ? {} : { spaceId: options.spaceId }),
+          ...(options.spaceId === undefined ? null : { spaceId: options.spaceId }),
           defaultProvider: appSettings.defaultProvider,
           loadSnapshot: () => api.orchestration.getShellSnapshot().catch(() => null),
           maxAttempts: ADD_PROJECT_SNAPSHOT_CATCH_UP_MAX_ATTEMPTS,
@@ -3029,7 +3041,7 @@ export default function Sidebar() {
             id: "delete",
             label: "Delete",
             destructive: true,
-            ...(thread.parentThreadId ? { separatorBefore: true } : {}),
+            ...(thread.parentThreadId ? { separatorBefore: true } : null),
           },
         ],
         position,
@@ -3053,10 +3065,10 @@ export default function Sidebar() {
         clearThreadNotification(threadId);
         return;
       }
-      if (typeof clicked === "string" && clicked.startsWith("handoff:")) {
-        const targetProvider = clicked.slice("handoff:".length);
-        if (handoffTargets.includes(targetProvider as ProviderKind)) {
-          await handoffThread(thread, targetProvider as ProviderKind);
+      if (clicked?.startsWith("handoff:")) {
+        const targetProvider = handoffTargets.find((provider) => clicked === `handoff:${provider}`);
+        if (targetProvider !== undefined) {
+          await handoffThread(thread, targetProvider);
         }
         return;
       }
@@ -3783,8 +3795,8 @@ export default function Sidebar() {
       const { active, over } = event;
       if (!over || active.id === over.id) return;
       const order = normalizeSidebarNavOrder(appSettings.sidebarNavOrder);
-      const fromIndex = order.indexOf(active.id as SidebarNavItemId);
-      const toIndex = order.indexOf(over.id as SidebarNavItemId);
+      const fromIndex = order.findIndex((id) => id === active.id);
+      const toIndex = order.findIndex((id) => id === over.id);
       if (fromIndex < 0 || toIndex < 0) return;
       updateSettings({ sidebarNavOrder: arrayMove(order, fromIndex, toIndex) });
     },
@@ -3965,11 +3977,11 @@ export default function Sidebar() {
     [chatWorkspaceRoot, homeDir, sortedProjects, studioWorkspaceRoot],
   );
   const spaceActivityById = useMemo(() => {
-    const priority: Record<SpaceActivityTone, number> = {
+    const priority = {
       attention: 3,
       running: 2,
       completed: 1,
-    };
+    } as const satisfies Record<SpaceActivityTone, number>;
     const activity = new Map<SpaceId | null, SpaceActivityTone>();
     for (const project of allStandardProjectsBase) {
       const status = resolveProjectStatusIndicator(
@@ -4136,7 +4148,7 @@ export default function Sidebar() {
 
     const nextLastThreadRoute = {
       threadId: routeThreadId,
-      ...(routeSearch.splitViewId ? { splitViewId: routeSearch.splitViewId } : {}),
+      ...(routeSearch.splitViewId ? { splitViewId: routeSearch.splitViewId } : null),
     };
     const settle = window.setTimeout(() => {
       setLastThreadRoute((current) => {
@@ -4750,7 +4762,7 @@ export default function Sidebar() {
                 )}
                 draggable
                 onDragStart={(event) => {
-                  const dragImage = event.currentTarget as HTMLElement | null;
+                  const dragImage: HTMLElement | null = event.currentTarget;
                   event.dataTransfer.effectAllowed = "move";
                   event.dataTransfer.setData(
                     THREAD_DRAG_MIME,
@@ -5401,8 +5413,8 @@ export default function Sidebar() {
     const bridge = window.desktopBridge;
     if (
       !bridge ||
-      typeof bridge.getUpdateState !== "function" ||
-      typeof bridge.onUpdateState !== "function"
+      !Predicate.isFunction(bridge.getUpdateState) ||
+      !Predicate.isFunction(bridge.onUpdateState)
     ) {
       return;
     }
@@ -5491,6 +5503,7 @@ export default function Sidebar() {
   }, [desktopUpdateState, surfaceDesktopUpdateError]);
 
   const showDesktopUpdateButton = isElectron && shouldShowDesktopUpdateButton(desktopUpdateState);
+  const isBetaDesktopFlavor = desktopUpdateState?.flavor === "beta";
 
   const desktopUpdateTooltip = desktopUpdateState
     ? getDesktopUpdateButtonTooltip(desktopUpdateState, {
@@ -5519,7 +5532,8 @@ export default function Sidebar() {
     desktopUpdateButtonPresentation.secondaryLabel !== null;
   const desktopUpdateDownloadPercent = getDesktopUpdateDownloadPercent(desktopUpdateState);
   const desktopUpdateRowButtonClasses = cn(
-    "inline-flex h-6 shrink-0 items-center justify-center gap-1.5 rounded-full bg-[var(--info)] px-2.5 font-system-ui text-[length:var(--app-font-size-ui-xs,10px)] font-medium leading-none text-white transition-colors",
+    "inline-flex h-6 shrink-0 items-center justify-center gap-1.5 rounded-full px-2.5 font-system-ui text-[length:var(--app-font-size-ui-xs,10px)] font-medium leading-none text-white transition-colors",
+    isBetaDesktopFlavor ? "bg-[image:var(--beta-gradient)]" : "bg-[var(--info)]",
     desktopUpdateButtonHasSecondaryLabel && "min-h-6 py-0.5",
     desktopUpdateButtonInteractivityClasses,
   );
@@ -5865,6 +5879,15 @@ export default function Sidebar() {
 
   const headerControls = <SidebarLeadingControls className="ml-auto hidden md:flex" />;
 
+  const betaBadge = isBetaDesktopFlavor ? (
+    <span
+      aria-label="Synara Beta"
+      className="inline-flex shrink-0 items-center rounded-full bg-[var(--beta-pill)] px-1.5 py-0.5 text-[9px] font-semibold uppercase leading-none tracking-wide text-[var(--beta-pill-ink)]"
+    >
+      Beta
+    </span>
+  ) : null;
+
   const wordmark = (
     <div className="flex w-full items-center gap-1.5">
       <SidebarTrigger className="shrink-0 text-muted-foreground/75 hover:text-foreground md:hidden" />
@@ -5955,6 +5978,9 @@ export default function Sidebar() {
         ) : null}
         {isOnSettings ? (
           <SidebarGroup className="p-0">
+            {isBetaDesktopFlavor ? (
+              <div className="flex items-center justify-end pb-1 pr-2.5">{betaBadge}</div>
+            ) : null}
             <SettingsSidebarNav
               activeSection={activeSettingsSection}
               onBack={handleBackToAppFromSettings}
@@ -5999,6 +6025,7 @@ export default function Sidebar() {
                     onClick={() => setActivityViewEnabledSmoothly(!activityViewEnabled)}
                   />
                 ) : null}
+                {betaBadge}
               </div>
             </div>
             {/* The keyed content remounts with a short enter animation while the picker

@@ -35,7 +35,9 @@ import type {
   IpcMainEvent,
   MenuItemConstructorOptions,
 } from "electron";
+import { Predicate } from "effect";
 import * as Effect from "effect/Effect";
+import type { Json, JsonObject } from "effect/Schema";
 import type {
   DesktopAppIcon,
   DesktopTheme,
@@ -320,7 +322,9 @@ function resolveEmbeddedFlavor(): SynaraDesktopFlavor | null {
 
   try {
     const raw = FS.readFileSync(packageJsonPath, "utf8");
-    const parsed = JSON.parse(raw) as { synaraFlavor?: unknown };
+    // SAFETY: JSON.parse returns any; only the three known flavor literals are
+    // read, and each is compared by value before it is returned.
+    const parsed = JSON.parse(raw) as { synaraFlavor?: Json };
     if (
       parsed.synaraFlavor === "production" ||
       parsed.synaraFlavor === "beta" ||
@@ -542,7 +546,11 @@ const desktopRuntimeInfo = resolveDesktopRuntimeInfo({
   runningUnderArm64Translation: app.runningUnderARM64Translation === true,
 });
 const initialUpdateState = (): DesktopUpdateState =>
-  createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo);
+  createInitialDesktopUpdateState(
+    app.getVersion(),
+    desktopRuntimeInfo,
+    desktopFlavor === "development" ? "production" : desktopFlavor,
+  );
 
 function logTimestamp(): string {
   return new Date().toISOString();
@@ -579,15 +587,15 @@ function safeConsoleError(...args: Parameters<typeof console.error>): void {
   }
 }
 
-function formatErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
+function formatErrorMessage(cause: unknown): string {
+  if (cause instanceof Error) {
+    return cause.message;
   }
-  return String(error);
+  return String(cause);
 }
 
-function getSafeExternalUrl(rawUrl: unknown): string | null {
-  if (typeof rawUrl !== "string" || rawUrl.length === 0) {
+function getSafeExternalUrl(rawUrl: Json): string | null {
+  if (!Predicate.isString(rawUrl) || rawUrl.length === 0) {
     return null;
   }
 
@@ -605,7 +613,7 @@ function getSafeExternalUrl(rawUrl: unknown): string | null {
   return parsedUrl.toString();
 }
 
-function getSafeTheme(rawTheme: unknown): DesktopTheme | null {
+function getSafeTheme(rawTheme: Json): DesktopTheme | null {
   if (rawTheme === "light" || rawTheme === "dark" || rawTheme === "system") {
     return rawTheme;
   }
@@ -613,10 +621,7 @@ function getSafeTheme(rawTheme: unknown): DesktopTheme | null {
   return null;
 }
 
-function getDesktopWindowState(window: BrowserWindow): {
-  isMaximized: boolean;
-  isFullscreen: boolean;
-} {
+function getDesktopWindowState(window: BrowserWindow) {
   return {
     isMaximized: window.isMaximized(),
     isFullscreen: window.isFullScreen(),
@@ -628,34 +633,39 @@ function emitDesktopWindowState(window: BrowserWindow | null = mainWindow): void
   window.webContents.send(IPC.windowState, getDesktopWindowState(window));
 }
 
-function isSaveFileInput(input: unknown): input is {
-  defaultFilename: string;
-  contents: string;
-  filters?: FileFilter[];
-} {
-  if (!input || typeof input !== "object") {
+type SaveFileRequest = {
+  readonly defaultFilename: string;
+  readonly contents: string;
+  readonly filters?: FileFilter[];
+};
+
+function isJsonObject(value: Json | undefined): value is JsonObject {
+  return Predicate.isObject(value);
+}
+
+function isSaveFileInput(input: Json | undefined): input is JsonObject & SaveFileRequest {
+  if (!isJsonObject(input)) {
     return false;
   }
-  const record = input as Record<string, unknown>;
-  if (typeof record.defaultFilename !== "string" || record.defaultFilename.trim().length === 0) {
+  if (!Predicate.isString(input.defaultFilename) || input.defaultFilename.trim().length === 0) {
     return false;
   }
-  if (typeof record.contents !== "string") {
+  if (!Predicate.isString(input.contents)) {
     return false;
   }
-  if (record.filters === undefined) {
+  const filters = input.filters;
+  if (filters === undefined) {
     return true;
   }
-  if (!Array.isArray(record.filters)) {
+  if (!Array.isArray(filters)) {
     return false;
   }
-  return record.filters.every((filter) => {
-    if (!filter || typeof filter !== "object") return false;
-    const filterRecord = filter as Record<string, unknown>;
+  return filters.every((filter) => {
+    if (!isJsonObject(filter)) return false;
     return (
-      typeof filterRecord.name === "string" &&
-      Array.isArray(filterRecord.extensions) &&
-      filterRecord.extensions.every((extension) => typeof extension === "string")
+      Predicate.isString(filter.name) &&
+      Array.isArray(filter.extensions) &&
+      filter.extensions.every((extension) => Predicate.isString(extension))
     );
   });
 }
@@ -713,8 +723,10 @@ async function waitForBackendWindowReady(baseUrl: string): Promise<"listening" |
             return false;
           }
           try {
+            // SAFETY: response.json() returns any; the payload is only read
+            // through a strict `=== true` comparison below.
             const payload = (await response.json()) as {
-              startupReady?: unknown;
+              startupReady?: Json;
             };
             return payload.startupReady === true;
           } catch {
@@ -750,13 +762,13 @@ function ensureInitialBackendWindowOpen(baseUrl: string): void {
 
 function writeDesktopStreamChunk(
   streamName: "stdout" | "stderr",
-  chunk: unknown,
+  chunk: string | Uint8Array,
   encoding: BufferEncoding | undefined,
 ): void {
   if (!desktopLogSink) return;
   const buffer = Buffer.isBuffer(chunk)
     ? chunk
-    : Buffer.from(String(chunk), typeof chunk === "string" ? encoding : undefined);
+    : Buffer.from(String(chunk), Predicate.isString(chunk) ? encoding : undefined);
   desktopLogSink.write(`[${logTimestamp()}] [${logScope(streamName)}] `);
   desktopLogSink.write(buffer);
   if (buffer.length === 0 || buffer[buffer.length - 1] !== 0x0a) {
@@ -779,9 +791,9 @@ function installStdIoCapture(): void {
       encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
       callback?: (error?: Error | null) => void,
     ): boolean => {
-      const encoding = typeof encodingOrCallback === "string" ? encodingOrCallback : undefined;
+      const encoding = Predicate.isString(encodingOrCallback) ? encodingOrCallback : undefined;
       writeDesktopStreamChunk(streamName, chunk, encoding);
-      if (typeof encodingOrCallback === "function") {
+      if (encodingOrCallback !== undefined && !Predicate.isString(encodingOrCallback)) {
         return originalWrite(chunk, encodingOrCallback);
       }
       if (callback !== undefined) {
@@ -1094,8 +1106,8 @@ function parseAppUpdateYml(): Record<string, string> | null {
   }
 }
 
-function normalizeCommitHash(value: unknown): string | null {
-  if (typeof value !== "string") {
+function normalizeCommitHash(value: Json | undefined): string | null {
+  if (!Predicate.isString(value)) {
     return null;
   }
   const trimmed = value.trim();
@@ -1113,7 +1125,9 @@ function resolveEmbeddedCommitHash(): string | null {
 
   try {
     const raw = FS.readFileSync(packageJsonPath, "utf8");
-    const parsed = JSON.parse(raw) as { synaraCommitHash?: unknown };
+    // SAFETY: JSON.parse returns any; normalizeCommitHash validates the value
+    // before it is used.
+    const parsed = JSON.parse(raw) as { synaraCommitHash?: Json };
     return normalizeCommitHash(parsed.synaraCommitHash);
   } catch {
     return null;
@@ -1177,8 +1191,8 @@ async function requireCurrentDesktopMigrationBundle(): Promise<boolean> {
   }
 }
 
-async function rejectUnverifiableDesktopMigrationBundle(error: unknown): Promise<false> {
-  const message = formatErrorMessage(error);
+async function rejectUnverifiableDesktopMigrationBundle(cause: unknown): Promise<false> {
+  const message = formatErrorMessage(cause);
   writeDesktopLogHeader(`migration bundle source check failed message=${message}`);
   await dialog.showMessageBox({
     type: "error",
@@ -1478,12 +1492,12 @@ function computeServedStaticRoot(): ServedStaticRoot | null {
   return { dir: snapshot.dir, snapshotted: true };
 }
 
-function handleFatalStartupError(stage: string, error: unknown): void {
-  const message = formatErrorMessage(error);
+function handleFatalStartupError(stage: string, cause: unknown): void {
+  const message = formatErrorMessage(cause);
   const detail =
-    error instanceof Error && typeof error.stack === "string" ? `\n${error.stack}` : "";
+    cause instanceof Error && Predicate.isString(cause.stack) ? `\n${cause.stack}` : "";
   writeDesktopLogHeader(`fatal startup error stage=${stage} message=${message}`);
-  console.error(`[desktop] fatal startup error (${stage})`, error);
+  console.error(`[desktop] fatal startup error (${stage})`, cause);
   if (!isQuitting) {
     isQuitting = true;
     dialog.showErrorBox("Synara failed to start", `Stage: ${stage}\n${message}${detail}`);
@@ -1780,7 +1794,7 @@ function configureApplicationMenu(): void {
       submenu: [
         {
           label: "Keyboard Shortcuts",
-          ...(keyboardShortcutsAccelerator ? { accelerator: keyboardShortcutsAccelerator } : {}),
+          ...(keyboardShortcutsAccelerator ? { accelerator: keyboardShortcutsAccelerator } : null),
           click: () => dispatchMenuAction("show-shortcuts"),
         },
         { type: "separator" },
@@ -1957,9 +1971,9 @@ function showDesktopNotification(input: {
   suppressWhenForeground?: boolean;
   threadId?: string;
 }): boolean {
-  const title = typeof input.title === "string" ? input.title.trim() : "";
-  const body = typeof input.body === "string" ? input.body.trim() : "";
-  const threadId = typeof input.threadId === "string" ? input.threadId.trim() : "";
+  const title = Predicate.isString(input.title) ? input.title.trim() : "";
+  const body = Predicate.isString(input.body) ? input.body.trim() : "";
+  const threadId = Predicate.isString(input.threadId) ? input.threadId.trim() : "";
   if (title.length === 0 || !Notification.isSupported()) {
     return false;
   }
@@ -1972,7 +1986,7 @@ function showDesktopNotification(input: {
     title,
     body,
     silent: input.silent === true,
-    ...(iconPath ? { icon: iconPath } : {}),
+    ...(iconPath ? { icon: iconPath } : null),
   });
   if (!isMainWindowForeground(mainWindow)) {
     incrementUnreadNotificationBadge();
@@ -2627,16 +2641,12 @@ function shouldEnableAutoUpdates(): boolean {
 }
 
 function isKnownUpdateVersionNewer(version: string | null | undefined): boolean {
-  return typeof version === "string" && isUpdateVersionNewer(app.getVersion(), version);
+  return (
+    version !== null && version !== undefined && isUpdateVersionNewer(app.getVersion(), version)
+  );
 }
 
-function getUpdaterCachePathArgs(): {
-  cacheDirName: string | null;
-  platform: NodeJS.Platform;
-  homeDir: string;
-  localAppData: string | null;
-  xdgCacheHome: string | null;
-} {
+function getUpdaterCachePathArgs() {
   return {
     cacheDirName: configuredUpdaterCacheDirName,
     platform: process.platform,
@@ -3354,7 +3364,11 @@ function configureAutoUpdater(): void {
     githubUpdateSource === null ? null : buildGitHubReleasesPageUrl(githubUpdateSource);
   const enabled = shouldEnableAutoUpdates();
   setUpdateState({
-    ...createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo),
+    ...createInitialDesktopUpdateState(
+      app.getVersion(),
+      desktopRuntimeInfo,
+      desktopFlavor === "development" ? "production" : desktopFlavor,
+    ),
     enabled,
     status: enabled ? "idle" : "disabled",
     releaseUrl,
@@ -3392,7 +3406,14 @@ function configureAutoUpdater(): void {
   // download transfer with a stall-aware, resumable one and installs a real idle
   // timeout, so an intermittent stall becomes a brief reconnect-and-resume
   // instead of a multi-minute freeze. Independent of the zip-validation fix.
-  if (!installResumableUpdateDownloader(autoUpdater as unknown as ResumableDownloaderTarget)) {
+  // SAFETY: electron-updater carries `httpExecutor` at runtime but omits it from
+  // the public AppUpdater type. `autoDownload` is public, so this is a structural
+  // view of the same instance, and a missing executor is handled like null.
+  const updaterRuntime = autoUpdater as {
+    readonly autoDownload: boolean;
+    readonly httpExecutor?: ResumableDownloaderTarget["httpExecutor"];
+  };
+  if (!installResumableUpdateDownloader({ httpExecutor: updaterRuntime.httpExecutor ?? null })) {
     console.warn(
       "[desktop-updater] Could not install resumable update downloader; falling back to default transfer.",
     );
@@ -3547,16 +3568,16 @@ function backendEnv(): NodeJS.ProcessEnv {
     ),
     // Point the backend's HTTP static route at the same swap-immune snapshot the
     // synara:// protocol serves, so both surfaces survive app.asar being replaced.
-    ...(servedStaticRoot?.snapshotted ? { SYNARA_STATIC_DIR: servedStaticRoot.dir } : {}),
+    ...(servedStaticRoot?.snapshotted ? { SYNARA_STATIC_DIR: servedStaticRoot.dir } : null),
     ...(app.isPackaged
       ? { [DEVICE_HELPER_SOURCE_DIR_ENV]: Path.join(process.resourcesPath, "device-helper") }
-      : {}),
+      : null),
     ...(migrationSourceDigest
       ? { [MIGRATION_RUNTIME_SOURCE_DIGEST_ENV]: migrationSourceDigest }
-      : {}),
+      : null),
     ...(migrationDivergenceConsent
       ? { [MIGRATION_DIVERGENCE_CONSENT_ENV]: migrationDivergenceConsent }
-      : {}),
+      : null),
     SYNARA_MODE: "desktop",
     SYNARA_NO_BROWSER: "1",
     SYNARA_PORT: String(backendPort),
@@ -4068,7 +4089,7 @@ function startBackend(trigger: BackendStartTrigger = "lifecycle"): void {
   const backendOutputCapture = captureBackendProcessOutput({
     stdout: child.stdout,
     stderr: child.stderr,
-    ...(backendLogDestination ? { writeLog: (chunk) => backendLogDestination.write(chunk) } : {}),
+    ...(backendLogDestination ? { writeLog: (chunk) => backendLogDestination.write(chunk) } : null),
     writeStdout: (chunk) => {
       process.stdout.write(chunk);
     },
@@ -4302,13 +4323,21 @@ function requestGracefulAppQuit(reason: string): void {
   }
 
   void runAfterDesktopShutdown(shutdownDesktopRuntime(reason), () => app.quit()).catch(
-    (error: unknown) => {
-      const message = formatErrorMessage(error);
+    (cause: unknown) => {
+      const message = formatErrorMessage(cause);
       writeDesktopLogHeader(`${reason} shutdown failed message=${message}`);
       console.warn(`[desktop] Shutdown failed during ${reason}: ${message}`);
       app.exit(1);
     },
   );
+}
+
+interface DesktopNotificationRequest {
+  readonly title?: Json;
+  readonly body?: Json;
+  readonly silent?: Json;
+  readonly suppressWhenForeground?: Json;
+  readonly threadId?: Json;
 }
 
 function registerIpcHandlers(): void {
@@ -4357,7 +4386,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(IPC.saveFile);
-  ipcMain.handle(IPC.saveFile, async (_event, input: unknown) => {
+  ipcMain.handle(IPC.saveFile, async (_event, input: Json) => {
     if (!isSaveFileInput(input)) {
       throw new Error("Invalid save file input.");
     }
@@ -4365,7 +4394,7 @@ function registerIpcHandlers(): void {
     const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
     const options = {
       defaultPath: input.defaultFilename,
-      ...(input.filters ? { filters: input.filters } : {}),
+      ...(input.filters ? { filters: input.filters } : null),
     };
     const result = owner
       ? await dialog.showSaveDialog(owner, options)
@@ -4380,8 +4409,8 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(IPC.confirm);
-  ipcMain.handle(IPC.confirm, async (_event, message: unknown) => {
-    if (typeof message !== "string") {
+  ipcMain.handle(IPC.confirm, async (_event, message: Json) => {
+    if (!Predicate.isString(message)) {
       return false;
     }
 
@@ -4390,12 +4419,12 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeAllListeners(IPC.quitConfirmationResponse);
-  ipcMain.on(IPC.quitConfirmationResponse, (_event, payload: unknown) => {
+  ipcMain.on(IPC.quitConfirmationResponse, (_event, payload: Json) => {
     runningChatsQuitGuard.receiveResponse(payload);
   });
 
   ipcMain.removeHandler(IPC.setTheme);
-  ipcMain.handle(IPC.setTheme, async (_event, rawTheme: unknown) => {
+  ipcMain.handle(IPC.setTheme, async (_event, rawTheme: Json) => {
     const theme = getSafeTheme(rawTheme);
     if (!theme) {
       return;
@@ -4417,7 +4446,7 @@ function registerIpcHandlers(): void {
     if (!shouldPersist && process.platform !== "win32") return;
     await applyDesktopAppIcon(icon, mainWindow, { flushShellIconCache: true });
   });
-  ipcMain.handle(IPC.setAppIcon, async (_event, rawIcon: unknown) => {
+  ipcMain.handle(IPC.setAppIcon, async (_event, rawIcon: Json) => {
     if (!isDesktopAppIcon(rawIcon)) return;
     await enqueueDesktopAppIconApply(rawIcon);
   });
@@ -4427,7 +4456,7 @@ function registerIpcHandlers(): void {
     IPC.contextMenu,
     async (_event, items: ContextMenuItem[], position?: { x: number; y: number }) => {
       const normalizedItems = items
-        .filter((item) => typeof item.id === "string" && typeof item.label === "string")
+        .filter((item) => Predicate.isString(item.id) && Predicate.isString(item.label))
         .map((item) => ({
           id: item.id,
           label: item.label,
@@ -4490,7 +4519,7 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.removeHandler(IPC.openExternal);
-  ipcMain.handle(IPC.openExternal, async (_event, rawUrl: unknown) => {
+  ipcMain.handle(IPC.openExternal, async (_event, rawUrl: Json) => {
     const externalUrl = getSafeExternalUrl(rawUrl);
     if (!externalUrl) {
       return false;
@@ -4505,8 +4534,8 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(IPC.clipboardWriteImage);
-  ipcMain.handle(IPC.clipboardWriteImage, async (_event, rawDataUrl: unknown) => {
-    if (typeof rawDataUrl !== "string") {
+  ipcMain.handle(IPC.clipboardWriteImage, async (_event, rawDataUrl: Json) => {
+    if (!Predicate.isString(rawDataUrl)) {
       return false;
     }
     if (rawDataUrl.length > MAX_CLIPBOARD_IMAGE_DATA_URL_LENGTH) {
@@ -4528,8 +4557,8 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(IPC.showInFolder);
-  ipcMain.handle(IPC.showInFolder, async (_event, rawPath: unknown) => {
-    if (typeof rawPath !== "string" || rawPath.trim().length === 0) {
+  ipcMain.handle(IPC.showInFolder, async (_event, rawPath: Json) => {
+    if (!Predicate.isString(rawPath) || rawPath.trim().length === 0) {
       throw new Error("Missing folder path.");
     }
     const resolvedPath = Path.resolve(rawPath);
@@ -4590,8 +4619,8 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.customTitleBarGetState, async () => getDesktopCustomTitleBarState());
 
   ipcMain.removeHandler(IPC.customTitleBarSetPreference);
-  ipcMain.handle(IPC.customTitleBarSetPreference, async (_event, rawEnabled: unknown) => {
-    if (typeof rawEnabled !== "boolean") {
+  ipcMain.handle(IPC.customTitleBarSetPreference, async (_event, rawEnabled: Json) => {
+    if (!Predicate.isBoolean(rawEnabled)) {
       return getDesktopCustomTitleBarState();
     }
     const state = getDesktopCustomTitleBarState();
@@ -4650,26 +4679,16 @@ function registerIpcHandlers(): void {
   ipcMain.removeHandler(IPC.notificationsShow);
   ipcMain.handle(
     IPC.notificationsShow,
-    async (
-      _event,
-      input:
-        | {
-            title?: unknown;
-            body?: unknown;
-            silent?: unknown;
-            suppressWhenForeground?: unknown;
-            threadId?: unknown;
-          }
-        | null
-        | undefined,
-    ) =>
-      showDesktopNotification({
-        title: typeof input?.title === "string" ? input.title : "",
-        body: typeof input?.body === "string" ? input.body : "",
-        silent: input?.silent === true,
-        suppressWhenForeground: input?.suppressWhenForeground === true,
-        ...(typeof input?.threadId === "string" ? { threadId: input.threadId } : {}),
-      }),
+    async (_event, input: DesktopNotificationRequest | null | undefined) => {
+      const request: DesktopNotificationRequest = input ?? {};
+      return showDesktopNotification({
+        title: Predicate.isString(request.title) ? request.title : "",
+        body: Predicate.isString(request.body) ? request.body : "",
+        silent: request.silent === true,
+        suppressWhenForeground: request.suppressWhenForeground === true,
+        ...(Predicate.isString(request.threadId) ? { threadId: request.threadId } : null),
+      });
+    },
   );
   if (appSnapManager) {
     registerAppSnapIpcHandlers(ipcMain, appSnapManager);
@@ -4913,7 +4932,10 @@ function createWindow(): BrowserWindow {
   });
 
   if (isDevelopment) {
-    void window.loadURL(process.env.VITE_DEV_SERVER_URL as string);
+    const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+    if (devServerUrl !== undefined) {
+      void window.loadURL(devServerUrl);
+    }
     window.webContents.openDevTools({ mode: "detach" });
   } else {
     void window.loadURL(desktopIdentity.entryUrl);
@@ -5361,7 +5383,7 @@ app.on("window-all-closed", () => {
 });
 
 if (process.platform !== "win32") {
-  process.on("uncaughtException", (error: unknown) => {
+  process.on("uncaughtException", (error: Error) => {
     if (!isBrokenPipeError(error)) {
       throw error;
     }
