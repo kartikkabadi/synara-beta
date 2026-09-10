@@ -514,7 +514,7 @@ jobs:
           name: Synara Beta v${{ needs.preflight.outputs.version }}
           generate_release_notes: true
           prerelease: true
-          make_latest: true
+          make_latest: false
           files: |
             release-assets/*.dmg
             release-assets/*.zip

@@ -42,12 +42,18 @@ Install Synara Beta (https://github.com/kartikkabadi/synara-beta) on this machin
 
 1. macOS and Linux: run: curl -fsSL https://raw.githubusercontent.com/kartikkabadi/synara-beta/main/scripts/install.sh | bash
    It resolves the newest -beta.* release, downloads the right artifact for this OS
-   and CPU, verifies the release signature and checksum, installs, and launches the app.
+   and CPU, verifies the release signature and checksum, and installs the app
+   (it also opens the app on macOS).
 2. Windows (PowerShell): run:
-   $t = ((Invoke-RestMethod "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100") | Where-Object { $_.tag_name -match '^v\d+\.\d+\.\d+-beta\.\d+$' } | Select-Object -First 1).tag_name
-   $f = Join-Path $env:TEMP "synara-beta-install.ps1"
-   Invoke-WebRequest "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-windows.ps1" -OutFile $f
-   & $f -Tag $t
+   $t = ((Invoke-RestMethod "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" -UseBasicParsing -ErrorAction Stop) | Where-Object { $_.tag_name -match '^v\d+\.\d+\.\d+-beta\.\d+$' } | Select-Object -First 1).tag_name
+   if (-not $t) { throw "Could not resolve the latest Synara Beta release." }
+   $f = Join-Path $env:TEMP $("synara-beta-install-$([Guid]::NewGuid()).ps1")
+   try {
+     Invoke-WebRequest "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-windows.ps1" -UseBasicParsing -OutFile $f -ErrorAction Stop
+     Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+     Unblock-File -Path $f
+     & $f -Tag $t
+   } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue }
 3. Fix these if they come up, then run the install again:
    - ssh-keygen is missing: install the OpenSSH client (apt install openssh-client, dnf install openssh-clients).
    - macOS says the app "is damaged": clear the quarantine flag with
@@ -62,7 +68,7 @@ Do not change Gatekeeper or system security settings.
 
 ### Fast one-line terminal install
 
-Install Synara Beta with one release-pinned command for your operating system. The downloaded release artifacts (DMG/AppImage/exe) are checksum-verified against an SSH-signed `SHA256SUMS`; the installer scripts themselves are fetched over HTTPS from the pinned release tag and are not signature-verified (see the [Installation Guide](./docs/install.md) for the full trust model).
+Install Synara Beta with one release-pinned command for your operating system. The downloaded release artifacts (DMG/AppImage/exe) are checksum-verified against an SSH-signed `SHA256SUMS`; the platform installer scripts are fetched over HTTPS from the pinned release tag and the universal `install.sh` bootstrap from `main`, and no installer script is signature-verified (see the [Installation Guide](./docs/install.md) for the full trust model).
 
 **macOS (Apple Silicon & Intel)**
 
