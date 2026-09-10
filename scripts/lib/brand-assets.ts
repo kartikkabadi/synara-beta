@@ -17,7 +17,8 @@ export const BRAND_ASSET_PATHS = {
 export const BETA_ASSET_PATHS = {
   betaMacIconPng: "assets/beta/beta-macos-1024.png",
   betaMacLegacyIconPng: "assets/beta/beta-macos-legacy-1024.png",
-  betaMacLegacyDarkIconPng: "assets/beta/beta-macos-legacy-dark-1024.png",
+  // One artwork serves both appearances: the dark dock slot reuses the light file.
+  betaMacLegacyDarkIconPng: "assets/beta/beta-macos-1024.png",
   betaLinuxIconPng: "assets/beta/beta-universal-1024.png",
   betaWindowsIconIco: "assets/beta/beta-windows.ico",
   betaWebFaviconIco: "assets/beta/beta-web-favicon.ico",

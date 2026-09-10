@@ -18,8 +18,6 @@ struct Palette {
 
 // Light: exact Xcode 26 stop colors.
 let light = Palette(top: 0x18A9EE, upperMid: 0x1895EA, lowerMid: 0x1778E4, bottom: 0x1560DC, mark: 0xFFFFFF)
-// Dark appearance: deeper sibling of the same ramp.
-let dark = Palette(top: 0x14549E, upperMid: 0x11489C, lowerMid: 0x0C3A8C, bottom: 0x072E6B, mark: 0xFFFFFF)
 
 func cg(_ hex: UInt32, _ a: CGFloat = 1) -> CGColor {
   CGColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: a)
@@ -168,37 +166,36 @@ func drawIcon(_ p: Palette, name: String) {
 
   ctx.restoreGState()
 
-  // BETA pill: inside the dock mask, bottom right
-  let pillRect = CGRect(x: 1010, y: 128, width: 860, height: 300)
+  // B badge: circular, bottom-right, inside the dock mask
+  let badgeRect = CGRect(x: 1230, y: 120, width: 400, height: 400)
   ctx.saveGState()
   ctx.setShadow(offset: CGSize(width: 8, height: -20), blur: 46, color: cg(0x03183A, 0.32))
-  ctx.addPath(CGPath(roundedRect: pillRect, cornerWidth: 150, cornerHeight: 150, transform: nil))
+  ctx.addPath(CGPath(ellipseIn: badgeRect, transform: nil))
   ctx.setFillColor(cg(0xFFFFFF))
   ctx.fillPath()
   ctx.restoreGState()
   ctx.saveGState()
-  ctx.addPath(CGPath(roundedRect: pillRect, cornerWidth: 150, cornerHeight: 150, transform: nil))
+  ctx.addPath(CGPath(ellipseIn: badgeRect, transform: nil))
   ctx.clip()
   if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF), cg(0xE9F0F9)] as CFArray, locations: [0, 1]) {
-    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: pillRect.maxY), end: CGPoint(x: 0, y: pillRect.minY), options: [])
+    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: badgeRect.maxY), end: CGPoint(x: 0, y: badgeRect.minY), options: [])
   }
   ctx.restoreGState()
   ctx.saveGState()
-  ctx.addPath(CGPath(roundedRect: pillRect.insetBy(dx: 1, dy: 1), cornerWidth: 149, cornerHeight: 149, transform: nil))
+  ctx.addPath(CGPath(ellipseIn: badgeRect.insetBy(dx: 2, dy: 2), transform: nil))
   ctx.setStrokeColor(cg(0xD7E0EC, 0.9))
-  ctx.setLineWidth(2)
+  ctx.setLineWidth(2.5)
   ctx.strokePath()
   ctx.restoreGState()
 
-  let font = NSFont.systemFont(ofSize: 200, weight: .bold)
+  let font = NSFont.systemFont(ofSize: 235, weight: .bold)
   let attrs: [NSAttributedString.Key: Any] = [
     .font: font,
     .foregroundColor: NSColor(srgbRed: 0x16 / 255.0, green: 0x68 / 255.0, blue: 0xE2 / 255.0, alpha: 1),
-    .kern: 20,
   ]
-  let text = NSAttributedString(string: "BETA", attributes: attrs)
+  let text = NSAttributedString(string: "B", attributes: attrs)
   let size = text.size()
-  let rect = CGRect(x: pillRect.minX + (pillRect.width - size.width) / 2 + 6, y: pillRect.minY + (pillRect.height - size.height) / 2, width: size.width, height: size.height)
+  let rect = CGRect(x: badgeRect.midX - size.width / 2 + 6, y: badgeRect.midY - size.height / 2, width: size.width, height: size.height)
   NSGraphicsContext.saveGraphicsState()
   NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
   text.draw(in: rect)
@@ -221,4 +218,3 @@ func drawIcon(_ p: Palette, name: String) {
 }
 
 drawIcon(light, name: "assets/beta/beta-macos-1024")
-drawIcon(dark, name: "assets/beta/beta-macos-legacy-dark-1024")
