@@ -568,8 +568,7 @@ function toMessage(cause: unknown, fallback: string): string {
 }
 
 function trimToUndefined(value: string | null | undefined): string | undefined {
-  const trimmed =
-    value === null || value === undefined ? "" : stripTerminalControlSequences(value).trim();
+  const trimmed = value === null || value === undefined ? "" : value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
 }
 

@@ -298,7 +298,7 @@ it("does not turn extension footer status into transcript tool progress", async 
   });
 });
 
-it("keeps extension notifications visible without inventing tool progress", async () => {
+it("drops informational extension notifications but keeps warnings visible", async () => {
   responses("success");
   captured.extensions.push((pi) => {
     pi.on("agent_start", (_event, context) => {
@@ -314,14 +314,6 @@ it("keeps extension notifications visible without inventing tool progress", asyn
     await waitFor(() => expect(completions(events)).toHaveLength(1));
     const notices = events.filter((event) => event.raw?.method === "extension/ui/notify");
     expect(notices.map((event) => ({ type: event.type, payload: event.payload }))).toEqual([
-      {
-        type: "runtime.warning",
-        payload: { message: "Enabled [full] mode", detail: { type: "info" } },
-      },
-      {
-        type: "runtime.warning",
-        payload: { message: "Configuration saved", detail: { type: "info" } },
-      },
       {
         type: "runtime.warning",
         payload: { message: "Please reconnect", detail: { type: "warning" } },
