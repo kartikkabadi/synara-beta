@@ -6,6 +6,7 @@ import {
   AddPlusIcon,
   ArchiveIcon,
   BookIcon,
+  BugIcon,
   ChatBubbleIcon,
   CircleQuestionIcon,
   ClockIcon,
@@ -881,7 +882,10 @@ function SidebarHelpMenu({
               <SidebarContextMenuIcon icon={KeyboardIcon} />
               <span>Keybindings</span>
             </MenuItem>
-            <MenuItem className={SIDEBAR_CONTEXT_MENU_ITEM_CLASS_NAME} onClick={onOpenFeedback}>
+            <MenuItem
+              className={SIDEBAR_CONTEXT_MENU_ITEM_CLASS_NAME}
+              onClick={() => onOpenFeedback()}
+            >
               <SidebarContextMenuIcon icon={ChatBubbleIcon} />
               <span>Send feedback</span>
             </MenuItem>
@@ -1595,6 +1599,10 @@ export default function Sidebar() {
   const [createProjectDialogOpen, setCreateProjectDialogOpen] = useState(false);
   const [searchPaletteOpen, setSearchPaletteOpen] = useState(false);
   const openFeedbackDialog = useFeedbackDialogStore((state) => state.openDialog);
+  const openBugReport = useCallback(
+    () => openFeedbackDialog(undefined, "bug"),
+    [openFeedbackDialog],
+  );
   const [searchPaletteMode, setSearchPaletteMode] = useState<SidebarSearchPaletteMode>("search");
   const projectAdditionLockRef = useRef(false);
   const [renameDialogThreadId, setRenameDialogThreadId] = useState<ThreadId | null>(null);
@@ -5603,7 +5611,14 @@ export default function Sidebar() {
         id: "feedback",
         label: "Feedback Synara",
         description: "Send feedback or report an issue to the Synara team.",
-        keywords: ["feedback", "bug", "issue", "problem", "report", "support", "synara"],
+        keywords: ["feedback", "issue", "problem", "report", "support", "synara"],
+      },
+      {
+        id: "bug",
+        label: "Report a bug",
+        description: "Open the bug report dialog with the Bug category selected.",
+        keywords: ["bug", "report", "issue", "problem", "broken", "crash", "synara"],
+        run: openBugReport,
       },
       {
         id: "settings",
@@ -5667,6 +5682,7 @@ export default function Sidebar() {
       importThreadShortcutLabel,
       newChatShortcutLabel,
       newThreadShortcutLabel,
+      openBugReport,
       openSpaceCreator,
       spaces,
       usageSettingsShortcutLabel,
@@ -6466,6 +6482,12 @@ export default function Sidebar() {
                     <span>Settings</span>
                   </SidebarMenuButton>
                 )}
+                <SidebarIconButton
+                  icon={BugIcon}
+                  label="Report a bug"
+                  tooltip="Report a bug"
+                  onClick={openBugReport}
+                />
                 {showDesktopUpdateButton ? (
                   <Tooltip>
                     <TooltipTrigger
