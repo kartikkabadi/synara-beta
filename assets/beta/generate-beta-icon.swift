@@ -93,7 +93,7 @@ func drawIcon(_ p: Palette, name: String) {
 
   // Full-bleed square gradient (the dock supplies the mask).
   let stops = [cg(p.top), cg(p.upperMid), cg(p.lowerMid), cg(p.bottom)] as CFArray
-  if let g = CGGradient(colorsSpace: cs, colors: [cg(p.top), cg(p.upperMid), cg(0x1473E8), cg(p.lowerMid), cg(p.bottom)] as CFArray, locations: [0, 0.3, 0.55, 0.8, 1]) {
+  if let g = CGGradient(colorsSpace: cs, colors: [cg(p.top), cg(p.upperMid), cg(0x0F66DC), cg(p.lowerMid), cg(p.bottom)] as CFArray, locations: [0, 0.3, 0.55, 0.8, 1]) {
     ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 0), end: CGPoint(x: 0, y: D), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
   }
 
@@ -111,7 +111,7 @@ func drawIcon(_ p: Palette, name: String) {
 
   // Blueprint shell: clean 5x5 grid (Xcode 26), guide circles and squircle inset (classic beta)
   ctx.setLineWidth(3)
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.22))
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.15))
   for step in 1...4 {
     let v = CGFloat(step) * D / 5
     ctx.move(to: CGPoint(x: v, y: 0)); ctx.addLine(to: CGPoint(x: v, y: D))
@@ -119,38 +119,20 @@ func drawIcon(_ p: Palette, name: String) {
   }
   ctx.strokePath()
 
-  // Faint cardinal axes
-  ctx.setLineWidth(2.5)
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.14))
-  ctx.move(to: CGPoint(x: 512, y: 0)); ctx.addLine(to: CGPoint(x: 512, y: D))
-  ctx.move(to: CGPoint(x: 0, y: 512)); ctx.addLine(to: CGPoint(x: D, y: 512))
-  ctx.strokePath()
-
-  // Diagonals
-  ctx.setLineWidth(2)
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.12))
-  ctx.move(to: CGPoint(x: 0, y: 0)); ctx.addLine(to: CGPoint(x: D, y: D))
-  ctx.move(to: CGPoint(x: 0, y: D)); ctx.addLine(to: CGPoint(x: D, y: 0))
-  ctx.strokePath()
-
   // Concentric guide circles
   ctx.setLineWidth(3.2)
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.30))
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.22))
   ctx.strokeEllipse(in: CGRect(x: 512 - 385, y: 512 - 385, width: 770, height: 770))
-  ctx.setLineWidth(2.6)
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.15))
-  ctx.strokeEllipse(in: CGRect(x: 512 - 470, y: 512 - 470, width: 940, height: 940))
-
   // Squircle inset guide
   ctx.setLineWidth(3)
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.24))
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.18))
   ctx.addPath(CGPath(roundedRect: CGRect(x: 72, y: 72, width: D - 144, height: D - 144), cornerWidth: 160, cornerHeight: 160, transform: nil))
   ctx.strokePath()
 
   // Depth layer 3: glass rim on the tile edge
   // Directional glass rim: light from top-left, fading clockwise into a deep base.
   ctx.setLineWidth(3)
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.55))
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.65))
   ctx.move(to: CGPoint(x: 0, y: 1.5)); ctx.addLine(to: CGPoint(x: D, y: 1.5)); ctx.strokePath()
   ctx.setStrokeColor(cg(0xFFFFFF, 0.32))
   ctx.move(to: CGPoint(x: 1.5, y: 0)); ctx.addLine(to: CGPoint(x: 1.5, y: D)); ctx.strokePath()
@@ -165,7 +147,7 @@ func drawIcon(_ p: Palette, name: String) {
   ctx.setShadow(offset: CGSize(width: 8, height: -18), blur: 44, color: cg(0x021233, 0.33))
   addMark(to: ctx)
   ctx.clip()
-  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xB9D9FF), cg(0x9CC6F7)] as CFArray, locations: [0, 1]) {
+  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xACD2FA), cg(0x8AB9F2)] as CFArray, locations: [0, 1]) {
     ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 260), end: CGPoint(x: 0, y: 805), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
   }
   if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF, 0.9), cg(0xFFFFFF, 0)] as CFArray, locations: [0, 1]) {
@@ -173,9 +155,6 @@ func drawIcon(_ p: Palette, name: String) {
   }
   if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF, 0.55), cg(0xFFFFFF, 0)] as CFArray, locations: [0, 1]) {
     ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 260), end: CGPoint(x: 0, y: 380), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
-  }
-  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF, 0.25), cg(0xFFFFFF, 0)] as CFArray, locations: [0, 1]) {
-    ctx.drawLinearGradient(g, start: CGPoint(x: 280, y: 240), end: CGPoint(x: 760, y: 720), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
   }
   ctx.restoreGState()
   ctx.saveGState()
