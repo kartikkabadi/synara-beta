@@ -13,6 +13,8 @@ import {
   shouldRejectUntrustedRequestOrigin,
 } from "./trustedOrigins";
 
+// SAFETY: Tests that exercise host, publicUrl, or authToken spread this fixture
+// and override that field; the base only relies on devUrl plus undefined-safe checks.
 const config = {
   devUrl: new URL("http://localhost:5173/"),
 } as ServerConfigShape;
