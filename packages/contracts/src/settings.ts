@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { TrimmedString } from "./baseSchemas";
+import { IsoDateTime, TrimmedString } from "./baseSchemas";
 import { DEFAULT_GIT_TEXT_GENERATION_MODEL } from "./model";
 import { ModelSelection, ProviderKind, ThreadEnvironmentMode } from "./orchestration";
 
@@ -117,6 +117,9 @@ export const ServerSettings = Schema.Struct({
   }).pipe(Schema.withDecodingDefault(() => ({}))),
   skills: SkillsServerSettings.pipe(Schema.withDecodingDefault(() => ({}))),
   worktrees: WorktreesServerSettings.pipe(Schema.withDecodingDefault(() => ({}))),
+  // When the first-run welcome tour was completed or skipped. Server-backed so a
+  // browser-storage reset does not replay setup on an already configured install.
+  onboardingCompletedAt: Schema.optionalKey(Schema.NullOr(IsoDateTime)),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -200,6 +203,7 @@ export const ServerSettingsPatch = Schema.Struct({
       pruneAfterMerge: Schema.optionalKey(Schema.Boolean),
     }),
   ),
+  onboardingCompletedAt: Schema.optionalKey(Schema.NullOr(IsoDateTime)),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 

@@ -1,3 +1,4 @@
+import { claudeTurnResultUsage, type ClaudeResultUsageBaseline } from "../claudeResultUsage.ts";
 /**
  * ClaudeAdapterLive - Scoped live implementation for the Claude Agent provider adapter.
  *
@@ -310,6 +311,7 @@ interface ClaudeSubagentRun {
 type ClaudeTokenUsageState = "current" | "skip-compaction-call" | "awaiting-fresh-assistant";
 
 interface ClaudeSessionContext {
+  resultUsageBaseline?: ClaudeResultUsageBaseline;
   readonly gatewaySessionLease?: AgentGatewaySessionLease;
   session: ProviderSession;
   readonly lifecycleGeneration?: string;
@@ -1983,7 +1985,13 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       threadId: ThreadId,
       owner: ClaudeProcessOwner,
     ) {
-      yield* teardownClaudeProcess(threadId, owner);
+      yield* teardownClaudeProcess(threadId, owner).pipe(
+        Effect.tapError(() =>
+          Effect.sync(() => {
+            if (owner.process) failedStartupProcessOwners.set(threadId, owner);
+          }),
+        ),
+      );
       if (failedStartupProcessOwners.get(threadId) === owner) {
         failedStartupProcessOwners.delete(threadId);
       }
@@ -2337,6 +2345,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         yield* updateResumeCursor(context);
 
         if (context.lastThreadStartedId !== nextThreadId) {
+          delete context.resultUsageBaseline;
           context.lastThreadStartedId = nextThreadId;
           const stamp = yield* makeEventStamp();
           yield* offerRuntimeEvent(context, {
@@ -2773,6 +2782,10 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           });
         }
 
+        const turnResultUsage = result
+          ? claudeTurnResultUsage(result, context.resultUsageBaseline)
+          : undefined;
+        if (result) context.resultUsageBaseline = result;
         const liveContextUsage = yield* readClaudeContextUsage(context);
         const resultContextWindow = maxClaudeContextWindowFromModelUsage(result?.modelUsage);
         const liveRawContextWindow = positiveFiniteNumber(liveContextUsage?.rawMaxTokens);
@@ -2905,9 +2918,9 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               state: status,
               ...(result?.stop_reason !== undefined ? { stopReason: result.stop_reason } : {}),
               ...(result?.usage ? { usage: result.usage } : {}),
-              ...(result?.modelUsage ? { modelUsage: result.modelUsage } : {}),
+              ...(turnResultUsage ? { modelUsage: turnResultUsage.modelUsage } : {}),
               ...(typeof result?.total_cost_usd === "number"
-                ? { totalCostUsd: result.total_cost_usd }
+                ? { totalCostUsd: turnResultUsage?.totalCostUsd ?? result.total_cost_usd }
                 : {}),
               ...(errorMessage ? { errorMessage } : {}),
             },
@@ -3018,9 +3031,9 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             state: status,
             ...(result?.stop_reason !== undefined ? { stopReason: result.stop_reason } : {}),
             ...(result?.usage ? { usage: result.usage } : {}),
-            ...(result?.modelUsage ? { modelUsage: result.modelUsage } : {}),
+            ...(turnResultUsage ? { modelUsage: turnResultUsage.modelUsage } : {}),
             ...(typeof result?.total_cost_usd === "number"
-              ? { totalCostUsd: result.total_cost_usd }
+              ? { totalCostUsd: turnResultUsage?.totalCostUsd ?? result.total_cost_usd }
               : {}),
             ...(errorMessage ? { errorMessage } : {}),
           },
@@ -4618,6 +4631,10 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           case "assistant":
             yield* handleAssistantMessage(context, message);
             return;
+          case "conversation_reset":
+            // The query survives /clear even when its cumulative counters restart.
+            delete context.resultUsageBaseline;
+            return;
           case "result":
             yield* handleResultMessage(context, message);
             return;
@@ -5376,7 +5393,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         }).pipe(
           Effect.tapError(() =>
             Effect.all([
-              teardownClaudeProcess(threadId, processOwner).pipe(
+              teardownFailedStartupProcess(threadId, processOwner).pipe(
                 Effect.catch((error) =>
                   Effect.sync(() => {
                     if (processOwner.process) {
@@ -5628,7 +5645,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                     cause: Cause.pretty(closeExit.cause),
                   });
                 }
-                yield* teardownClaudeProcess(threadId, processOwner);
+                yield* teardownFailedStartupProcess(threadId, processOwner);
               });
             }).pipe(Effect.ignore),
           ),
@@ -6226,6 +6243,8 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       withSessionLifecycleLock(
         threadId,
         Effect.gen(function* () {
+          const failedOwner = failedStartupProcessOwners.get(threadId);
+          if (failedOwner) yield* teardownFailedStartupProcess(threadId, failedOwner);
           const context = sessions.get(threadId);
           if (!context) {
             return;

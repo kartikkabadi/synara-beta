@@ -290,6 +290,14 @@
       "b7c195d9": 1
     }
   },
+  "anti-slop(no-chained-type-assertions):apps/server/src/codexSessionStartup.test.ts": {
+    "total": 3,
+    "messages": {
+      "01b43b4d": 1,
+      "6fa0db24": 1,
+      "d60cac9a": 1
+    }
+  },
   "anti-slop(no-chained-type-assertions):apps/server/src/device/IosSimulatorBackend.capabilities.test.ts": {
     "total": 1,
     "messages": {
@@ -489,17 +497,23 @@
       "e6d38f0b": 10
     }
   },
+  "anti-slop(no-chained-type-assertions):apps/server/src/provider/Layers/AntigravityAdapter.output.test.ts": {
+    "total": 1,
+    "messages": {
+      "0822a985": 1
+    }
+  },
   "anti-slop(no-chained-type-assertions):apps/server/src/provider/Layers/ClaudeAdapter.test.ts": {
-    "total": 216,
+    "total": 221,
     "messages": {
       "273afc0b": 1,
-      "4a7750b0": 193,
-      "73724d22": 5,
+      "4a7750b0": 195,
+      "73724d22": 6,
       "75b63d4e": 2,
       "98d31a54": 1,
       "c7edfea4": 3,
-      "cca00a0b": 5,
-      "deb7ba25": 5,
+      "cca00a0b": 6,
+      "deb7ba25": 6,
       "e861c3f6": 1
     }
   },
@@ -531,6 +545,12 @@
       "a0212c13": 1,
       "ebd1d22c": 1,
       "f731b7f2": 1
+    }
+  },
+  "anti-slop(no-chained-type-assertions):apps/server/src/provider/Layers/PiAdapter.lifecycle.test.ts": {
+    "total": 1,
+    "messages": {
+      "533c82e1": 1
     }
   },
   "anti-slop(no-chained-type-assertions):apps/server/src/provider/Layers/ProviderDiscoveryService.test.ts": {
@@ -713,9 +733,9 @@
     }
   },
   "anti-slop(no-chained-type-assertions):apps/web/src/components/WorkspaceFilePreview.editing.browser.tsx": {
-    "total": 9,
+    "total": 10,
     "messages": {
-      "1ce31224": 9
+      "1ce31224": 10
     }
   },
   "anti-slop(no-chained-type-assertions):apps/web/src/components/WorkspaceFilePreview.relocation.browser.tsx": {
@@ -768,10 +788,10 @@
     }
   },
   "anti-slop(no-chained-type-assertions):apps/web/src/composerDraftStore.attachments.test.ts": {
-    "total": 4,
+    "total": 6,
     "messages": {
-      "0b615cdc": 2,
-      "6f710c26": 2
+      "0b615cdc": 3,
+      "6f710c26": 3
     }
   },
   "anti-slop(no-chained-type-assertions):apps/web/src/composerDraftStore.models.test.ts": {
@@ -1640,13 +1660,14 @@
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/server/src/git/Layers/GitCore.test.ts": {
-    "total": 1,
+    "total": 2,
     "messages": {
-      "494cc64f": 1
+      "494cc64f": 1,
+      "e20afbbb": 1
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/server/src/git/Layers/GitCore.ts": {
-    "total": 14,
+    "total": 15,
     "messages": {
       "08a602de": 1,
       "14e0c834": 1,
@@ -1659,7 +1680,8 @@
       "739c2926": 1,
       "b6e5d60f": 1,
       "cf896d2a": 1,
-      "d8287b3a": 1
+      "d8287b3a": 1,
+      "ed0836d1": 1
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/server/src/git/Layers/GitHubCli.ts": {
@@ -1794,9 +1816,10 @@
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/server/src/orchestration/Layers/OrchestrationEngine.test.ts": {
-    "total": 1,
+    "total": 2,
     "messages": {
-      "bca6a653": 1
+      "bca6a653": 1,
+      "d58b1366": 1
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/server/src/orchestration/Layers/ProjectionPipeline.test.ts": {
@@ -1863,12 +1886,13 @@
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/server/src/orchestration/Layers/ProviderCommandReactor.test.ts": {
-    "total": 8,
+    "total": 9,
     "messages": {
       "20997750": 1,
       "02f08afb": 1,
       "15c993ff": 1,
       "2394925c": 1,
+      "67ff7c9e": 1,
       "78b03fcf": 1,
       "96f9ef24": 1,
       "c2244075": 1,
@@ -1876,7 +1900,7 @@
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/server/src/orchestration/Layers/ProviderCommandReactor.ts": {
-    "total": 77,
+    "total": 78,
     "messages": {
       "30762629": 2,
       "48799319": 1,
@@ -1918,6 +1942,7 @@
       "abbe8d66": 1,
       "b6734d61": 1,
       "b9e371cb": 1,
+      "bb4f62fb": 1,
       "bd0fe25d": 1,
       "bf510d7a": 1,
       "c0292760": 1,
@@ -1941,8 +1966,9 @@
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts": {
-    "total": 3,
+    "total": 4,
     "messages": {
+      "0a09d348": 1,
       "40bc5a58": 1,
       "fbbe073a": 1,
       "fe11f3be": 1
@@ -1983,6 +2009,12 @@
     "total": 1,
     "messages": {
       "116cf61f": 1
+    }
+  },
+  "anti-slop(no-conditional-empty-object-spread):apps/server/src/orchestration/Layers/messageTextChunks.test.ts": {
+    "total": 1,
+    "messages": {
+      "3166cf1c": 1
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/server/src/orchestration/decider.archive.test.ts": {
@@ -2146,14 +2178,16 @@
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/server/src/orchestration/providerRuntimeActivityProjection.ts": {
-    "total": 61,
+    "total": 64,
     "messages": {
       "63422326": 2,
       "04f53765": 1,
       "1696e2d2": 1,
+      "169a1f95": 1,
       "1b07747e": 1,
       "1f166bef": 1,
       "1f4099c6": 1,
+      "2537b623": 1,
       "2b415501": 1,
       "2e42639b": 1,
       "31eb0fa6": 1,
@@ -2188,6 +2222,7 @@
       "be7e3aef": 1,
       "c3b6a7c2": 1,
       "c5e46fb5": 1,
+      "cd9b80b4": 1,
       "d0b0e3c2": 1,
       "dea5838e": 4,
       "e11754df": 1,
@@ -2210,6 +2245,19 @@
     "messages": {
       "3a2995b1": 1,
       "405e4667": 1
+    }
+  },
+  "anti-slop(no-conditional-empty-object-spread):apps/server/src/orchestration/startupTurnReconciliation.test.ts": {
+    "total": 1,
+    "messages": {
+      "d70eee32": 1
+    }
+  },
+  "anti-slop(no-conditional-empty-object-spread):apps/server/src/orchestration/startupTurnReconciliation.ts": {
+    "total": 2,
+    "messages": {
+      "04ab60db": 1,
+      "cdd80c0e": 1
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/server/src/orchestration/threadGitMetadata.ts": {
@@ -2282,9 +2330,9 @@
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/server/src/platform/supervisedProcessTeardown.ts": {
-    "total": 2,
+    "total": 3,
     "messages": {
-      "768f672c": 2
+      "768f672c": 3
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/server/src/platform/windowsProcessSnapshot.ts": {
@@ -2314,6 +2362,12 @@
     "messages": {
       "7f160843": 1,
       "c5326467": 1
+    }
+  },
+  "anti-slop(no-conditional-empty-object-spread):apps/server/src/provider/Layers/AntigravityAdapter.output.test.ts": {
+    "total": 1,
+    "messages": {
+      "31168ea3": 1
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/server/src/provider/Layers/AntigravityAdapter.test.ts": {
@@ -2376,6 +2430,7 @@
   "anti-slop(no-conditional-empty-object-spread):apps/server/src/provider/Layers/ClaudeAdapter.ts": {
     "total": 166,
     "messages": {
+      "35503705": 2,
       "66359707": 1,
       "94278740": 1,
       "03b4da40": 1,
@@ -2407,7 +2462,6 @@
       "43114a00": 1,
       "436a8ecb": 2,
       "4560b553": 1,
-      "49e89724": 2,
       "4b2e5a60": 1,
       "4dc6891b": 1,
       "4f934ba2": 1,
@@ -2506,7 +2560,7 @@
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/server/src/provider/Layers/CodexAdapter.ts": {
-    "total": 108,
+    "total": 112,
     "messages": {
       "20190791": 1,
       "57902350": 2,
@@ -2536,6 +2590,7 @@
       "4b097554": 1,
       "4c0b427f": 1,
       "4ca95cb9": 2,
+      "4dd79dc0": 1,
       "504c325e": 1,
       "529916d2": 1,
       "52e5c7b4": 2,
@@ -2551,6 +2606,7 @@
       "73983a19": 1,
       "7b4b1483": 1,
       "7ef9a093": 1,
+      "80c87796": 1,
       "818a4072": 1,
       "81917ee1": 1,
       "8f32b597": 1,
@@ -2563,6 +2619,7 @@
       "9f3e86b3": 2,
       "a1c75970": 1,
       "a43f1646": 1,
+      "a47d1791": 1,
       "ac910af2": 1,
       "addf2aef": 2,
       "b43056c3": 1,
@@ -2589,6 +2646,7 @@
       "eeb611e9": 1,
       "f2020538": 1,
       "f3ed9db9": 1,
+      "f8b66af1": 1,
       "f978cceb": 3,
       "fd698b73": 1,
       "feaefdc7": 1
@@ -3701,9 +3759,17 @@
       "5f49ed30": 1
     }
   },
-  "anti-slop(no-conditional-empty-object-spread):apps/web/src/components/DiffPanel.tsx": {
-    "total": 2,
+  "anti-slop(no-conditional-empty-object-spread):apps/web/src/components/DiffLineBlamePopover.tsx": {
+    "total": 1,
     "messages": {
+      "0eaa2977": 1
+    }
+  },
+  "anti-slop(no-conditional-empty-object-spread):apps/web/src/components/DiffPanel.tsx": {
+    "total": 4,
+    "messages": {
+      "3524bb24": 1,
+      "41bc3b5e": 1,
       "5ecbf01a": 1,
       "77e63ac9": 1
     }
@@ -3778,9 +3844,10 @@
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/web/src/components/chat/FileDiffView.tsx": {
-    "total": 1,
+    "total": 2,
     "messages": {
-      "5a1e0395": 1
+      "5a1e0395": 1,
+      "bf59ffc8": 1
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/web/src/components/chat/InlineMentionChip.tsx": {
@@ -3895,6 +3962,12 @@
     "messages": {
       "028788e9": 1,
       "e63f2953": 1
+    }
+  },
+  "anti-slop(no-conditional-empty-object-spread):apps/web/src/components/chat/environment/EnvironmentPullRequestSection.tsx": {
+    "total": 1,
+    "messages": {
+      "f5968a5f": 1
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/web/src/components/chat/messageTrail.logic.test.ts": {
@@ -4079,7 +4152,7 @@
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/web/src/composerDraftPersistence.ts": {
-    "total": 57,
+    "total": 63,
     "messages": {
       "048b016e": 1,
       "06f6c8d3": 1,
@@ -4098,6 +4171,7 @@
       "4df6eca0": 1,
       "518c6d19": 3,
       "5b9d2215": 1,
+      "5d5071b5": 3,
       "641f99c8": 1,
       "6a392ab1": 1,
       "769bd3eb": 1,
@@ -4120,7 +4194,10 @@
       "bba3c97c": 1,
       "c85f6307": 1,
       "c8728f2b": 1,
+      "ceee4998": 1,
+      "daee1743": 1,
       "dcf394a1": 1,
+      "e12f711a": 1,
       "f5eb470c": 1,
       "fa7b9d69": 1,
       "fcac9c85": 1,
@@ -4204,6 +4281,12 @@
       "fbbd7599": 1
     }
   },
+  "anti-slop(no-conditional-empty-object-spread):apps/web/src/hooks/useWorkspaceFileEditor.ts": {
+    "total": 1,
+    "messages": {
+      "ddf55b25": 1
+    }
+  },
   "anti-slop(no-conditional-empty-object-spread):apps/web/src/keybindings.test.ts": {
     "total": 1,
     "messages": {
@@ -4251,19 +4334,25 @@
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/web/src/lib/gitReactQuery.ts": {
-    "total": 16,
+    "total": 23,
     "messages": {
+      "82570200": 1,
       "070b1e83": 1,
+      "1a0f3679": 1,
       "1df82733": 1,
       "21bcf3fb": 1,
+      "28bfece8": 1,
       "5edc70db": 1,
+      "723b300f": 1,
       "7bf9fe77": 1,
       "8cac684b": 1,
       "a24044fc": 1,
       "cd91aa3c": 1,
       "cf446a27": 1,
       "e0c8ade7": 1,
+      "e49adbfc": 1,
       "e6c3323f": 1,
+      "ed95d267": 2,
       "efdbc433": 1,
       "f8a1da33": 1,
       "f977b95c": 2,
@@ -4456,6 +4545,12 @@
       "f5550b7b": 1
     }
   },
+  "anti-slop(no-conditional-empty-object-spread):apps/web/src/pendingInteractionDerivation.test.ts": {
+    "total": 1,
+    "messages": {
+      "d70eee32": 1
+    }
+  },
   "anti-slop(no-conditional-empty-object-spread):apps/web/src/pendingInteractionDerivation.ts": {
     "total": 6,
     "messages": {
@@ -4540,9 +4635,9 @@
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/web/src/routes/_chat.tsx": {
-    "total": 2,
+    "total": 1,
     "messages": {
-      "fc33cc90": 2
+      "fc33cc90": 1
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/web/src/session-logic.ts": {
@@ -4688,9 +4783,10 @@
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/web/src/timestampFormat.ts": {
-    "total": 2,
+    "total": 3,
     "messages": {
       "07cf0aca": 1,
+      "13c04f33": 1,
       "3653670a": 1
     }
   },
@@ -4824,6 +4920,12 @@
       "cca7644f": 2,
       "d6fc0586": 1,
       "f34d48dd": 1
+    }
+  },
+  "anti-slop(no-conditional-empty-object-spread):packages/shared/src/threadSummary.ts": {
+    "total": 1,
+    "messages": {
+      "539eb502": 1
     }
   },
   "anti-slop(no-conditional-empty-object-spread):packages/shared/src/toolOutputSummary.ts": {
@@ -5176,6 +5278,12 @@
       "b192b843": 1
     }
   },
+  "anti-slop(no-known-value-widening):apps/server/src/codexSessionStartup.test.ts": {
+    "total": 1,
+    "messages": {
+      "631ef956": 1
+    }
+  },
   "anti-slop(no-known-value-widening):apps/server/src/device/DeviceManager.test.ts": {
     "total": 1,
     "messages": {
@@ -5485,9 +5593,9 @@
     }
   },
   "anti-slop(no-known-value-widening):apps/server/src/provider/Layers/ClaudeAdapter.test.ts": {
-    "total": 9,
+    "total": 10,
     "messages": {
-      "24875a3f": 5,
+      "24875a3f": 6,
       "2c8ff6ea": 1,
       "6526e145": 1,
       "8e27ecc4": 1,
@@ -5918,6 +6026,13 @@
       "71687ca9": 1
     }
   },
+  "anti-slop(no-known-value-widening):apps/web/src/components/DiffPanelChangeMarkers.tsx": {
+    "total": 2,
+    "messages": {
+      "568b16a3": 1,
+      "68906ba1": 1
+    }
+  },
   "anti-slop(no-known-value-widening):apps/web/src/components/EventRouter.browser.tsx": {
     "total": 6,
     "messages": {
@@ -6058,10 +6173,10 @@
     }
   },
   "anti-slop(no-known-value-widening):apps/web/src/components/WorkspaceFilePreview.editing.browser.tsx": {
-    "total": 3,
+    "total": 4,
     "messages": {
       "37e4b99d": 2,
-      "6b453396": 1
+      "6b453396": 2
     }
   },
   "anti-slop(no-known-value-widening):apps/web/src/components/WorkspaceSearchPalette.tsx": {
@@ -6168,6 +6283,12 @@
       "f7dddab7": 4
     }
   },
+  "anti-slop(no-known-value-widening):apps/web/src/components/chat/PullRequestContextCard.tsx": {
+    "total": 1,
+    "messages": {
+      "b6f24e62": 1
+    }
+  },
   "anti-slop(no-known-value-widening):apps/web/src/components/chat/RightDock.tsx": {
     "total": 1,
     "messages": {
@@ -6213,6 +6334,12 @@
       "fd23c76d": 1
     }
   },
+  "anti-slop(no-known-value-widening):apps/web/src/components/chat/WorkspaceFileEditorChrome.tsx": {
+    "total": 1,
+    "messages": {
+      "e1610afa": 1
+    }
+  },
   "anti-slop(no-known-value-widening):apps/web/src/components/chat/composerOverlay.ts": {
     "total": 1,
     "messages": {
@@ -6223,6 +6350,13 @@
     "total": 1,
     "messages": {
       "e78f8125": 1
+    }
+  },
+  "anti-slop(no-known-value-widening):apps/web/src/components/chat/environment/EnvironmentPullRequestSection.tsx": {
+    "total": 2,
+    "messages": {
+      "c158e651": 1,
+      "d8340a6a": 1
     }
   },
   "anti-slop(no-known-value-widening):apps/web/src/components/chat/environment/environmentPullRequest.logic.ts": {
@@ -6597,6 +6731,13 @@
       "932231d5": 1
     }
   },
+  "anti-slop(no-known-value-widening):apps/web/src/lib/editorGutterDiff.ts": {
+    "total": 2,
+    "messages": {
+      "766efba7": 1,
+      "adceff71": 1
+    }
+  },
   "anti-slop(no-known-value-widening):apps/web/src/lib/fileComments.ts": {
     "total": 1,
     "messages": {
@@ -6693,6 +6834,20 @@
       "b4112fa5": 1
     }
   },
+  "anti-slop(no-known-value-widening):apps/web/src/onboarding/OnboardingDialog.tsx": {
+    "total": 2,
+    "messages": {
+      "b720afbb": 1,
+      "e424cb57": 1
+    }
+  },
+  "anti-slop(no-known-value-widening):apps/web/src/onboarding/steps/ProvidersStep.tsx": {
+    "total": 2,
+    "messages": {
+      "417f3713": 1,
+      "a17d356f": 1
+    }
+  },
   "anti-slop(no-known-value-widening):apps/web/src/persistedRecord.ts": {
     "total": 1,
     "messages": {
@@ -6738,8 +6893,9 @@
     }
   },
   "anti-slop(no-known-value-widening):apps/web/src/repoDiffScopeStore.ts": {
-    "total": 1,
+    "total": 2,
     "messages": {
+      "5284133f": 1,
       "a237ff51": 1
     }
   },
@@ -6987,10 +7143,11 @@
     }
   },
   "anti-slop(no-known-value-widening):packages/shared/src/model.ts": {
-    "total": 2,
+    "total": 3,
     "messages": {
       "048e002a": 1,
-      "bb5dfc6d": 1
+      "bb5dfc6d": 1,
+      "cbc344a5": 1
     }
   },
   "anti-slop(no-known-value-widening):packages/shared/src/outboundHttp.ts": {
@@ -7187,6 +7344,12 @@
       "332d11ee": 1
     }
   },
+  "anti-slop(no-module-mocking):apps/server/src/codexSessionStartup.test.ts": {
+    "total": 1,
+    "messages": {
+      "4ec13ed2": 1
+    }
+  },
   "anti-slop(no-module-mocking):apps/server/src/git/Layers/GitHubCli.test.ts": {
     "total": 1,
     "messages": {
@@ -7209,6 +7372,18 @@
     "total": 1,
     "messages": {
       "eea9842e": 1
+    }
+  },
+  "anti-slop(no-module-mocking):apps/server/src/platform/processLiveness.test.ts": {
+    "total": 1,
+    "messages": {
+      "4ec13ed2": 1
+    }
+  },
+  "anti-slop(no-module-mocking):apps/server/src/provider/Layers/PiAdapter.lifecycle.test.ts": {
+    "total": 1,
+    "messages": {
+      "9f33c712": 1
     }
   },
   "anti-slop(no-module-mocking):apps/server/src/provider/Layers/PiOpenRouter.test.ts": {
@@ -7334,6 +7509,12 @@
       "cfb39255": 1
     }
   },
+  "anti-slop(no-module-mocking):apps/web/src/components/chat/DockExplorerPane.browser.tsx": {
+    "total": 1,
+    "messages": {
+      "10c71240": 1
+    }
+  },
   "anti-slop(no-module-mocking):apps/web/src/components/chat/EditedFileRow.browser.tsx": {
     "total": 1,
     "messages": {
@@ -7350,6 +7531,12 @@
     "total": 1,
     "messages": {
       "ca5add2d": 1
+    }
+  },
+  "anti-slop(no-module-mocking):apps/web/src/components/chat/environment/EnvironmentPullRequestSection.browser.tsx": {
+    "total": 1,
+    "messages": {
+      "f9719776": 1
     }
   },
   "anti-slop(no-module-mocking):apps/web/src/components/chat/environment/EnvironmentUsageSection.browser.tsx": {
@@ -7437,6 +7624,12 @@
       "ef1c37ab": 1
     }
   },
+  "anti-slop(no-module-mocking):apps/web/src/components/terminal/terminalRuntimeRegistry.test.ts": {
+    "total": 1,
+    "messages": {
+      "b3e33de1": 1
+    }
+  },
   "anti-slop(no-module-mocking):apps/web/src/featureFlags.test.ts": {
     "total": 1,
     "messages": {
@@ -7462,6 +7655,15 @@
     "total": 1,
     "messages": {
       "f9719776": 1
+    }
+  },
+  "anti-slop(no-module-mocking):apps/web/src/hooks/useOnboarding.browser.tsx": {
+    "total": 4,
+    "messages": {
+      "1468bd17": 1,
+      "32d008ca": 1,
+      "7b9f0071": 1,
+      "8f09e52b": 1
     }
   },
   "anti-slop(no-module-mocking):apps/web/src/hooks/useProviderModelCatalog.test.tsx": {
@@ -7522,6 +7724,12 @@
       "f4ac2582": 1
     }
   },
+  "anti-slop(no-module-mocking):apps/web/src/hooks/useWorkspaceFileEditorSession.browser.tsx": {
+    "total": 1,
+    "messages": {
+      "d5a280d3": 1
+    }
+  },
   "anti-slop(no-module-mocking):apps/web/src/lib/activeThreadDelete.test.ts": {
     "total": 7,
     "messages": {
@@ -7546,6 +7754,12 @@
       "43a8496c": 1,
       "9fadd4e7": 1,
       "f9719776": 1
+    }
+  },
+  "anti-slop(no-module-mocking):apps/web/src/lib/gitReactQuery.test.ts": {
+    "total": 1,
+    "messages": {
+      "70771d2c": 1
     }
   },
   "anti-slop(no-module-mocking):apps/web/src/lib/kanbanTaskCreate.test.ts": {
@@ -8864,8 +9078,8 @@
   "anti-slop(no-runtime-typeof):apps/server/src/orchestration/decider.ts": {
     "total": 2,
     "messages": {
-      "932c09ae": 1,
-      "987cd74a": 1
+      "07aff255": 1,
+      "2bcd7647": 1
     }
   },
   "anti-slop(no-runtime-typeof):apps/server/src/orchestration/importedThreadMessages.ts": {
@@ -8894,7 +9108,7 @@
     }
   },
   "anti-slop(no-runtime-typeof):apps/server/src/orchestration/providerRuntimeActivityProjection.ts": {
-    "total": 42,
+    "total": 44,
     "messages": {
       "30928902": 1,
       "092a3723": 1,
@@ -8920,6 +9134,7 @@
       "9c5e4ca0": 1,
       "9d20f488": 1,
       "a9e7a12d": 1,
+      "b9115952": 1,
       "b98cc1b0": 2,
       "bc4cc7ff": 1,
       "be2ffca7": 1,
@@ -8930,7 +9145,8 @@
       "df90d64f": 1,
       "e0d30c3b": 1,
       "ee0f77e8": 1,
-      "f2d5fe6e": 1
+      "f2d5fe6e": 1,
+      "f77e27ed": 1
     }
   },
   "anti-slop(no-runtime-typeof):apps/server/src/persistence/DatabaseLifecycleLock.ts": {
@@ -9490,6 +9706,20 @@
       "c498f8c0": 1
     }
   },
+  "anti-slop(no-runtime-typeof):apps/server/src/provider/antigravityPrintResult.ts": {
+    "total": 9,
+    "messages": {
+      "0e300bdf": 1,
+      "0ec82e63": 1,
+      "129586c5": 1,
+      "70adceaf": 1,
+      "8c047e78": 1,
+      "9c1f6ef2": 1,
+      "a60690d6": 1,
+      "bb131aa8": 1,
+      "fda602fb": 1
+    }
+  },
   "anti-slop(no-runtime-typeof):apps/server/src/provider/claudeCredentialKeepalive.ts": {
     "total": 1,
     "messages": {
@@ -10031,7 +10261,7 @@
     }
   },
   "anti-slop(no-runtime-typeof):apps/web/src/components/DiffPanel.tsx": {
-    "total": 10,
+    "total": 11,
     "messages": {
       "12310375": 1,
       "06043189": 1,
@@ -10042,7 +10272,14 @@
       "699872fb": 1,
       "a340a0f8": 1,
       "c1a757ce": 1,
-      "db881c24": 1
+      "db881c24": 1,
+      "e1b0414b": 1
+    }
+  },
+  "anti-slop(no-runtime-typeof):apps/web/src/components/DiffPanelCompareRefMenuSection.tsx": {
+    "total": 1,
+    "messages": {
+      "56c1c604": 1
     }
   },
   "anti-slop(no-runtime-typeof):apps/web/src/components/DiffPanelToolbar.tsx": {
@@ -10473,17 +10710,20 @@
     }
   },
   "anti-slop(no-runtime-typeof):apps/web/src/composerDraftPersistence.ts": {
-    "total": 60,
+    "total": 68,
     "messages": {
       "20688800": 1,
       "00a4ab9e": 1,
       "02cd2634": 1,
-      "08a0e31a": 6,
+      "061ecf02": 1,
+      "08a0e31a": 7,
+      "0e65ce7b": 1,
       "1cd1c784": 1,
       "20e66150": 1,
       "22e067a3": 1,
       "263d5430": 1,
       "3534469f": 1,
+      "364f44ac": 1,
       "37a6e9cf": 1,
       "49c66531": 1,
       "5344ee4b": 2,
@@ -10497,6 +10737,7 @@
       "733ccd10": 1,
       "7a79f3cf": 1,
       "7dc68bed": 1,
+      "83f54963": 1,
       "84b85edf": 1,
       "872a5fa1": 1,
       "8f22222e": 1,
@@ -10512,11 +10753,13 @@
       "c936e0e8": 1,
       "ca89f3ca": 1,
       "caddec86": 1,
-      "cf721ed1": 4,
+      "cf721ed1": 5,
       "db3156e4": 1,
+      "e217c7fe": 1,
       "ec55f9f8": 1,
       "ed06e4e1": 1,
       "ee538985": 1,
+      "f11f7f7d": 1,
       "f934cb98": 1,
       "fc4c4cbb": 1,
       "fe542b7d": 1,
@@ -10616,6 +10859,12 @@
       "63098fae": 2,
       "bced2ed4": 1,
       "f9c00d8a": 1
+    }
+  },
+  "anti-slop(no-runtime-typeof):apps/web/src/hooks/useDiffChangeNavigationShortcuts.ts": {
+    "total": 1,
+    "messages": {
+      "5b14913d": 1
     }
   },
   "anti-slop(no-runtime-typeof):apps/web/src/hooks/useLocalStorage.ts": {
@@ -10996,6 +11245,18 @@
       "07b0b40a": 1
     }
   },
+  "anti-slop(no-runtime-typeof):apps/web/src/lib/pullRequestContext.ts": {
+    "total": 7,
+    "messages": {
+      "0e65ce7b": 1,
+      "76fc0c17": 1,
+      "83f54963": 1,
+      "8fa4feda": 1,
+      "9609c00d": 1,
+      "99d4bb6e": 1,
+      "e217c7fe": 1
+    }
+  },
   "anti-slop(no-runtime-typeof):apps/web/src/lib/rateLimits.ts": {
     "total": 15,
     "messages": {
@@ -11157,14 +11418,14 @@
     }
   },
   "anti-slop(no-runtime-typeof):apps/web/src/pendingInteractionDerivation.ts": {
-    "total": 14,
+    "total": 13,
     "messages": {
       "077b1fcf": 1,
       "287968c4": 1,
       "31839bf3": 1,
       "3d6f5384": 1,
       "50d0ad71": 1,
-      "5fed5472": 2,
+      "5fed5472": 1,
       "6aaca111": 1,
       "6e27ef8e": 1,
       "9684a6eb": 1,
@@ -11189,6 +11450,12 @@
       "6675724e": 1
     }
   },
+  "anti-slop(no-runtime-typeof):apps/web/src/projectEnvironmentStore.ts": {
+    "total": 1,
+    "messages": {
+      "0fde45f3": 1
+    }
+  },
   "anti-slop(no-runtime-typeof):apps/web/src/providerModelOptions.ts": {
     "total": 1,
     "messages": {
@@ -11204,9 +11471,11 @@
     }
   },
   "anti-slop(no-runtime-typeof):apps/web/src/repoDiffScopeStore.ts": {
-    "total": 1,
+    "total": 3,
     "messages": {
-      "2a9c9c74": 1
+      "1ea4a08d": 1,
+      "2a9c9c74": 1,
+      "812bb6fa": 1
     }
   },
   "anti-slop(no-runtime-typeof):apps/web/src/rightDockStore.logic.ts": {
@@ -11602,6 +11871,15 @@
       "87e6a316": 1
     }
   },
+  "anti-slop(no-runtime-typeof):packages/shared/src/pendingInteractions.ts": {
+    "total": 4,
+    "messages": {
+      "125009c7": 1,
+      "1b56ae24": 1,
+      "4a5e84f8": 1,
+      "874c736f": 1
+    }
+  },
   "anti-slop(no-runtime-typeof):packages/shared/src/processRuntime.ts": {
     "total": 1,
     "messages": {
@@ -11654,6 +11932,12 @@
       "6675724e": 1,
       "98c9c305": 1,
       "9bfa7422": 1
+    }
+  },
+  "anti-slop(no-runtime-typeof):packages/shared/src/workspaceFileWrite.ts": {
+    "total": 1,
+    "messages": {
+      "3a3568f4": 1
     }
   },
   "anti-slop(no-runtime-typeof):scripts/canary.ts": {
@@ -13049,6 +13333,13 @@
       "3a922f42": 1
     }
   },
+  "anti-slop(no-unknown-parameters):apps/server/src/codexSessionStartup.test.ts": {
+    "total": 2,
+    "messages": {
+      "46cdeead": 1,
+      "df6dca06": 1
+    }
+  },
   "anti-slop(no-unknown-parameters):apps/server/src/device/DeviceManager.ts": {
     "total": 2,
     "messages": {
@@ -13503,7 +13794,7 @@
     }
   },
   "anti-slop(no-unknown-parameters):apps/server/src/provider/Layers/OpenCodeAdapter.ts": {
-    "total": 18,
+    "total": 16,
     "messages": {
       "34926135": 1,
       "0a019f0c": 1,
@@ -13517,11 +13808,9 @@
       "8807ca30": 1,
       "a6fa2e5f": 1,
       "b765cc0e": 1,
-      "c6b069d1": 1,
       "cc6d5820": 1,
       "ec5eb8be": 1,
-      "f7dce90a": 1,
-      "fee63ecc": 1
+      "f7dce90a": 1
     }
   },
   "anti-slop(no-unknown-parameters):apps/server/src/provider/Layers/ProviderHealth.ts": {
@@ -13621,6 +13910,12 @@
       "ff0442ee": 1
     }
   },
+  "anti-slop(no-unknown-parameters):apps/server/src/provider/acp/AcpSessionRuntime.test.ts": {
+    "total": 1,
+    "messages": {
+      "3bcd96b7": 1
+    }
+  },
   "anti-slop(no-unknown-parameters):apps/server/src/provider/acp/AcpSessionRuntime.ts": {
     "total": 13,
     "messages": {
@@ -13646,6 +13941,12 @@
     "total": 1,
     "messages": {
       "16d0b29c": 1
+    }
+  },
+  "anti-slop(no-unknown-parameters):apps/server/src/provider/antigravityPrintResult.ts": {
+    "total": 1,
+    "messages": {
+      "8751bca1": 1
     }
   },
   "anti-slop(no-unknown-parameters):apps/server/src/provider/claudePluginSkills.ts": {
@@ -13709,6 +14010,12 @@
       "96d3be4c": 1,
       "b34a224c": 1,
       "fc2b137a": 1
+    }
+  },
+  "anti-slop(no-unknown-parameters):apps/server/src/provider/openCodeMessageState.ts": {
+    "total": 1,
+    "messages": {
+      "4630201d": 1
     }
   },
   "anti-slop(no-unknown-parameters):apps/server/src/provider/opencodeRuntime.ts": {
@@ -14100,10 +14407,11 @@
   "anti-slop(no-unknown-parameters):apps/web/src/components/ChatView.tsx": {
     "total": 7,
     "messages": {
+      "0e9c0cb0": 1,
       "35b9cbb1": 1,
       "3c395e09": 1,
       "a096cd5e": 1,
-      "e9c00490": 3,
+      "e9c00490": 2,
       "ebf79ca0": 1
     }
   },
@@ -14200,6 +14508,12 @@
     "total": 1,
     "messages": {
       "9cec4e68": 1
+    }
+  },
+  "anti-slop(no-unknown-parameters):apps/web/src/components/chat/environment/EnvironmentPullRequestSection.tsx": {
+    "total": 2,
+    "messages": {
+      "ebf79ca0": 2
     }
   },
   "anti-slop(no-unknown-parameters):apps/web/src/components/chat/environment/usePinnedMessageActions.ts": {
@@ -14322,7 +14636,7 @@
     }
   },
   "anti-slop(no-unknown-parameters):apps/web/src/composerDraftPersistence.ts": {
-    "total": 14,
+    "total": 15,
     "messages": {
       "2899cefe": 1,
       "5163db98": 1,
@@ -14330,14 +14644,14 @@
       "a165ee4e": 1,
       "a7184e86": 1,
       "a84525a8": 1,
-      "cfbc3266": 6,
+      "cfbc3266": 7,
       "d74878c6": 2
     }
   },
   "anti-slop(no-unknown-parameters):apps/web/src/composerDraftStore.attachments.test.ts": {
-    "total": 2,
+    "total": 3,
     "messages": {
-      "d74878c6": 2
+      "d74878c6": 3
     }
   },
   "anti-slop(no-unknown-parameters):apps/web/src/composerDraftStore.models.test.ts": {
@@ -14420,6 +14734,24 @@
     "total": 1,
     "messages": {
       "ebf79ca0": 1
+    }
+  },
+  "anti-slop(no-unknown-parameters):apps/web/src/hooks/useVisibleDiffFilePath.ts": {
+    "total": 1,
+    "messages": {
+      "ec48cba6": 1
+    }
+  },
+  "anti-slop(no-unknown-parameters):apps/web/src/hooks/useWorkspaceFileEditor.ts": {
+    "total": 1,
+    "messages": {
+      "ebf79ca0": 1
+    }
+  },
+  "anti-slop(no-unknown-parameters):apps/web/src/hooks/useWorkspaceFileEditorSession.browser.tsx": {
+    "total": 1,
+    "messages": {
+      "560305f2": 1
     }
   },
   "anti-slop(no-unknown-parameters):apps/web/src/kanbanUiStore.ts": {
@@ -14578,6 +14910,12 @@
       "f04b742c": 1
     }
   },
+  "anti-slop(no-unknown-parameters):apps/web/src/lib/pullRequestContext.ts": {
+    "total": 1,
+    "messages": {
+      "21d9f6e3": 1
+    }
+  },
   "anti-slop(no-unknown-parameters):apps/web/src/lib/pullRequestReactQuery.testUtils.ts": {
     "total": 1,
     "messages": {
@@ -14701,6 +15039,12 @@
       "581be1d8": 1,
       "d5f25a8f": 1,
       "d8f6a96a": 1
+    }
+  },
+  "anti-slop(no-unknown-parameters):apps/web/src/repoDiffScopeStore.ts": {
+    "total": 1,
+    "messages": {
+      "20488e9a": 1
     }
   },
   "anti-slop(no-unknown-parameters):apps/web/src/rightDockStore.logic.ts": {
@@ -14991,6 +15335,12 @@
       "447f1d79": 1,
       "45b60a5a": 1,
       "ff0442ee": 1
+    }
+  },
+  "anti-slop(no-unknown-parameters):packages/shared/src/workspaceFileWrite.ts": {
+    "total": 1,
+    "messages": {
+      "4d7241a0": 1
     }
   },
   "anti-slop(no-unknown-parameters):scripts/device-helper-smoke.ts": {
@@ -15496,6 +15846,13 @@
       "0ecdd018": 1,
       "c06636d9": 1,
       "c2282ab5": 1
+    }
+  },
+  "anti-slop(no-unknown-returns):apps/web/src/hooks/useOnboarding.browser.tsx": {
+    "total": 2,
+    "messages": {
+      "35b2acd8": 1,
+      "55221e6b": 1
     }
   },
   "anti-slop(no-unknown-returns):apps/web/src/hooks/useSidebarProjectRunController.test.ts": {
@@ -16891,6 +17248,15 @@
       "f8b90267": 1
     }
   },
+  "anti-slop(no-unsafe-dictionary-type):apps/server/src/provider/antigravityPrintResult.ts": {
+    "total": 4,
+    "messages": {
+      "0a463d1a": 1,
+      "71dc5639": 1,
+      "810fccca": 1,
+      "90ef41f6": 1
+    }
+  },
   "anti-slop(no-unsafe-dictionary-type):apps/server/src/provider/claudePluginSkills.ts": {
     "total": 1,
     "messages": {
@@ -17349,7 +17715,7 @@
     }
   },
   "anti-slop(no-unsafe-dictionary-type):apps/web/src/composerDraftPersistence.ts": {
-    "total": 12,
+    "total": 13,
     "messages": {
       "07e74a47": 1,
       "1240b27c": 1,
@@ -17357,7 +17723,7 @@
       "67e1b293": 1,
       "904e9af6": 1,
       "a390e561": 1,
-      "d4994378": 6
+      "d4994378": 7
     }
   },
   "anti-slop(no-unsafe-dictionary-type):apps/web/src/composerDraftStore.attachments.test.ts": {
@@ -17457,6 +17823,12 @@
     "messages": {
       "7a84933f": 1,
       "7f535254": 1
+    }
+  },
+  "anti-slop(no-unsafe-dictionary-type):apps/web/src/lib/pullRequestContext.ts": {
+    "total": 1,
+    "messages": {
+      "28d686de": 1
     }
   },
   "anti-slop(no-unsafe-dictionary-type):apps/web/src/lib/pullRequestMutationOptions.ts": {
@@ -17759,6 +18131,12 @@
     "total": 1,
     "messages": {
       "2080bd9c": 1
+    }
+  },
+  "anti-slop(no-unsafe-dictionary-type):packages/shared/src/pendingInteractions.ts": {
+    "total": 1,
+    "messages": {
+      "11825c75": 1
     }
   },
   "anti-slop(no-unsafe-dictionary-type):packages/shared/src/subagents.ts": {
@@ -19134,6 +19512,15 @@
       "a38f2a93": 2
     }
   },
+  "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/codexSessionStartup.test.ts": {
+    "total": 7,
+    "messages": {
+      "273f1b81": 1,
+      "6e0905fe": 2,
+      "775801f1": 2,
+      "ffce73e3": 2
+    }
+  },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/codexWorkingDirectory.ts": {
     "total": 1,
     "messages": {
@@ -19704,14 +20091,15 @@
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/orchestration/Layers/ProviderCommandReactor.test.ts": {
-    "total": 83,
+    "total": 86,
     "messages": {
       "142d9f0e": 1,
       "1682589f": 1,
       "2aa08681": 2,
       "2d32425b": 1,
       "30eaf6ab": 1,
-      "392e4e59": 1,
+      "3443639c": 1,
+      "392e4e59": 2,
       "43e6afd7": 1,
       "4484acab": 1,
       "4d3463b1": 3,
@@ -19731,7 +20119,7 @@
       "90be697d": 1,
       "9687a8de": 2,
       "a4c0d669": 2,
-      "b6b57c6c": 1,
+      "b6b57c6c": 2,
       "b75a6151": 1,
       "bc021c84": 2,
       "bc5a6bf6": 1,
@@ -19756,9 +20144,10 @@
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/orchestration/Layers/ProviderCommandReactor.ts": {
-    "total": 14,
+    "total": 15,
     "messages": {
       "00af9972": 1,
+      "121cfba4": 1,
       "24221a40": 1,
       "27e7b4e1": 7,
       "4dc17437": 1,
@@ -19825,10 +20214,11 @@
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/orchestration/Layers/ThreadDeletionReactor.test.ts": {
-    "total": 2,
+    "total": 3,
     "messages": {
       "70dc62fc": 1,
-      "aea9b48b": 1
+      "aea9b48b": 1,
+      "c136c173": 1
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/orchestration/Layers/ThreadGitMetadataReactor.test.ts": {
@@ -19841,6 +20231,12 @@
       "d45cb1d7": 2,
       "fe5c6cc4": 2,
       "ff7195bf": 2
+    }
+  },
+  "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/orchestration/Layers/usageActivityBounds.test.ts": {
+    "total": 1,
+    "messages": {
+      "2087508f": 1
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/orchestration/commandFingerprint.test.ts": {
@@ -19894,10 +20290,10 @@
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/orchestration/decider.ts": {
     "total": 8,
     "messages": {
+      "26f95f87": 1,
       "313f419a": 2,
-      "371b1ae8": 1,
-      "4b2b1dc8": 2,
       "4e9f488a": 1,
+      "56a0d235": 2,
       "e4c7a864": 2
     }
   },
@@ -20261,8 +20657,15 @@
       "2642a824": 1
     }
   },
+  "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/provider/Layers/AntigravityAdapter.output.test.ts": {
+    "total": 3,
+    "messages": {
+      "4b260c22": 2,
+      "6bcd9333": 1
+    }
+  },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/provider/Layers/AntigravityAdapter.test.ts": {
-    "total": 27,
+    "total": 28,
     "messages": {
       "11f311d6": 1,
       "5fa0dab4": 1,
@@ -20272,6 +20675,7 @@
       "87a1b34f": 1,
       "96e4dafe": 2,
       "aaab1586": 9,
+      "c0bea7f3": 1,
       "c1063c02": 1
     }
   },
@@ -20291,7 +20695,7 @@
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/provider/Layers/ClaudeAdapter.test.ts": {
-    "total": 470,
+    "total": 480,
     "messages": {
       "19676314": 1,
       "20778668": 1,
@@ -20306,10 +20710,10 @@
       "3c08a54f": 6,
       "3e402b52": 1,
       "40c34dfc": 1,
-      "4a9c5f43": 10,
+      "4a9c5f43": 12,
       "4e628474": 1,
       "51acb7de": 1,
-      "5a2e933d": 386,
+      "5a2e933d": 390,
       "617fc345": 1,
       "692f92cc": 2,
       "7b129e85": 1,
@@ -20319,13 +20723,13 @@
       "94e36f26": 1,
       "97ebe02c": 1,
       "97fac754": 1,
-      "9f6dbaae": 10,
+      "9f6dbaae": 12,
       "a12f77d2": 1,
       "a8b2acc4": 1,
       "b37425e2": 1,
       "bb86abc5": 1,
       "d515e065": 5,
-      "de3421ae": 10,
+      "de3421ae": 12,
       "e0d1633e": 1,
       "e9aafc25": 2,
       "ef232945": 2,
@@ -20380,7 +20784,7 @@
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/provider/Layers/DevinAdapter.test.ts": {
-    "total": 21,
+    "total": 23,
     "messages": {
       "03d245ce": 1,
       "0c9688a0": 1,
@@ -20392,13 +20796,14 @@
       "70dc62fc": 1,
       "77b73df6": 1,
       "7c44879f": 1,
-      "890d0169": 1,
+      "890d0169": 2,
       "97a7ac41": 1,
       "b2c5127a": 1,
       "c320f58d": 1,
       "cf368025": 3,
       "d4d4e390": 1,
       "d8ed1288": 1,
+      "e603f60d": 1,
       "efd504d6": 1,
       "f6ede315": 1
     }
@@ -20458,6 +20863,18 @@
       "d7b813c6": 1,
       "f10faf89": 1,
       "fd06f2aa": 1
+    }
+  },
+  "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/provider/Layers/PiAdapter.lifecycle.test.ts": {
+    "total": 8,
+    "messages": {
+      "42b7a7c7": 1,
+      "42ba5d7b": 1,
+      "449b7af2": 2,
+      "c9654380": 1,
+      "cbbbd421": 1,
+      "d32f1add": 1,
+      "dea50405": 1
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/provider/Layers/PiOpenRouter.test.ts": {
@@ -20697,6 +21114,12 @@
     "total": 1,
     "messages": {
       "9008e714": 1
+    }
+  },
+  "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/provider/antigravityPrintResult.ts": {
+    "total": 1,
+    "messages": {
+      "2642a824": 1
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/provider/boundedCallbackIngress.ts": {
@@ -21153,11 +21576,9 @@
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/workspace/Layers/WorkspaceFileSystem.ts": {
-    "total": 3,
+    "total": 1,
     "messages": {
-      "3609eab3": 1,
-      "a6144cf5": 1,
-      "defa47ea": 1
+      "3609eab3": 1
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/workspace/outOfRootFileReference.ts": {
@@ -21343,7 +21764,7 @@
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/components/ChatView.browser.tsx": {
-    "total": 132,
+    "total": 137,
     "messages": {
       "00e270bc": 1,
       "0148ad0e": 1,
@@ -21376,6 +21797,7 @@
       "47c6ec61": 1,
       "569cfdb2": 1,
       "59bf414b": 1,
+      "5bf4d45c": 1,
       "5d568970": 1,
       "5e52015d": 1,
       "60a06f88": 1,
@@ -21387,12 +21809,14 @@
       "69b7a415": 1,
       "6e3e71f7": 1,
       "70dcfe88": 1,
+      "70dede86": 1,
       "73b8e36c": 1,
       "73d691de": 1,
       "7514891e": 1,
       "789bacd4": 1,
       "79c3e96b": 1,
       "7e72b494": 1,
+      "831b377d": 1,
       "84ba98c4": 1,
       "876ae44e": 1,
       "891076bf": 1,
@@ -21414,6 +21838,7 @@
       "a247ee76": 1,
       "a41d5dbd": 1,
       "a4280d79": 1,
+      "a43eb23b": 1,
       "a70fe227": 1,
       "a8a32223": 1,
       "aa02c7c0": 1,
@@ -21443,6 +21868,7 @@
       "e1eb5aff": 1,
       "e299f15c": 1,
       "e3368feb": 1,
+      "e4767a8f": 1,
       "eabd5ce0": 1,
       "eeddfb1c": 1,
       "ef4f4d50": 1,
@@ -21457,7 +21883,7 @@
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/components/ChatView.logic.test.ts": {
-    "total": 18,
+    "total": 20,
     "messages": {
       "296905d4": 1,
       "38826ab8": 1,
@@ -21469,8 +21895,8 @@
       "90dcd76c": 1,
       "9263481b": 1,
       "a0dc99bf": 1,
-      "a5aa3a61": 1,
-      "c55abe5c": 1,
+      "a5aa3a61": 2,
+      "c55abe5c": 2,
       "ec710352": 4,
       "fef847c4": 2
     }
@@ -21574,12 +22000,14 @@
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/components/EventRouter.browser.tsx": {
-    "total": 4,
+    "total": 6,
     "messages": {
       "41f37c79": 1,
+      "9f57878f": 1,
       "a247ee76": 1,
       "ae86dccc": 1,
-      "d7cc599e": 1
+      "d7cc599e": 1,
+      "ff7846f0": 1
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/components/FolderClosed.tsx": {
@@ -21723,9 +22151,9 @@
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/components/WorkspaceFilePreview.editing.browser.tsx": {
-    "total": 18,
+    "total": 20,
     "messages": {
-      "28ac313f": 18
+      "28ac313f": 20
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/components/WorkspaceFilePreview.relocation.browser.tsx": {
@@ -21852,6 +22280,12 @@
     "total": 1,
     "messages": {
       "f5bdb1cd": 1
+    }
+  },
+  "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/components/chat/RightDock.browser.tsx": {
+    "total": 1,
+    "messages": {
+      "0d9cd345": 1
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/components/chat/RightDock.tsx": {
@@ -22084,6 +22518,12 @@
       "8e6c0de1": 1
     }
   },
+  "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/components/terminal/terminalRuntimeRegistry.test.ts": {
+    "total": 1,
+    "messages": {
+      "a70441dd": 1
+    }
+  },
   "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/components/ui/autocomplete.tsx": {
     "total": 1,
     "messages": {
@@ -22173,7 +22613,7 @@
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/composerDraftPersistence.ts": {
-    "total": 32,
+    "total": 33,
     "messages": {
       "0b989acb": 1,
       "1b6e0dce": 1,
@@ -22194,15 +22634,15 @@
       "a88da716": 1,
       "b1d59c46": 2,
       "b4941019": 4,
-      "d1ede1d2": 6,
+      "d1ede1d2": 7,
       "ff72214a": 1
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/composerDraftStore.attachments.test.ts": {
-    "total": 9,
+    "total": 13,
     "messages": {
-      "3c2deb11": 4,
-      "4be0f3d1": 4,
+      "3c2deb11": 6,
+      "4be0f3d1": 6,
       "88e14998": 1
     }
   },
@@ -22654,7 +23094,7 @@
   "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/lib/dockTerminalScope.ts": {
     "total": 1,
     "messages": {
-      "7a0685ea": 1
+      "bf690883": 1
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/lib/editableEventTarget.test.ts": {
@@ -22861,6 +23301,19 @@
       "cd6db00c": 2
     }
   },
+  "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/lib/pullRequestContext.test.ts": {
+    "total": 1,
+    "messages": {
+      "14380489": 1
+    }
+  },
+  "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/lib/pullRequestContext.ts": {
+    "total": 2,
+    "messages": {
+      "681e4920": 1,
+      "ae9792b0": 1
+    }
+  },
   "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/lib/pullRequestReactQuery.action.test.ts": {
     "total": 9,
     "messages": {
@@ -22930,6 +23383,12 @@
       "1d802ea3": 1,
       "7ebb2f5c": 1,
       "e5f3ae91": 1
+    }
+  },
+  "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/lib/remarkWikiLinks.ts": {
+    "total": 1,
+    "messages": {
+      "46a8be8a": 1
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/lib/serverReactQuery.test.ts": {
@@ -23161,6 +23620,12 @@
       "4c462af4": 1
     }
   },
+  "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/onboarding/onboardingTerminalScope.ts": {
+    "total": 1,
+    "messages": {
+      "c92006c9": 1
+    }
+  },
   "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/pairingBootstrap.test.ts": {
     "total": 2,
     "messages": {
@@ -23286,7 +23751,7 @@
   "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/repoDiffScopeStore.ts": {
     "total": 1,
     "messages": {
-      "f31039cb": 1
+      "f05da68d": 1
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/web/src/rightDockStore.logic.test.ts": {
@@ -23930,6 +24395,12 @@
     "total": 1,
     "messages": {
       "d604b1de": 1
+    }
+  },
+  "anti-slop(require-safety-comment-for-type-assertion):packages/shared/src/pendingInteractions.ts": {
+    "total": 1,
+    "messages": {
+      "7ceb6283": 1
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):packages/shared/src/pinnedMessages.ts": {

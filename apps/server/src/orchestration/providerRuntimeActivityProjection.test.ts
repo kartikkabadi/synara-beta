@@ -55,6 +55,27 @@ function expectSchemaValidActivities(event: ProviderRuntimeEvent, sessionSequenc
   }
 }
 
+it.each(["info", "warning", "error"])("projects Pi %s notifications as notices", (type) => {
+  const [activity] = projectProviderRuntimeActivities(
+    runtimeEvent({
+      provider: "pi",
+      type: "runtime.warning",
+      eventId: "pi-notification",
+      turnId: TURN_ID,
+      payload: { message: "Extension notification", detail: { type } },
+      raw: { source: "pi.sdk.event", method: "extension/ui/notify", payload: { type } },
+    }),
+  );
+
+  expect(activity).toMatchObject({
+    tone: "info",
+    kind: "runtime.warning",
+    summary: type === "info" ? "Pi extension" : "Runtime warning",
+    payload: { message: "Extension notification", detail: "Extension notification" },
+  });
+  expect(() => decodeActivityAppendCommand(activity!)).not.toThrow();
+});
+
 describe("projected activities satisfy the orchestration command schema", () => {
   it("omits an absent approval request id instead of emitting an explicit undefined", () => {
     expectSchemaValidActivities(
@@ -686,7 +707,13 @@ describe("provider runtime activity projection", () => {
       payload: {
         state: "completed",
         modelUsage: {
-          "claude-fable-5": { inputTokens: 960, outputTokens: 40, totalTokens: 1_000 },
+          "claude-fable-5": {
+            inputTokens: 960,
+            outputTokens: 40,
+            totalTokens: 1_000,
+            cacheReadInputTokens: 800,
+            cacheCreationInputTokens: 60,
+          },
         },
       },
     });

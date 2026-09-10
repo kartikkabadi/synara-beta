@@ -2,7 +2,13 @@
 // Purpose: Small, dependency-free text helpers shared across server and web so
 // repeated string semantics (count pluralization, etc.) live in one place.
 // Layer: Shared runtime utility
-// Exports: pluralize, nonEmptyTrimmed, splitsSurrogatePair, stripTerminalControlSequences, unicodeSafeEndOffset
+// Exports: normalizeLineEndings, pluralize, nonEmptyTrimmed, splitsSurrogatePair, stripTerminalControlSequences, unicodeSafeEndOffset
+
+// Workspace text buffers use LF; retain the separate on-disk format metadata
+// when this representation is used for editing or comparison.
+export function normalizeLineEndings(contents: string): string {
+  return contents.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
+}
 
 // Reports whether a UTF-16 offset falls between the high and low surrogate of
 // one Unicode code point. JavaScript string lengths and slice offsets count
@@ -41,14 +47,12 @@ export function nonEmptyTrimmed(value: string | null | undefined): string | unde
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-// Removes terminal formatting/control sequences from provider text before it
-// reaches chat or durable activity storage. A real ESC or C1 prefix must be
-// present: bare bracketed text like `[10m]` is ordinary content, not a
-// control sequence, and must survive.
+// Removes actual terminal control sequences while preserving ordinary brackets
+// and visible text between separate OSC controls (including hyperlink labels).
 export function stripTerminalControlSequences(value: string): string {
   return value
     .replace(/(?:\u001B\[|\u009B)[0-?]*[ -/]*[@-~]/gu, "")
-    .replace(/(?:\u001B\]|\u009D)[^\u0007]*(?:\u0007|\u001B\\)/gu, "");
+    .replace(/(?:\u001B\]|\u009D)[^\u0007\u001B\u009C]*(?:\u0007|\u001B\\|\u009C)/gu, "");
 }
 
 // Returns the singular or plural form of a noun based on `count`. The plural

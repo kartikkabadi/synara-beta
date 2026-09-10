@@ -392,7 +392,15 @@ function buildContextWindowActivityPayload(
   // Stamp the emitting provider so token stats can attribute usage to the
   // provider that actually processed the turn, not the thread's persisted
   // model selection (which can drift, e.g. across future per-turn providers).
-  return toActivityPayload({ ...usage, provider: event.provider });
+  return toActivityPayload({
+    ...usage,
+    provider: event.provider,
+    ...(event.providerRefs?.providerThreadId
+      ? {
+          usageSessionId: `${event.providerRefs.providerThreadId}${event.lifecycleGeneration ? `:${event.lifecycleGeneration}` : ""}`,
+        }
+      : {}),
+  });
 }
 
 function asPositiveFiniteNumber(value: unknown): number | undefined {
@@ -400,6 +408,8 @@ function asPositiveFiniteNumber(value: unknown): number | undefined {
 }
 
 interface CompactModelUsage {
+  readonly cacheReadInputTokens?: number;
+  readonly cacheCreationInputTokens?: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly totalTokens: number;
@@ -430,7 +440,24 @@ function compactTurnModelUsage(
     if (totalTokens <= 0) {
       continue;
     }
-    compact[model] = { inputTokens, outputTokens, totalTokens };
+    // Preserve reported zeroes; missing cache counters must remain unknown.
+    const cacheReadInputTokens = usage.cacheReadInputTokens;
+    const cacheCreationInputTokens = usage.cacheCreationInputTokens;
+    compact[model] = {
+      inputTokens,
+      outputTokens,
+      totalTokens,
+      ...(typeof cacheReadInputTokens === "number" &&
+      Number.isFinite(cacheReadInputTokens) &&
+      cacheReadInputTokens >= 0
+        ? { cacheReadInputTokens }
+        : {}),
+      ...(typeof cacheCreationInputTokens === "number" &&
+      Number.isFinite(cacheCreationInputTokens) &&
+      cacheCreationInputTokens >= 0
+        ? { cacheCreationInputTokens }
+        : {}),
+    };
   }
   return Object.keys(compact).length > 0 ? compact : undefined;
 }
@@ -661,6 +688,10 @@ export function projectProviderRuntimeActivities(
       // line ("Moved to background: <work>"), not as a runtime warning.
       const detailSubtype = asString(asObject(event.payload.detail)?.subtype);
       const isBackgroundMove = detailSubtype === "background_tasks_changed";
+      const isPiInfoNotification =
+        event.provider === "pi" &&
+        raw?.method === "extension/ui/notify" &&
+        asObject(event.payload.detail)?.type === "info";
       const message = truncateDetail(event.payload.message);
       return [
         {
@@ -668,12 +699,14 @@ export function projectProviderRuntimeActivities(
           createdAt: event.createdAt,
           tone: "info",
           kind: "runtime.warning",
-          summary: isBackgroundMove
-            ? "Moved to background"
-            : event.provider === "opencode" &&
-                (nativeType === "session.next.retried" || nativeType === "session.status")
-              ? "OpenCode retrying"
-              : "Runtime warning",
+          summary: isPiInfoNotification
+            ? "Pi extension"
+            : isBackgroundMove
+              ? "Moved to background"
+              : event.provider === "opencode" &&
+                  (nativeType === "session.next.retried" || nativeType === "session.status")
+                ? "OpenCode retrying"
+                : "Runtime warning",
           // Keep the user-visible message even when raw detail is structured.
           payload: toActivityPayload({
             message,

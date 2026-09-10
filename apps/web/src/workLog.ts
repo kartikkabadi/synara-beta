@@ -55,6 +55,7 @@ const SESSION_CONTEXT_RECAP_PREVIEW_MAX_CHARS = 600;
 export type ProviderContextLifecycleReason =
   | "conversation-rebuilt"
   | "fresh-session"
+  | "interrupt-escalation"
   | "native-history-unavailable"
   | "native-resume-failed";
 
@@ -522,6 +523,7 @@ function isProviderContextLifecycleReason(
   return (
     value === "conversation-rebuilt" ||
     value === "fresh-session" ||
+    value === "interrupt-escalation" ||
     value === "native-history-unavailable" ||
     value === "native-resume-failed"
   );
@@ -1131,10 +1133,15 @@ function mergeRuntimeWarningEntries(
   const merged: DerivedWorkLogEntry = {
     ...previous,
     ...next,
+    id: previous.id,
+    createdAt: previous.createdAt,
     runtimeWarningRepeatCount: repeatCount,
     detail: repeatPreview,
     preview: repeatPreview,
   };
+  if (previous.sequence !== undefined) {
+    merged.sequence = previous.sequence;
+  }
   if (runtimeWarningMessage) {
     merged.runtimeWarningMessage = runtimeWarningMessage;
   }
@@ -1155,7 +1162,11 @@ function mergeTaskListEntries(
   if (previous.taskListHasTasks && !next.taskListHasTasks) {
     return previous;
   }
-  return { ...next, id: previous.id, createdAt: previous.createdAt };
+  const merged: DerivedWorkLogEntry = { ...next, id: previous.id, createdAt: previous.createdAt };
+  if (previous.sequence !== undefined) {
+    merged.sequence = previous.sequence;
+  }
+  return merged;
 }
 
 // Ingestion emits compaction progress ("Compacting conversation...") and its
@@ -1255,8 +1266,18 @@ function mergeDerivedWorkLogEntries(
     : (next.toolStatus ?? previous.toolStatus);
   const liveActivity = mergeWorkLogLiveActivity(previous.liveActivity, next.liveActivity);
   const toolDetails = mergeWorkLogToolDetails(previous.toolDetails, next.toolDetails);
+  // Keep the visual anchor below, but let the latest known turn own lifecycle
+  // settlement and live composer state when a background tool spans turns.
   const turnId = next.turnId ?? previous.turnId;
-  const merged: DerivedWorkLogEntry = { ...previous, ...next };
+  const merged: DerivedWorkLogEntry = {
+    ...previous,
+    ...next,
+    id: previous.id,
+    createdAt: previous.createdAt,
+  };
+  if (previous.sequence !== undefined) {
+    merged.sequence = previous.sequence;
+  }
   if (turnId !== undefined) {
     merged.turnId = turnId;
   }
