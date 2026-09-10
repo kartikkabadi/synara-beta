@@ -2223,9 +2223,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           };
           recordItem(
             context,
-            tracked.args === undefined
-              ? completedItem
-              : { ...completedItem, args: tracked.args },
+            tracked.args === undefined ? completedItem : { ...completedItem, args: tracked.args },
             event.toolCallId,
           );
           const payload = {
