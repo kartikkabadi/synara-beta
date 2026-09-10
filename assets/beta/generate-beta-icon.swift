@@ -97,16 +97,10 @@ func drawIcon(_ p: Palette, name: String) {
     ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 0), end: CGPoint(x: 0, y: D), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
   }
 
-  // Depth layer 1: soft light pool top-left, vignette bottom-right
-  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF, 0.10), cg(0xFFFFFF, 0)] as CFArray, locations: [0, 1]) {
-    ctx.drawRadialGradient(g, startCenter: CGPoint(x: 300, y: 220), startRadius: 0, endCenter: CGPoint(x: 300, y: 220), endRadius: 900, options: [])
-  }
-  if let g = CGGradient(colorsSpace: cs, colors: [cg(0x06255C, 0.10), cg(0x06255C, 0)] as CFArray, locations: [0, 1]) {
-    ctx.drawRadialGradient(g, startCenter: CGPoint(x: 850, y: 900), startRadius: 0, endCenter: CGPoint(x: 850, y: 900), endRadius: 780, options: [])
-  }
-
-  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF, 0.10), cg(0xFFFFFF, 0)] as CFArray, locations: [0, 1]) {
-    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 0), end: CGPoint(x: 0, y: 130), options: [])
+  // No washes: like Apple's tiles, luminosity comes from the saturated gradient itself.
+  // Bottom-edge lift (Xcode brightens its last rows instead of crushing them).
+  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF, 0.12), cg(0xFFFFFF, 0)] as CFArray, locations: [0, 1]) {
+    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: D), end: CGPoint(x: 0, y: D - 64), options: [])
   }
 
   // Blueprint shell: clean 5x5 grid (Xcode 26), guide circles and squircle inset (classic beta)
@@ -147,22 +141,22 @@ func drawIcon(_ p: Palette, name: String) {
   ctx.addPath(CGPath(roundedRect: CGRect(x: 72, y: 72, width: D - 144, height: D - 144), cornerWidth: 160, cornerHeight: 160, transform: nil))
   ctx.strokePath()
 
-  if let g = CGGradient(colorsSpace: cs, colors: [cg(0x021233, 0.12), cg(0x021233, 0)] as CFArray, locations: [0, 1]) {
-    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 0), end: CGPoint(x: 0, y: 52), options: [])
-  }
-
   // Depth layer 3: glass rim on the tile edge
   ctx.setLineWidth(3)
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.30))
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.22))
   ctx.stroke(CGRect(x: 1.5, y: 1.5, width: D - 3, height: D - 3))
 
-  // Solid mark (layered: lift shadow + gentle vertical volume)
+  // Glass mark (App Store recipe): tight grounding shadow, icy vertical volume,
+  // bright top catchlight. Reads white at dock size, glass up close.
   ctx.saveGState()
-  ctx.setShadow(offset: CGSize(width: 12, height: -28), blur: 56, color: cg(0x021233, 0.48))
+  ctx.setShadow(offset: CGSize(width: 8, height: -20), blur: 36, color: cg(0x021233, 0.38))
   addMark(to: ctx)
   ctx.clip()
-  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF), cg(0xEDF3FA)] as CFArray, locations: [0, 1]) {
-    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 280), end: CGPoint(x: 0, y: 785), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xF6FCFF), cg(0xC6E7FF)] as CFArray, locations: [0, 1]) {
+    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 260), end: CGPoint(x: 0, y: 805), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+  }
+  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF, 0.45), cg(0xFFFFFF, 0)] as CFArray, locations: [0, 1]) {
+    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 260), end: CGPoint(x: 0, y: 560), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
   }
   ctx.restoreGState()
 
