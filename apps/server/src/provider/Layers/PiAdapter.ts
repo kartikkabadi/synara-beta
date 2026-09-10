@@ -571,24 +571,6 @@ function trimToUndefined(value: string | null | undefined): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-// Pi extensions send TUI text with ANSI colors and running timers
-// (e.g. "Moonwalking... (1m 23s)"). Clean before compare/emit so the
-// timeline shows one readable row instead of 200+ raw rows.
-export function cleanPiUiText(value: string): string {
-  return cleanPiUiNoticeText(value)
-    .replace(/\s*\(\d+\s*m(?:\s+\d+\s*s)?\)?(?=\s*$)/g, "")
-    .replace(/(^|\s)\.(?=\s|$)/g, "$1")
-    .replace(/[·•●○◌◍◎◦]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function cleanPiUiTextToUndefined(value: string | null | undefined): string | undefined {
-  if (value === null || value === undefined) return undefined;
-  const cleaned = cleanPiUiText(value);
-  return cleaned.length > 0 ? cleaned : undefined;
-}
-
 // Strip terminal escape sequences only. A bare "[10m]" is ordinary text, so
 // matching brackets without a real escape byte would corrupt it.
 export function cleanPiUiNoticeText(value: string): string {
@@ -603,38 +585,6 @@ function cleanPiUiNoticeTextToUndefined(value: string | null | undefined): strin
   if (value === null || value === undefined) return undefined;
   const cleaned = cleanPiUiNoticeText(value);
   return cleaned.length > 0 ? cleaned : undefined;
-}
-
-// Per-turn progress caches for the extension UI bridge. Repeats fold within
-// a turn; everything resets on turn change so a later turn re-emits.
-export interface PiExtensionProgressTracker {
-  turnId: TurnId | undefined;
-  workingMessage: string | undefined;
-  statusTexts: Map<string, string>;
-  lastSummary: string | undefined;
-}
-
-export function makePiExtensionProgressTracker(): PiExtensionProgressTracker {
-  return {
-    turnId: undefined,
-    workingMessage: undefined,
-    statusTexts: new Map<string, string>(),
-    lastSummary: undefined,
-  };
-}
-
-// Reset per-turn caches when the turn changes. Returns true on reset. Call
-// before any equality check so a later turn re-emits identical text.
-export function syncPiExtensionProgressTurn(
-  tracker: PiExtensionProgressTracker,
-  turnId: TurnId | undefined,
-): boolean {
-  if (tracker.turnId === turnId) return false;
-  tracker.turnId = turnId;
-  tracker.workingMessage = undefined;
-  tracker.statusTexts.clear();
-  tracker.lastSummary = undefined;
-  return true;
 }
 
 function isPiThinkingLevel(value: string | null | undefined): value is ThinkingLevel {
