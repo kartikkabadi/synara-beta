@@ -40,10 +40,14 @@ Copy the block below into Claude Code, Cursor, Codex, or any agent with shell ac
 ```text
 Install Synara Beta (https://github.com/kartikkabadi/synara-beta) on this machine.
 
-1. Run: curl -fsSL https://raw.githubusercontent.com/kartikkabadi/synara-beta/main/scripts/install.sh | bash
+1. macOS and Linux: run: curl -fsSL https://raw.githubusercontent.com/kartikkabadi/synara-beta/main/scripts/install.sh | bash
    It resolves the newest -beta.* release, downloads the right artifact for this OS
    and CPU, verifies the release signature and checksum, installs, and launches the app.
-2. On Windows the script prints a PowerShell command instead. Run that in PowerShell.
+2. Windows (PowerShell): run:
+   $t = ((Invoke-RestMethod "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100") | Where-Object { $_.tag_name -match '^v\d+\.\d+\.\d+-beta\.\d+$' } | Select-Object -First 1).tag_name
+   $f = Join-Path $env:TEMP "synara-beta-install.ps1"
+   Invoke-WebRequest "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-windows.ps1" -OutFile $f
+   & $f -Tag $t
 3. Fix these if they come up, then run the install again:
    - ssh-keygen is missing: install the OpenSSH client (apt install openssh-client, dnf install openssh-clients).
    - macOS says the app "is damaged": clear the quarantine flag with
