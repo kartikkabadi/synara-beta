@@ -97,10 +97,16 @@ func drawIcon(_ p: Palette, name: String) {
     ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 0), end: CGPoint(x: 0, y: D), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
   }
 
-  // No washes: like Apple's tiles, luminosity comes from the saturated gradient itself.
+  // Layered translucent depth bands (reference recipe): soft light masses under the linework.
+  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF, 0.08), cg(0xFFFFFF, 0)] as CFArray, locations: [0, 1]) {
+    ctx.drawRadialGradient(g, startCenter: CGPoint(x: 250, y: 300), startRadius: 0, endCenter: CGPoint(x: 250, y: 300), endRadius: 400, options: [])
+  }
+  if let g = CGGradient(colorsSpace: cs, colors: [cg(0x7CC4FF, 0.16), cg(0x7CC4FF, 0)] as CFArray, locations: [0, 1]) {
+    ctx.drawRadialGradient(g, startCenter: CGPoint(x: 210, y: 790), startRadius: 0, endCenter: CGPoint(x: 210, y: 790), endRadius: 470, options: [])
+  }
   // Bottom-edge lift (Xcode brightens its last rows instead of crushing them).
-  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF, 0.12), cg(0xFFFFFF, 0)] as CFArray, locations: [0, 1]) {
-    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: D), end: CGPoint(x: 0, y: D - 64), options: [])
+  if let g = CGGradient(colorsSpace: cs, colors: [cg(0x37C8FF, 0.26), cg(0x37C8FF, 0)] as CFArray, locations: [0, 1]) {
+    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: D), end: CGPoint(x: 0, y: D - 140), options: [])
   }
 
   // Blueprint shell: clean 5x5 grid (Xcode 26), guide circles and squircle inset (classic beta)
@@ -142,22 +148,56 @@ func drawIcon(_ p: Palette, name: String) {
   ctx.strokePath()
 
   // Depth layer 3: glass rim on the tile edge
+  // Directional glass rim: light from top-left, fading clockwise into a deep base.
   ctx.setLineWidth(3)
-  ctx.setStrokeColor(cg(0xFFFFFF, 0.22))
-  ctx.stroke(CGRect(x: 1.5, y: 1.5, width: D - 3, height: D - 3))
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.55))
+  ctx.move(to: CGPoint(x: 0, y: 1.5)); ctx.addLine(to: CGPoint(x: D, y: 1.5)); ctx.strokePath()
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.32))
+  ctx.move(to: CGPoint(x: 1.5, y: 0)); ctx.addLine(to: CGPoint(x: 1.5, y: D)); ctx.strokePath()
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.14))
+  ctx.move(to: CGPoint(x: D - 1.5, y: 0)); ctx.addLine(to: CGPoint(x: D - 1.5, y: D)); ctx.strokePath()
+  ctx.setStrokeColor(cg(0x06255C, 0.45))
+  ctx.move(to: CGPoint(x: 0, y: D - 1.5)); ctx.addLine(to: CGPoint(x: D, y: D - 1.5)); ctx.strokePath()
 
+  // Drafting-mark sparkles: tiny plus marks and dots, drafting-sheet detail.
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.50))
+  func plus(_ cx: CGFloat, _ cy: CGFloat, _ r: CGFloat, _ w: CGFloat) {
+    ctx.setLineWidth(w)
+    ctx.move(to: CGPoint(x: cx - r, y: cy)); ctx.addLine(to: CGPoint(x: cx + r, y: cy))
+    ctx.move(to: CGPoint(x: cx, y: cy - r)); ctx.addLine(to: CGPoint(x: cx, y: cy + r))
+    ctx.strokePath()
+  }
+  plus(150, 168, 13, 3.2); plus(884, 208, 9, 2.8); plus(872, 836, 11, 3)
+  ctx.setFillColor(cg(0xFFFFFF, 0.50))
+  ctx.fillEllipse(in: CGRect(x: 196, y: 836, width: 7, height: 7))
+  ctx.fillEllipse(in: CGRect(x: 806, y: 128, width: 5, height: 5))
   // Glass mark (App Store recipe): tight grounding shadow, icy vertical volume,
   // bright top catchlight. Reads white at dock size, glass up close.
   ctx.saveGState()
   ctx.setShadow(offset: CGSize(width: 8, height: -20), blur: 36, color: cg(0x021233, 0.38))
   addMark(to: ctx)
   ctx.clip()
-  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xF6FCFF), cg(0xC6E7FF)] as CFArray, locations: [0, 1]) {
+  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF), cg(0xD9EBFF), cg(0xBFE0FF)] as CFArray, locations: [0, 0.45, 1]) {
     ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 260), end: CGPoint(x: 0, y: 805), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
   }
-  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF, 0.45), cg(0xFFFFFF, 0)] as CFArray, locations: [0, 1]) {
-    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 260), end: CGPoint(x: 0, y: 560), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+  if let g = CGGradient(colorsSpace: cs, colors: [cg(0xFFFFFF, 0.55), cg(0xFFFFFF, 0)] as CFArray, locations: [0, 1]) {
+    ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 260), end: CGPoint(x: 0, y: 380), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
   }
+  ctx.restoreGState()
+  ctx.saveGState()
+  addMark(to: ctx)
+  ctx.clip()
+  ctx.saveGState()
+  ctx.clip(to: CGRect(x: 0, y: 0, width: D, height: 440))
+  addMark(to: ctx)
+  ctx.setStrokeColor(cg(0xFFFFFF, 1.0))
+  ctx.setLineWidth(4)
+  ctx.strokePath()
+  ctx.restoreGState()
+  addMark(to: ctx)
+  ctx.setStrokeColor(cg(0xFFFFFF, 0.50))
+  ctx.setLineWidth(8)
+  ctx.strokePath()
   ctx.restoreGState()
 
   ctx.restoreGState()
