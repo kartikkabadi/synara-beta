@@ -1335,9 +1335,12 @@
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/server/src/agentGateway/threadReadTools.ts": {
-    "total": 1,
+    "total": 4,
     "messages": {
-      "5c09a52d": 1
+      "3302fdc4": 1,
+      "5c09a52d": 1,
+      "8712ade0": 1,
+      "ddcf2f99": 1
     }
   },
   "anti-slop(no-conditional-empty-object-spread):apps/server/src/agentGateway/threadSummary.ts": {
@@ -19120,13 +19123,15 @@
     }
   },
   "anti-slop(require-safety-comment-for-type-assertion):apps/server/src/agentGateway/Layers/AgentGateway.test.ts": {
-    "total": 117,
+    "total": 121,
     "messages": {
       "18814112": 1,
+      "40921536": 1,
       "01e232cf": 2,
       "03b2ed4c": 1,
       "03ff71b3": 1,
       "07294bc9": 1,
+      "0b0b63d1": 1,
       "0b34127e": 1,
       "0c9f13ae": 1,
       "115918f1": 2,
@@ -19140,6 +19145,7 @@
       "2bba2e3e": 1,
       "32f17169": 2,
       "3557bdf3": 1,
+      "37d6fe7e": 1,
       "37fba077": 1,
       "3c0e3661": 2,
       "461298e4": 1,
@@ -19182,7 +19188,7 @@
       "b2103bf3": 1,
       "b23bb89e": 2,
       "b58d9b9f": 1,
-      "b90299a2": 1,
+      "b90299a2": 2,
       "c0fd6987": 1,
       "c1283228": 2,
       "c63e510e": 1,
