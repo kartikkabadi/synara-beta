@@ -48,10 +48,12 @@ Install Synara Beta (https://github.com/kartikkabadi/synara-beta) on this machin
    $t = ((Invoke-RestMethod "https://api.github.com/repos/kartikkabadi/synara-beta/releases?per_page=100" -UseBasicParsing -ErrorAction Stop) | Where-Object { $_.tag_name -match '^v\d+\.\d+\.\d+-beta\.\d+$' } | Select-Object -First 1).tag_name
    if (-not $t) { throw "Could not resolve the latest Synara Beta release." }
    $f = Join-Path $env:TEMP $("synara-beta-install-$([Guid]::NewGuid()).ps1")
-   Invoke-WebRequest "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-windows.ps1" -UseBasicParsing -OutFile $f -ErrorAction Stop
-   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-   Unblock-File -Path $f
-   try { & $f -Tag $t } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue }
+   try {
+     Invoke-WebRequest "https://raw.githubusercontent.com/kartikkabadi/synara-beta/$t/scripts/install-windows.ps1" -UseBasicParsing -OutFile $f -ErrorAction Stop
+     Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+     Unblock-File -Path $f
+     & $f -Tag $t
+   } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue }
 3. Fix these if they come up, then run the install again:
    - ssh-keygen is missing: install the OpenSSH client (apt install openssh-client, dnf install openssh-clients).
    - macOS says the app "is damaged": clear the quarantine flag with
