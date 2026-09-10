@@ -13,7 +13,10 @@ import path from "node:path";
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
+import { stripTerminalControlSequences } from "@synara/shared/text";
 import {
+  cleanPiUiNoticeText,
+  cleanPiUiText,
   createPiModelRuntime,
   ensurePiAnthropicCatalogModels,
   getPiDiscoverableModels,
@@ -21,9 +24,11 @@ import {
   getPiSupportedThinkingOptions,
   buildPiAgentGatewayCustomTools,
   makePiBashProcessSupervisor,
+  makePiExtensionProgressTracker,
   makePiRuntimeEventBase,
   makePiUserInputOptions,
   PLAIN_PI_EXTENSION_THEME,
+  syncPiExtensionProgressTurn,
   toPiProviderModelDescriptor,
 } from "./PiAdapter";
 
@@ -614,5 +619,61 @@ describe("Pi extension UI helpers", () => {
     expect(PLAIN_PI_EXTENSION_THEME.fg("accent", "ready")).toBe("ready");
     expect(PLAIN_PI_EXTENSION_THEME.bold("done")).toBe("done");
     expect(PLAIN_PI_EXTENSION_THEME.getThinkingBorderColor("medium")("thinking")).toBe("thinking");
+  });
+
+  it("strips ANSI colors and running timers but keeps ordinary text", () => {
+    expect(
+      cleanPiUiText("[38;2;215;119;87mMoonwalking...[0m [38;2;153;153;153m (0m 5s)[0m"),
+    ).toBe("Moonwalking...");
+    expect(cleanPiUiText("Moonwalking... (1m 23s)")).toBe("Moonwalking...");
+    expect(cleanPiUiText("Install [m] package")).toBe("Install [m] package");
+    expect(cleanPiUiText("Window [10m] closes")).toBe("Window [10m] closes");
+    expect(cleanPiUiText("Rebuild [0;31m] marker")).toBe("Rebuild [0;31m] marker");
+    expect(cleanPiUiText("Sync (1m complete")).toBe("Sync (1m complete");
+    expect(cleanPiUiText("level reached — nice work…")).toBe("level reached — nice work…");
+    expect(cleanPiUiText("• loading")).toBe("loading");
+    expect(cleanPiUiText(". . caveman level: FULL")).toBe("caveman level: FULL");
+  });
+
+  it("keeps legitimate durations in notices but strips real escape bytes", () => {
+    expect(cleanPiUiNoticeText("Retry after (10m)")).toBe("Retry after (10m)");
+    expect(cleanPiUiNoticeText("Window [10m]")).toBe("Window [10m]");
+    expect(cleanPiUiNoticeText("level — done…")).toBe("level — done…");
+    expect(cleanPiUiNoticeText("[31mboom[0m")).toBe("boom");
+    expect(cleanPiUiNoticeText("  spaced   out  ")).toBe("spaced out");
+  });
+
+  it("resets progress caches when the turn changes", () => {
+    const tracker = makePiExtensionProgressTracker();
+    const turnA = "turn-a" as never;
+    const turnB = "turn-b" as never;
+    expect(syncPiExtensionProgressTurn(tracker, turnA)).toBe(true);
+    tracker.workingMessage = "Moonwalking...";
+    tracker.statusTexts.set("caveman", "FULL");
+    tracker.lastSummary = "Moonwalking...";
+    expect(syncPiExtensionProgressTurn(tracker, turnA)).toBe(false);
+    expect(tracker.lastSummary).toBe("Moonwalking...");
+    expect(syncPiExtensionProgressTurn(tracker, turnB)).toBe(true);
+    expect(tracker.workingMessage).toBeUndefined();
+    expect(tracker.statusTexts.size).toBe(0);
+    expect(tracker.lastSummary).toBeUndefined();
+  });
+
+  it("strips caveman footer ticks so extension status never reaches the transcript", () => {
+    // Ports the upstream #1093 lifecycle assertion to unit scope: footer
+    // status ticks are terminal chrome. The hybrid drops setStatus rows by
+    // default, and both cleaners strip the escapes while keeping the text.
+    const ticks = [
+      "\u001b[38;2;215;119;87m\u2820\u001b[0m caveman level: FULL",
+      "\u001b[38;2;215;119;87m\u2814\u001b[0m caveman level: FULL",
+    ];
+    expect(ticks.map((tick) => stripTerminalControlSequences(tick))).toEqual([
+      "\u2820 caveman level: FULL",
+      "\u2814 caveman level: FULL",
+    ]);
+    expect(ticks.map((tick) => cleanPiUiNoticeText(tick))).toEqual([
+      "\u2820 caveman level: FULL",
+      "\u2814 caveman level: FULL",
+    ]);
   });
 });
